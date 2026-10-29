@@ -21,6 +21,7 @@
 #cmakedefine HAVE_LANGINFO_H 1
 #cmakedefine HAVE_DLFCN_H 1
 #cmakedefine HAVE_OPENAL_EFX_H 1
+#cmakedefine HAVE_OPENAL_FRAMEWORK 1
 #cmakedefine RPI 1
 #cmakedefine HAVE_MMAP ${HAVE_MMAP}
 #cmakedefine SUPPORTS_MEMSTREAM ${SUPPORTS_MEMSTREAM}

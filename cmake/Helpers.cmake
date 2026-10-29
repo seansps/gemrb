@@ -491,6 +491,10 @@ FUNCTION(ADD_GEMRB_PLUGIN plugin_name)
 	IF(APPLE)
 		SET_TARGET_PROPERTIES(${plugin_name} PROPERTIES PREFIX ""
 			LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/gemrb/${PROJECT_NAME}.app/Contents/PlugIns)
+		# modules link with -bundle_loader against the executable, so it must exist first
+		IF(NOT STATIC_LINK)
+			ADD_DEPENDENCIES(${plugin_name} gemrb)
+		ENDIF()
 	ELSE (APPLE)
 		IF(NOT STATIC_LINK)
 			INSTALL(TARGETS ${plugin_name} DESTINATION ${PLUGIN_DIR})

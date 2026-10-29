@@ -11,7 +11,7 @@
 
 #include <utility>
 
-#if __APPLE__
+#ifdef HAVE_OPENAL_FRAMEWORK
 	#include <OpenAL/OpenAL.h> // umbrella include for all the headers we want
 #else
 	#include "al.h"

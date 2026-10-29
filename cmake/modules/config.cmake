@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-# - Build a config.h file
+# - Platform checks for config.h (written once dependencies are found, see top-level CMakeLists.txt)
 # 
 
 ADD_DEFINITIONS("-DHAVE_CONFIG_H")
@@ -48,9 +48,3 @@ IF(NOT WIN32)
 	ENDIF( NOT PERMITS_OBJECT_TO_FUNCTION_CAST )
 ENDIF(NOT WIN32)
 
-IF(OPENAL_INCLUDE_DIR AND EXISTS "${OPENAL_INCLUDE_DIR}/efx.h")
-	SET(HAVE_OPENAL_EFX_H 1)
-ENDIF()
-
-CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/cmake/cmake_config.h.in
-	${CMAKE_CURRENT_BINARY_DIR}/config.h ESCAPE_QUOTES)

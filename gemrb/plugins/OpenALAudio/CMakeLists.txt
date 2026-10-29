@@ -10,6 +10,11 @@ IF(OPENAL_FOUND)
 
 	TARGET_LINK_LIBRARIES(OpenALAudio ${OPENAL_LIBRARY} Threads::Threads)
 
+	# Apple deprecated its OpenAL framework; only reached when openal-soft isn't installed
+	IF(HAVE_OPENAL_FRAMEWORK)
+		TARGET_COMPILE_OPTIONS(OpenALAudio PRIVATE -Wno-deprecated-declarations)
+	ENDIF()
+
 	IF(MINGW AND SDL_BACKEND STREQUAL "SDL2")
 		TARGET_LINK_LIBRARIES( OpenALAudio imm32 winmm version)
 	ENDIF()

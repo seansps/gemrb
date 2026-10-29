@@ -115,6 +115,10 @@ CONFIGURE_FOR_SANITIZE(${SANITIZE})
 CONFIGURE_TARGET_PLATFORM_SPECIFICS()
 CONFIGURE_FMT()
 
+# after all checks and dependency lookups, so their results are visible on the first configure
+CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/cmake/cmake_config.h.in
+	${CMAKE_CURRENT_BINARY_DIR}/config.h ESCAPE_QUOTES)
+
 # The engine does not work without threads, enable them globally.
 FIND_PACKAGE(Threads REQUIRED)
 
