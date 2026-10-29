@@ -90,22 +90,46 @@ IF(APPLE) #application bundle generation
 		SET(SDL_BASENAME "libSDL2.dylib")
 		SET(SDL_LIB "${SDL2_LIBDIR}/${SDL_BASENAME}")
 		get_filename_component(SDL_FULL_PATH "${SDL_LIB}" REALPATH)
-
-		FILE(COPY ${SDL_FULL_PATH} DESTINATION ${BUNDLE_FRAMEWORK_PATH} FOLLOW_SYMLINK_CHAIN FILE_PERMISSIONS OWNER_READ OWNER_WRITE)
-		
-		# change the "install name" of the copied SDL
-		ADD_CUSTOM_COMMAND(TARGET gemrb PRE_BUILD COMMAND ${CMAKE_INSTALL_NAME_TOOL} -id "@loader_path/../Frameworks/${SDL_BASENAME}" "${SDL_FULL_PATH}")
-		# install_name_tool invalidates the signature and arm64 refuses to load such dylibs (SIGKILL,
-		# "Code Signature Invalid"), so re-sign ad-hoc and refresh the bundled copy, which the configure
-		# step may have taken from an already modified original
 		get_filename_component(SDL_REAL_NAME "${SDL_FULL_PATH}" NAME)
-		ADD_CUSTOM_COMMAND(TARGET gemrb PRE_BUILD COMMAND codesign --force --sign - "${SDL_FULL_PATH}")
-		ADD_CUSTOM_COMMAND(TARGET gemrb POST_BUILD
-			COMMAND ${CMAKE_COMMAND} -E copy "${SDL_FULL_PATH}" "${BUNDLE_FRAMEWORK_PATH}/${SDL_REAL_NAME}"
-			COMMAND codesign --force --sign - "${BUNDLE_FRAMEWORK_PATH}/${SDL_REAL_NAME}"
-		)
+		SET(SDL_BUNDLED "${BUNDLE_FRAMEWORK_PATH}/${SDL_REAL_NAME}")
+
+		# Bundle a copy of SDL and point the copy's "install name" into the bundle. Never modify the
+		# original (e.g. Homebrew's). install_name_tool invalidates the signature, which arm64 refuses
+		# to load (SIGKILL, "Code Signature Invalid"), so re-sign the copy ad-hoc.
+		FILE(COPY ${SDL_FULL_PATH} DESTINATION ${BUNDLE_FRAMEWORK_PATH} FILE_PERMISSIONS OWNER_READ OWNER_WRITE)
+		FILE(CREATE_LINK ${SDL_REAL_NAME} "${BUNDLE_FRAMEWORK_PATH}/${SDL_BASENAME}" SYMBOLIC)
+		EXECUTE_PROCESS(COMMAND ${CMAKE_INSTALL_NAME_TOOL} -id "@loader_path/../Frameworks/${SDL_BASENAME}" "${SDL_BUNDLED}")
+		EXECUTE_PROCESS(COMMAND codesign --force --sign - "${SDL_BUNDLED}")
+
+		# link against the bundled copy, so binaries record its in-bundle install name
+		IF(TARGET SDL2::SDL2)
+			SET_TARGET_PROPERTIES(SDL2::SDL2 PROPERTIES IMPORTED_LOCATION "${SDL_BUNDLED}")
+			GET_TARGET_PROPERTY(SDL_IMPORTED_CONFIGS SDL2::SDL2 IMPORTED_CONFIGURATIONS)
+			FOREACH(SDL_CONFIG IN LISTS SDL_IMPORTED_CONFIGS)
+				SET_TARGET_PROPERTIES(SDL2::SDL2 PROPERTIES IMPORTED_LOCATION_${SDL_CONFIG} "${SDL_BUNDLED}")
+			ENDFOREACH()
+		ELSE()
+			SET(SDL_LIBRARY "${SDL_BUNDLED}")
+		ENDIF()
+
 		IF(USE_SDLMIXER)
-			FILE(COPY "${SDL_MIXER_LIBRARIES}" DESTINATION ${BUNDLE_FRAMEWORK_PATH} FOLLOW_SYMLINK_CHAIN FILE_PERMISSIONS OWNER_READ OWNER_WRITE)
+			get_filename_component(SDL_MIXER_NAME "${SDL_MIXER_LIBRARIES}" NAME)
+			get_filename_component(SDL_MIXER_FULL_PATH "${SDL_MIXER_LIBRARIES}" REALPATH)
+			get_filename_component(SDL_MIXER_REAL_NAME "${SDL_MIXER_FULL_PATH}" NAME)
+			SET(SDL_MIXER_BUNDLED "${BUNDLE_FRAMEWORK_PATH}/${SDL_MIXER_REAL_NAME}")
+			FILE(COPY "${SDL_MIXER_FULL_PATH}" DESTINATION ${BUNDLE_FRAMEWORK_PATH} FILE_PERMISSIONS OWNER_READ OWNER_WRITE)
+			FILE(CREATE_LINK ${SDL_MIXER_REAL_NAME} "${BUNDLE_FRAMEWORK_PATH}/${SDL_MIXER_NAME}" SYMBOLIC)
+
+			# the copy must load the bundled SDL too, not the one it was built against
+			EXECUTE_PROCESS(COMMAND otool -L "${SDL_MIXER_BUNDLED}" OUTPUT_VARIABLE SDL_MIXER_DEPS)
+			STRING(REGEX MATCH "[^\t\n ]*libSDL2-[^\t\n ]*\\.dylib" SDL_MIXER_SDL_DEP "${SDL_MIXER_DEPS}")
+			SET(SDL_MIXER_CHANGE)
+			IF(SDL_MIXER_SDL_DEP)
+				SET(SDL_MIXER_CHANGE -change "${SDL_MIXER_SDL_DEP}" "@loader_path/${SDL_BASENAME}")
+			ENDIF()
+			EXECUTE_PROCESS(COMMAND ${CMAKE_INSTALL_NAME_TOOL} -id "@loader_path/../Frameworks/${SDL_MIXER_NAME}" ${SDL_MIXER_CHANGE} "${SDL_MIXER_BUNDLED}")
+			EXECUTE_PROCESS(COMMAND codesign --force --sign - "${SDL_MIXER_BUNDLED}")
+			SET(SDL_MIXER_LIBRARIES "${SDL_MIXER_BUNDLED}")
 		ENDIF()
 	ELSE()
 		SET(SDL_LIB "${SDL2_LIBDIR}")
