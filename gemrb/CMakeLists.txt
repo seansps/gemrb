@@ -95,6 +95,15 @@ IF(APPLE) #application bundle generation
 		
 		# change the "install name" of the copied SDL
 		ADD_CUSTOM_COMMAND(TARGET gemrb PRE_BUILD COMMAND ${CMAKE_INSTALL_NAME_TOOL} -id "@loader_path/../Frameworks/${SDL_BASENAME}" "${SDL_FULL_PATH}")
+		# install_name_tool invalidates the signature and arm64 refuses to load such dylibs (SIGKILL,
+		# "Code Signature Invalid"), so re-sign ad-hoc and refresh the bundled copy, which the configure
+		# step may have taken from an already modified original
+		get_filename_component(SDL_REAL_NAME "${SDL_FULL_PATH}" NAME)
+		ADD_CUSTOM_COMMAND(TARGET gemrb PRE_BUILD COMMAND codesign --force --sign - "${SDL_FULL_PATH}")
+		ADD_CUSTOM_COMMAND(TARGET gemrb POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy "${SDL_FULL_PATH}" "${BUNDLE_FRAMEWORK_PATH}/${SDL_REAL_NAME}"
+			COMMAND codesign --force --sign - "${BUNDLE_FRAMEWORK_PATH}/${SDL_REAL_NAME}"
+		)
 		IF(USE_SDLMIXER)
 			FILE(COPY "${SDL_MIXER_LIBRARIES}" DESTINATION ${BUNDLE_FRAMEWORK_PATH} FOLLOW_SYMLINK_CHAIN FILE_PERMISSIONS OWNER_READ OWNER_WRITE)
 		ENDIF()
