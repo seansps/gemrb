@@ -40,6 +40,24 @@ ELSE()
 ENDIF()
 ENDIF()
 
+IF(USE_ENET)
+	FIND_PATH(ENET_INCLUDE_DIR enet/enet.h
+		HINTS $ENV{ENETDIR}
+		PATH_SUFFIXES include
+		PATHS /opt/homebrew/opt/enet /usr/local/opt/enet /opt/local)
+	FIND_LIBRARY(ENET_LIBRARY NAMES enet libenet
+		HINTS $ENV{ENETDIR}
+		PATH_SUFFIXES lib
+		PATHS /opt/homebrew/opt/enet /usr/local/opt/enet /opt/local)
+	IF(ENET_INCLUDE_DIR AND ENET_LIBRARY)
+		SET(HAVE_ENET 1)
+		MESSAGE(STATUS "Looking for ENet: found (${ENET_LIBRARY})")
+	ELSE()
+		MESSAGE(WARNING "Looking for ENet: not found! Networked co-op will be disabled.")
+		MESSAGE(WARNING "If it just wasn't found, try setting the ENETDIR environment variable.")
+	ENDIF()
+ENDIF()
+
 IF(USE_LIBVLC)
 	FIND_PACKAGE(LIBVLC MODULE)
 	IF(LIBVLC_FOUND)

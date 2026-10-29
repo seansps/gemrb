@@ -47,6 +47,7 @@ FILE(GLOB gemrb_core_LIB_SRCS
 	MapReverb.cpp
 	MoviePlayer.cpp
 	MurmurHash.cpp
+	Net/Protocol.cpp
 	Palette.cpp
 	PalettedImageMgr.cpp
 	Particles.cpp
@@ -182,6 +183,14 @@ ENDIF()
 
 IF(USE_TRACY)
   TARGET_LINK_LIBRARIES(gemrb_core Tracy)
+ENDIF()
+
+IF(HAVE_ENET)
+	TARGET_INCLUDE_DIRECTORIES(gemrb_core PRIVATE ${ENET_INCLUDE_DIR})
+	TARGET_LINK_LIBRARIES(gemrb_core ${ENET_LIBRARY})
+	IF(WIN32)
+		TARGET_LINK_LIBRARIES(gemrb_core ws2_32 winmm)
+	ENDIF()
 ENDIF()
 
 target_compile_definitions(gemrb_core PRIVATE _USE_MATH_DEFINES)
