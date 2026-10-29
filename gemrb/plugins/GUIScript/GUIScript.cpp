@@ -3827,6 +3827,46 @@ static PyObject* GemRB_NetChat(PyObject* /*self*/, PyObject* args)
 	Py_RETURN_TRUE;
 }
 
+PyDoc_STRVAR(GemRB_NetGetMode__doc,
+	     "===== NetGetMode =====\n\
+\n\
+**Prototype:** GemRB.NetGetMode ()\n\
+\n\
+**Description:** Returns the co-op role of this instance. A client doesn't \n\
+start games of its own, it waits for the host to send its game.\n\
+\n\
+**Return value:** string, 'host', 'client' or '' (single player)\n\
+");
+
+static PyObject* GemRB_NetGetMode(PyObject* /*self*/, PyObject* /*args*/)
+{
+	const NetSession* net = core->GetNetSession();
+	if (!net) {
+		return PyString_FromStringObj("");
+	}
+	return PyString_FromStringObj(net->IsHost() ? "host" : "client");
+}
+
+PyDoc_STRVAR(GemRB_NetResync__doc,
+	     "===== NetResync =====\n\
+\n\
+**Prototype:** GemRB.NetResync ()\n\
+\n\
+**Description:** Co-op clients only: asks the host for a fresh copy of its \n\
+game and reloads it, eg. after a desync.\n\
+\n\
+**Return value:** bool, whether the request was sent\n\
+");
+
+static PyObject* GemRB_NetResync(PyObject* /*self*/, PyObject* /*args*/)
+{
+	NetSession* net = core->GetNetSession();
+	if (!net || !net->RequestResync()) {
+		Py_RETURN_FALSE;
+	}
+	Py_RETURN_TRUE;
+}
+
 PyDoc_STRVAR(GemRB_LoadMusicPL__doc,
 	     "===== LoadMusicPL =====\n\
 \n\
@@ -12994,6 +13034,8 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(ModifyEffect, METH_VARARGS),
 	METHOD(MoveToArea, METH_VARARGS),
 	METHOD(NetChat, METH_VARARGS),
+	METHOD(NetGetMode, METH_NOARGS),
+	METHOD(NetResync, METH_NOARGS),
 	METHOD(PlayMovie, METH_VARARGS),
 	METHOD(PlaySound, METH_VARARGS),
 	METHOD(PrepareSpontaneousCast, METH_VARARGS),

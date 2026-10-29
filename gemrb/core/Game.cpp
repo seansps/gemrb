@@ -1595,7 +1595,7 @@ static bool ShouldChangeSong(bool combatChange)
 	return doChangeSong;
 }
 
-// runs all area scripts
+// co-op clients: the host simulates, only keep presentation state current
 void Game::UpdateReplica()
 {
 	for (const auto& map : Maps) {
@@ -1603,6 +1603,7 @@ void Game::UpdateReplica()
 	}
 }
 
+// runs all area scripts
 void Game::UpdateScripts()
 {
 	Update();

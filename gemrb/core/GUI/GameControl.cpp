@@ -263,6 +263,7 @@ void GameControl::CreateMovement(Actor* actor, const Point& p, bool append, bool
 	tryToRun = tryToRun || AlwaysRun;
 
 	// co-op clients don't simulate, they send the order to the host instead
+	// (and drop it if it can't be sent, since nothing would ever run it locally)
 	NetSession* net = core->GetNetSession();
 	if (net && net->IsReplica()) {
 		std::string order;
@@ -275,8 +276,8 @@ void GameControl::CreateMovement(Actor* actor, const Point& p, bool append, bool
 		}
 		if (net->ForwardCommand(*actor, order, append)) {
 			actor->Destination = p; // just to force target reticle drawing
-			return;
 		}
+		return;
 	}
 
 	if (append) {
