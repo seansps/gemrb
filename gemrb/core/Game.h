@@ -443,6 +443,8 @@ public:
 	/** Runs the script engine on the global script and the area scripts
 	areas run scripts on door, infopoint, container, actors too */
 	void UpdateScripts();
+	/** co-op client stand-in for UpdateScripts: no scripts, AI or rules, the host sends the state */
+	void UpdateReplica();
 	/** checks if resting is possible */
 	bool CanPartyRest(RestChecks checks, ieStrRef* err = nullptr) const;
 	/** runs area functionality, sets partyrested trigger */

@@ -47,6 +47,7 @@ FILE(GLOB gemrb_core_LIB_SRCS
 	MapReverb.cpp
 	MoviePlayer.cpp
 	MurmurHash.cpp
+	Net/NetSession.cpp
 	Net/Protocol.cpp
 	Palette.cpp
 	PalettedImageMgr.cpp

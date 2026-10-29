@@ -643,6 +643,13 @@ void Map::UpdateScripts()
 	SortQueues();
 }
 
+void Map::UpdateReplica()
+{
+	// actors may have been moved by replicated state, so keep the draw order current
+	GenerateQueues();
+	SortQueues();
+}
+
 ResRef Map::ResolveTerrainSound(const ResRef& resref, const Point& p) const
 {
 	struct TerrainSounds {

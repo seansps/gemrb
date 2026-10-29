@@ -377,6 +377,8 @@ public:
 	void SetTileMapProps(TileProps props);
 	void AutoLockDoors() const;
 	void UpdateScripts();
+	/** only rebuilds the draw queues, for co-op clients mirroring the host */
+	void UpdateReplica();
 	bool UpdateTraversabilityCache();
 	TraversabilityCache::Data_t& GetTraversabilityCacheData();
 	ResRef ResolveTerrainSound(const ResRef& sound, const Point& pos) const;

@@ -46,6 +46,7 @@
 #include "GUI/TextArea.h"
 #include "GUI/WindowManager.h"
 #include "GameScript/GameScript.h"
+#include "Net/NetSession.h"
 #include "Scriptable/Container.h"
 #include "Streams/FileStream.h"
 #include "System/FileFilters.h"
@@ -671,10 +672,13 @@ Interface::Interface(CoreSettings&& cfg)
 	EventMgr::RegisterHotKeyCallback(ToggleConsole, ' ', GEM_MOD_CTRL);
 
 	PathFinderScheduler::Start(config.PathfinderThreadsCount, config.PathfinderMainThreadMode);
+
+	netSession = NetSession::Create(config);
 }
 
 Interface::~Interface() noexcept
 {
+	netSession.reset();
 	PathFinderScheduler::Stop();
 	WindowManager::CursorMouseUp = nullptr;
 	WindowManager::CursorMouseDown = nullptr;
@@ -1902,15 +1906,28 @@ void Interface::GameLoop(void)
 
 	bool do_update = GSUpdate(update_scripts);
 
+	// receive first, so orders forwarded by clients run in this very tick
+	if (netSession) {
+		netSession->PreTick();
+	}
+
 	if (game) {
 		if (gc && !game->selected.empty()) {
 			gc->ChangeMap(GetFirstSelectedPC(true), false);
 		}
-		//in multi player (if we ever get to it), only the server must call this
+		// in multiplayer only the host runs the simulation, replicas just mirror its state
 		if (do_update) {
-			// the game object will run the area scripts as well
-			game->UpdateScripts();
+			if (netSession && netSession->IsReplica()) {
+				game->UpdateReplica();
+			} else {
+				// the game object will run the area scripts as well
+				game->UpdateScripts();
+			}
 		}
+	}
+
+	if (netSession) {
+		netSession->PostTick();
 	}
 }
 

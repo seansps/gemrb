@@ -60,6 +60,7 @@ class KeyMap;
 class Label;
 class Map;
 class MusicMgr;
+class NetSession;
 class ProjectileServer;
 class SaveGame;
 class SaveGameIterator;
@@ -345,6 +346,7 @@ private:
 
 	std::deque<Timer> timers;
 	std::unique_ptr<KeyMap> keyMap;
+	std::unique_ptr<NetSession> netSession; // only set when networked co-op is enabled
 	Scriptable* CutSceneRunner = nullptr;
 
 	int MaximumAbility = 0;
@@ -496,6 +498,8 @@ public:
 	WorldMap* GetWorldMap() const;
 	WorldMap* GetWorldMap(const ResRef& area) const;
 	GameControl* GetGameControl() const { return game ? gamectrl : nullptr; }
+	/** the co-op session, nullptr in single player */
+	NetSession* GetNetSession() const { return netSession.get(); }
 	/** if backtomain is not null then goes back to main screen */
 	void QuitGame(int backtomain);
 	/** sets up load game */

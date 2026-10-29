@@ -326,6 +326,13 @@ CoreSettings LoadFromDictionary(InterfaceConfig cfg)
 		config.PathfinderMainThreadMode = PathfinderMainThreadModeImmediate;
 	}
 
+	CONFIG_STRING("NetMode", config.NetMode);
+	CONFIG_STRING("NetHost", config.NetHost);
+	CONFIG_INT("NetPort", config.NetPort);
+	CONFIG_STRING("NetName", config.NetName);
+	CONFIG_STRING("NetTestChat", config.NetTestChat);
+	CONFIG_STRING("NetTestMove", config.NetTestMove);
+
 	auto value = cfg.Get("ModPath", "");
 	if (value.length()) {
 		config.ModPath = Explode<std::string, std::string>(value, PathListSeparator);

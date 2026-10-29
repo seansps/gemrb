@@ -1596,6 +1596,13 @@ static bool ShouldChangeSong(bool combatChange)
 }
 
 // runs all area scripts
+void Game::UpdateReplica()
+{
+	for (const auto& map : Maps) {
+		map->UpdateReplica();
+	}
+}
+
 void Game::UpdateScripts()
 {
 	Update();

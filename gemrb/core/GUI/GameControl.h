@@ -121,7 +121,6 @@ private:
 	bool IsDisabledCursor() const override;
 
 	void PerformSelectedAction(const Point& p);
-	void CommandSelectedMovement(const Point& p, bool formation = true, bool append = false, bool tryToRun = false) const;
 
 	bool OnGlobalMouseMove(const Event&);
 	bool OnCheatKeyRelease(const KeyboardEvent& key, unsigned short mod);
@@ -145,6 +144,8 @@ private:
 	void DumpActorInfo(ActorDump, const Map*) const noexcept;
 
 public:
+	/** orders the selected party to walk to p, as a ground click does; public for the co-op test hook */
+	void CommandSelectedMovement(const Point& p, bool formation = true, bool append = false, bool tryToRun = false) const;
 	explicit GameControl(const Region& frame);
 	~GameControl(void) override;
 

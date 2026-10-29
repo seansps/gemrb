@@ -28,6 +28,7 @@
 #include "GUI/TextArea.h"
 #include "GUI/WindowManager.h"
 #include "GameScript/GSUtils.h"
+#include "Net/NetSession.h"
 #include "Scriptable/Container.h"
 #include "Scriptable/Door.h"
 #include "Scriptable/InfoPoint.h"
@@ -260,6 +261,23 @@ void GameControl::CreateMovement(Actor* actor, const Point& p, bool append, bool
 {
 	Holder<Action> action;
 	tryToRun = tryToRun || AlwaysRun;
+
+	// co-op clients don't simulate, they send the order to the host instead
+	NetSession* net = core->GetNetSession();
+	if (net && net->IsReplica()) {
+		std::string order;
+		if (append) {
+			order = fmt::format("AddWayPoint([{}.{}])", p.x, p.y);
+		} else if (tryToRun && CanRun(actor)) {
+			order = fmt::format("RunToPoint([{}.{}])", p.x, p.y);
+		} else {
+			order = fmt::format("MoveToPoint([{}.{}])", p.x, p.y);
+		}
+		if (net->ForwardCommand(*actor, order, append)) {
+			actor->Destination = p; // just to force target reticle drawing
+			return;
+		}
+	}
 
 	if (append) {
 		action = GenerateAction(fmt::format("AddWayPoint([{}.{}])", p.x, p.y));

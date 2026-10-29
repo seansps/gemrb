@@ -112,6 +112,14 @@ struct CoreSettings {
 	// negative means "auto detection"; resolved to a concrete count while loading
 	int PathfinderThreadsCount = -1;
 	std::string PathfinderMainThreadMode = "immediate";
+	// networked co-op (core/Net), inert unless NetMode is set to host or client
+	std::string NetMode;
+	std::string NetHost = "127.0.0.1";
+	int NetPort = 27015;
+	std::string NetName = "Player";
+	// spike test hooks: send a chat line once joined; issue one party move ("x.y") once in sync
+	std::string NetTestChat;
+	std::string NetTestMove;
 
 	variables_t vars;
 };

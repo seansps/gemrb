@@ -43,6 +43,7 @@
 #include "GUI/WindowManager.h"
 #include "GUI/WorldMapControl.h"
 #include "GameScript/GSUtils.h" //checkvariable
+#include "Net/NetSession.h"
 #include "Scriptable/Container.h"
 #include "Scriptable/Door.h"
 #include "Scriptable/InfoPoint.h"
@@ -3797,6 +3798,33 @@ static PyObject* GemRB_Quit(PyObject* /*self*/, PyObject* /*args*/)
 {
 	core->QuitFlag |= QF_EXITGAME;
 	Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(GemRB_NetChat__doc,
+	     "===== NetChat =====\n\
+\n\
+**Prototype:** GemRB.NetChat (Text)\n\
+\n\
+**Description:** Sends a chat line to the other players of a co-op session. \n\
+Does nothing in single player.\n\
+\n\
+**Parameters:**\n\
+  * Text - the message (UTF-8)\n\
+\n\
+**Return value:** bool, whether there was a session to send it to\n\
+");
+
+static PyObject* GemRB_NetChat(PyObject* /*self*/, PyObject* args)
+{
+	char* text = nullptr;
+	PARSE_ARGS(args, "s", &text);
+
+	NetSession* net = core->GetNetSession();
+	if (!net) {
+		Py_RETURN_FALSE;
+	}
+	net->SendChat(text);
+	Py_RETURN_TRUE;
 }
 
 PyDoc_STRVAR(GemRB_LoadMusicPL__doc,
@@ -12965,6 +12993,7 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(MemorizeSpell, METH_VARARGS),
 	METHOD(ModifyEffect, METH_VARARGS),
 	METHOD(MoveToArea, METH_VARARGS),
+	METHOD(NetChat, METH_VARARGS),
 	METHOD(PlayMovie, METH_VARARGS),
 	METHOD(PlaySound, METH_VARARGS),
 	METHOD(PrepareSpontaneousCast, METH_VARARGS),
