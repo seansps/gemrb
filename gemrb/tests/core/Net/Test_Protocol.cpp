@@ -75,14 +75,14 @@ TEST(NetProtocolTest, CommandRoundTrip)
 	EXPECT_EQ(cmd2.action, cmd.action);
 }
 
-TEST(NetProtocolTest, StateAndManifestRoundTrip)
+TEST(NetProtocolTest, StateAndActorTableRoundTrip)
 {
 	NetActorState state;
 	state.tick = 123456;
 	state.area = "AR0100";
 	for (int i = 0; i < 6; ++i) {
 		NetActorStateEntry entry;
-		entry.globalID = 10001 + i;
+		entry.netID = 10001 + i;
 		entry.x = i * 100 - 50; // negative coordinates survive too
 		entry.y = 2000000 + i;
 		entry.orientation = uint8_t(i);
@@ -96,23 +96,84 @@ TEST(NetProtocolTest, StateAndManifestRoundTrip)
 	EXPECT_EQ(state2.area, state.area);
 	ASSERT_EQ(state2.actors.size(), state.actors.size());
 	for (size_t i = 0; i < state.actors.size(); ++i) {
-		EXPECT_EQ(state2.actors[i].globalID, state.actors[i].globalID);
+		EXPECT_EQ(state2.actors[i].netID, state.actors[i].netID);
 		EXPECT_EQ(state2.actors[i].x, state.actors[i].x);
 		EXPECT_EQ(state2.actors[i].y, state.actors[i].y);
 		EXPECT_EQ(state2.actors[i].orientation, state.actors[i].orientation);
 		EXPECT_EQ(state2.actors[i].stance, state.actors[i].stance);
 	}
 
-	NetPartyManifest manifest;
-	manifest.area = "AR0100";
-	manifest.actors.push_back({ 10005, 1, "protagon" });
-	NetPartyManifest manifest2;
-	data = NetEncode(manifest);
-	ASSERT_TRUE(NetDecode(data.data(), data.size(), manifest2));
-	ASSERT_EQ(manifest2.actors.size(), 1U);
-	EXPECT_EQ(manifest2.actors[0].globalID, 10005U);
-	EXPECT_EQ(manifest2.actors[0].partySlot, 1);
-	EXPECT_EQ(manifest2.actors[0].scriptName, "protagon");
+	NetActorTable table;
+	table.transferID = 7;
+	table.actors.push_back({ 10005, 1, "AR0100", "protagon", 700, 500 });
+	table.actors.push_back({ 10042, 0, "AR0100", "rabbit", -3, 1234567 });
+	NetActorTable table2;
+	data = NetEncode(table);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), table2));
+	EXPECT_EQ(table2.transferID, 7U);
+	ASSERT_EQ(table2.actors.size(), 2U);
+	EXPECT_EQ(table2.actors[0].netID, 10005U);
+	EXPECT_EQ(table2.actors[0].partySlot, 1);
+	EXPECT_EQ(table2.actors[0].area, "AR0100");
+	EXPECT_EQ(table2.actors[0].scriptName, "protagon");
+	EXPECT_EQ(table2.actors[0].x, 700);
+	EXPECT_EQ(table2.actors[1].partySlot, 0);
+	EXPECT_EQ(table2.actors[1].scriptName, "rabbit");
+	EXPECT_EQ(table2.actors[1].x, -3);
+	EXPECT_EQ(table2.actors[1].y, 1234567);
+}
+
+TEST(NetProtocolTest, SaveTransferMessagesRoundTrip)
+{
+	NetSaveBegin begin;
+	begin.transferID = 3;
+	begin.size = 123456;
+	begin.hash = 0x0123456789abcdefULL;
+	begin.area = "AR0100";
+	NetSaveBegin begin2;
+	auto data = NetEncode(begin);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), begin2));
+	EXPECT_EQ(begin2.transferID, 3U);
+	EXPECT_EQ(begin2.size, 123456U);
+	EXPECT_EQ(begin2.hash, 0x0123456789abcdefULL);
+	EXPECT_EQ(begin2.area, "AR0100");
+
+	// sizes above the limit are refused up front
+	begin.size = uint32_t(NET_MAX_SAVE_SIZE + 1);
+	data = NetEncode(begin);
+	EXPECT_FALSE(NetDecode(data.data(), data.size(), begin2));
+
+	NetSaveChunk chunk;
+	chunk.transferID = 3;
+	chunk.offset = 65536;
+	chunk.data = { 0, 1, 2, 0xff };
+	NetSaveChunk chunk2;
+	data = NetEncode(chunk);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), chunk2));
+	EXPECT_EQ(chunk2.offset, 65536U);
+	EXPECT_EQ(chunk2.data, chunk.data);
+
+	// a hand-made chunk above the limit is rejected
+	NetWriter w(NetMsgType::SaveChunk);
+	w.U32(3);
+	w.U32(0);
+	std::vector<uint8_t> big(NET_SAVE_CHUNK + 1, 'z');
+	w.Bytes(big.data(), big.size());
+	EXPECT_FALSE(NetDecode(w.Data().data(), w.Data().size(), chunk2));
+
+	NetReady ready;
+	ready.transferID = 3;
+	ready.mapped = 12;
+	NetReady ready2;
+	data = NetEncode(ready);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), ready2));
+	EXPECT_EQ(ready2.transferID, 3U);
+	EXPECT_EQ(ready2.mapped, 12);
+
+	NetResyncRequest resync;
+	data = NetEncode(resync);
+	EXPECT_EQ(data.size(), NET_HEADER_SIZE);
+	EXPECT_TRUE(NetDecode(data.data(), data.size(), resync));
 }
 
 TEST(NetProtocolTest, RejectsBadPackets)

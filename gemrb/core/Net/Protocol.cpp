@@ -38,11 +38,23 @@ void NetWriter::I32(int32_t value)
 	U32(static_cast<uint32_t>(value));
 }
 
+void NetWriter::U64(uint64_t value)
+{
+	U32(uint32_t(value & 0xffffffff));
+	U32(uint32_t(value >> 32));
+}
+
 void NetWriter::Str(const std::string& value)
 {
 	size_t len = std::min(value.size(), NET_MAX_STRING);
 	U16(uint16_t(len));
 	buffer.insert(buffer.end(), value.begin(), value.begin() + len);
+}
+
+void NetWriter::Bytes(const uint8_t* data, size_t size)
+{
+	U32(uint32_t(size));
+	buffer.insert(buffer.end(), data, data + size);
 }
 
 NetReader::NetReader(const uint8_t* data, size_t size)
@@ -99,6 +111,13 @@ int32_t NetReader::I32()
 	return static_cast<int32_t>(U32());
 }
 
+uint64_t NetReader::U64()
+{
+	uint64_t lo = U32();
+	uint64_t hi = U32();
+	return lo | (hi << 32);
+}
+
 std::string NetReader::Str()
 {
 	uint16_t len = U16();
@@ -107,6 +126,18 @@ std::string NetReader::Str()
 	}
 	if (!Need(len)) return {};
 	std::string value(reinterpret_cast<const char*>(data + pos), len);
+	pos += len;
+	return value;
+}
+
+std::vector<uint8_t> NetReader::Bytes(size_t maxSize)
+{
+	uint32_t len = U32();
+	if (len > maxSize) {
+		ok = false;
+	}
+	if (!Need(len)) return {};
+	std::vector<uint8_t> value(data + pos, data + pos + len);
 	pos += len;
 	return value;
 }
@@ -169,28 +200,35 @@ bool NetChat::Read(NetReader& r)
 	return r.Ok();
 }
 
-void NetPartyManifest::Write(NetWriter& w) const
+void NetActorTable::Write(NetWriter& w) const
 {
-	w.Str(area);
-	size_t count = std::min(actors.size(), NET_MAX_ENTRIES);
+	w.U32(transferID);
+	size_t count = std::min(actors.size(), NET_MAX_ACTORS);
 	w.U16(uint16_t(count));
 	for (size_t i = 0; i < count; ++i) {
-		w.U32(actors[i].globalID);
-		w.U8(actors[i].partySlot);
-		w.Str(actors[i].scriptName);
+		const auto& entry = actors[i];
+		w.U32(entry.netID);
+		w.U8(entry.partySlot);
+		w.Str(entry.area);
+		w.Str(entry.scriptName);
+		w.I32(entry.x);
+		w.I32(entry.y);
 	}
 }
 
-bool NetPartyManifest::Read(NetReader& r)
+bool NetActorTable::Read(NetReader& r)
 {
-	area = r.Str();
+	transferID = r.U32();
 	uint16_t count = r.U16();
-	if (!r.Ok() || count > NET_MAX_ENTRIES) return false;
+	if (!r.Ok() || count > NET_MAX_ACTORS) return false;
 	actors.resize(count);
 	for (auto& entry : actors) {
-		entry.globalID = r.U32();
+		entry.netID = r.U32();
 		entry.partySlot = r.U8();
+		entry.area = r.Str();
 		entry.scriptName = r.Str();
+		entry.x = r.I32();
+		entry.y = r.I32();
 	}
 	return r.Ok();
 }
@@ -218,7 +256,7 @@ void NetActorState::Write(NetWriter& w) const
 	w.U16(uint16_t(count));
 	for (size_t i = 0; i < count; ++i) {
 		const auto& entry = actors[i];
-		w.U32(entry.globalID);
+		w.U32(entry.netID);
 		w.I32(entry.x);
 		w.I32(entry.y);
 		w.U8(entry.orientation);
@@ -234,12 +272,57 @@ bool NetActorState::Read(NetReader& r)
 	if (!r.Ok() || count > NET_MAX_ENTRIES) return false;
 	actors.resize(count);
 	for (auto& entry : actors) {
-		entry.globalID = r.U32();
+		entry.netID = r.U32();
 		entry.x = r.I32();
 		entry.y = r.I32();
 		entry.orientation = r.U8();
 		entry.stance = r.U8();
 	}
+	return r.Ok();
+}
+
+void NetSaveBegin::Write(NetWriter& w) const
+{
+	w.U32(transferID);
+	w.U32(size);
+	w.U64(hash);
+	w.Str(area);
+}
+
+bool NetSaveBegin::Read(NetReader& r)
+{
+	transferID = r.U32();
+	size = r.U32();
+	hash = r.U64();
+	area = r.Str();
+	return r.Ok() && size <= NET_MAX_SAVE_SIZE;
+}
+
+void NetSaveChunk::Write(NetWriter& w) const
+{
+	w.U32(transferID);
+	w.U32(offset);
+	w.Bytes(data.data(), std::min(data.size(), NET_SAVE_CHUNK));
+}
+
+bool NetSaveChunk::Read(NetReader& r)
+{
+	transferID = r.U32();
+	offset = r.U32();
+	data = r.Bytes(NET_SAVE_CHUNK);
+	return r.Ok();
+}
+
+void NetReady::Write(NetWriter& w) const
+{
+	w.U32(transferID);
+	w.U16(mapped);
+}
+
+bool NetReady::Read(NetReader& r)
+{
+	transferID = r.U32();
+	mapped = r.U16();
 	return r.Ok();
 }
 

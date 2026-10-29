@@ -332,6 +332,9 @@ CoreSettings LoadFromDictionary(InterfaceConfig cfg)
 	CONFIG_STRING("NetName", config.NetName);
 	CONFIG_STRING("NetTestChat", config.NetTestChat);
 	CONFIG_STRING("NetTestMove", config.NetTestMove);
+	CONFIG_STRING("NetTestVar", config.NetTestVar);
+	CONFIG_INT("NetTestResync", config.NetTestResync);
+	CONFIG_INT("NetTestSlowTransfer", config.NetTestSlowTransfer);
 
 	auto value = cfg.Get("ModPath", "");
 	if (value.length()) {
