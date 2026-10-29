@@ -12,6 +12,18 @@
 
 using namespace GemRB;
 
+// command line, so "gemrb -c some.cfg" bypasses the config window and NSUserDefaults
+static int cliArgc = 0;
+static char** cliArgv = nullptr;
+
+static bool HasCLIConfig()
+{
+	for (int i = 1; i < cliArgc - 1; ++i) {
+		if (strcmp(cliArgv[i], "-c") == 0) return true;
+	}
+	return false;
+}
+
 /* The main class of the application, the application's delegate */
 @implementation CocoaWrapper
 @synthesize configWindow=_configWindow;
@@ -115,6 +127,10 @@ using namespace GemRB;
 	[[NSBundle mainBundle] loadNibNamed:@"GemRB" owner:self topLevelObjects:nil];
 
 	if (core == NULL) {
+		if (HasCLIConfig()) {
+			[self launchGame:self];
+			return;
+		}
 		[_configWindow makeKeyAndOrderFront:nil];
 	}
 }
@@ -164,8 +180,9 @@ using namespace GemRB;
 	}
 
 	InterfaceConfig config;
+	bool fromCLI = HasCLIConfig();
 
-	for ( NSString* key in dict ) {
+	for (NSString* key in fromCLI ? @[] : dict) {
 		NSString* value = nil;
 		id obj = [dict objectForKey:key];
 		if ([obj isKindOfClass:[NSNumber class]]) {
@@ -180,10 +197,11 @@ using namespace GemRB;
 	}
 	
 	try {
-		CoreSettings settings = LoadFromDictionary(std::move(config));
+		CoreSettings settings = fromCLI ? LoadFromArgs(cliArgc, cliArgv) : LoadFromDictionary(std::move(config));
 		ToggleLogging(settings.Logging);
 
-		if (getenv("TERM") && isatty(STDOUT_FILENO)) {
+		if (fromCLI || (getenv("TERM") && isatty(STDOUT_FILENO))) {
+			// also when redirected, so "gemrb -c x.cfg > x.log" captures the log
 			AddLogWriter(createStdioLogWriter());
 		} else {
 			AddLogWriter(std::make_shared<AppleLogger>());
@@ -200,7 +218,7 @@ using namespace GemRB;
 
 	PluginMgr::Get()->RunCleanup();
 
-	if ([defaults boolForKey:@"TerminateOnClose"]) {
+	if (fromCLI || [defaults boolForKey:@"TerminateOnClose"]) {
 		[NSApp terminate:self];
 	}
 }
@@ -243,8 +261,10 @@ using namespace GemRB;
 @end
 
 /* Main entry point to executable - should *not* be GemRB_main! */
-int main (int __unused argc, char ** __unused argv)
+int main (int argc, char ** argv)
 {
+	cliArgc = argc;
+	cliArgv = argv;
 	CocoaWrapper* wrapper = [[CocoaWrapper alloc] init];
 	@autoreleasepool {
 		/* Ensure the application object is initialized */
