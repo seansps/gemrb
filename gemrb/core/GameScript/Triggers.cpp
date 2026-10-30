@@ -1278,13 +1278,15 @@ int GameScript::HaveSpell(Scriptable* Sender, const Trigger* parameters)
 		return 0;
 	}
 
+	// HaveSpellRES has no number, so check it before the marked spell fallback
+	if (!parameters->resref0Parameter.IsEmpty()) {
+		return actor->spellbook.HaveSpell(parameters->resref0Parameter, 0);
+	}
+
 	if (parameters->int0Parameter == 0 && Sender->objects.LastMarkedSpell == 0) {
 		return false;
 	}
 
-	if (!parameters->resref0Parameter.IsEmpty()) {
-		return actor->spellbook.HaveSpell(parameters->resref0Parameter, 0);
-	}
 	int spellNum = parameters->int0Parameter;
 	if (!spellNum) spellNum = Sender->objects.LastMarkedSpell;
 	return actor->spellbook.HaveSpell(spellNum, 0);
