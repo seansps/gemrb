@@ -48,6 +48,7 @@ FILE(GLOB gemrb_core_LIB_SRCS
 	MoviePlayer.cpp
 	MurmurHash.cpp
 	Net/NetSession.cpp
+	Net/Prompt.cpp
 	Net/Protocol.cpp
 	Net/Replication.cpp
 	Net/Resync.cpp
@@ -60,6 +61,7 @@ FILE(GLOB gemrb_core_LIB_SRCS
 	Polygon.cpp
 	Projectile.cpp
 	ProjectileServer.cpp
+	Prompts.cpp
 	Region.cpp
 	ResourceDesc.cpp
 	ResourceManager.cpp

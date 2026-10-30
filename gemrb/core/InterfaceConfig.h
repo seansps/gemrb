@@ -134,6 +134,15 @@ struct CoreSettings {
 	std::string NetTestOrders;
 	int NetTestResync = 0;
 	int NetTestSlowTransfer = 0;
+	// co-op travel prompts (M1.8): the player whose character steps on a travel region confirms it;
+	// every other connected player votes on it (no answer in time counts as yes)
+	int NetTravelConfirm = 0;
+	int NetTravelVote = 1;
+	// ms a prompt waits for its answer when the asker doesn't say (travel prompts too)
+	int PromptTimeout = 30000;
+	// test hook for prompts without a session (single player): "tick:order;..." as NetTestOrders'
+	// ask and prompt orders, see PromptManager::RunTestOrder
+	std::string TestPrompts;
 
 	variables_t vars;
 };

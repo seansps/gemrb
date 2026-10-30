@@ -339,6 +339,10 @@ CoreSettings LoadFromDictionary(InterfaceConfig cfg)
 	CONFIG_STRING("NetTestOrders", config.NetTestOrders);
 	CONFIG_INT("NetTestResync", config.NetTestResync);
 	CONFIG_INT("NetTestSlowTransfer", config.NetTestSlowTransfer);
+	CONFIG_INT("NetTravelConfirm", config.NetTravelConfirm);
+	CONFIG_INT("NetTravelVote", config.NetTravelVote);
+	CONFIG_INT("PromptTimeout", config.PromptTimeout);
+	CONFIG_STRING("TestPrompts", config.TestPrompts);
 
 	auto value = cfg.Get("ModPath", "");
 	if (value.length()) {

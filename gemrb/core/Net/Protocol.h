@@ -20,6 +20,8 @@
 
 #include "exports.h"
 
+#include "Net/Prompt.h"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -29,7 +31,7 @@
 namespace GemRB {
 
 constexpr uint8_t NET_MAGIC = 0xE7;
-constexpr uint8_t NET_PROTOCOL_VERSION = 6;
+constexpr uint8_t NET_PROTOCOL_VERSION = 7;
 constexpr uint16_t NET_DEFAULT_PORT = 27015;
 constexpr size_t NET_HEADER_SIZE = 3;
 constexpr size_t NET_MAX_STRING = 1024;
@@ -101,6 +103,8 @@ enum class NetMsgType : uint8_t {
 	AreaData, // host -> client, the party moved: the new area as an ARE, instead of a whole save
 	Globals, // host -> client, global variables that changed
 	ChatHistory, // host -> client, the recent chat a joining player missed
+	Prompt, // host -> client, the open prompt ("ask the owning player") as everyone sees it, or its outcome
+	PromptAnswer, // client -> host, the asked player's answer
 	count
 };
 
@@ -195,6 +199,10 @@ struct GEM_EXPORT NetWelcome {
 	bool Read(NetReader& r);
 };
 
+// Its layout is fixed for good (since v1): the header, then the reason as a string, nothing
+// else. So a host can turn away a client of any other version in words that client reads:
+// it stamps the client's version into the header (NetEncodeReject), and from v7 on clients
+// read a Reject of any version (NetDecodeAnyReject).
 struct GEM_EXPORT NetReject {
 	static constexpr NetMsgType Type = NetMsgType::Reject;
 	std::string reason;
@@ -202,6 +210,13 @@ struct GEM_EXPORT NetReject {
 	void Write(NetWriter& w) const;
 	bool Read(NetReader& r);
 };
+
+// a Reject for a peer that speaks another protocol version: its header carries that version
+GEM_EXPORT std::vector<uint8_t> NetEncodeReject(const NetReject& reject, uint8_t version);
+// a Reject from a host of any version; version is the one in its header
+GEM_EXPORT bool NetDecodeAnyReject(const uint8_t* data, size_t size, NetReject& reject, uint8_t& version);
+// a packet with our magic but another version: which version and message type it says it is
+GEM_EXPORT bool NetPeekForeign(const uint8_t* data, size_t size, uint8_t& version, uint8_t& type);
 
 // a chat line; clients send text (and a whisper's target), the host fills in who said it
 struct GEM_EXPORT NetChat {
@@ -792,6 +807,46 @@ struct GEM_EXPORT NetGlobals {
 struct GEM_EXPORT NetChatHistory {
 	static constexpr NetMsgType Type = NetMsgType::ChatHistory;
 	std::vector<NetChat> lines;
+
+	void Write(NetWriter& w) const;
+	bool Read(NetReader& r);
+};
+
+// someone a prompt asks, as everyone sees it
+struct NetPromptVoter {
+	uint8_t slot = 0; // asked
+	uint8_t by = 0; // answers now (the host while an owner is away)
+	uint8_t state = 0; // PromptVoter::State
+	uint8_t away = 0;
+	std::string name; // the asked player's
+	std::string byName;
+};
+
+// the open prompt, the same for everyone: the asked player gets the window to answer it,
+// the others "Waiting for X to decide"; CLOSED carries how it ended, for everyone's message window
+struct GEM_EXPORT NetPrompt {
+	static constexpr NetMsgType Type = NetMsgType::Prompt;
+	enum State : uint8_t {
+		OPEN,
+		CLOSED
+	};
+	uint32_t id = 0;
+	uint8_t state = OPEN;
+	uint32_t remaining = 0; // ms, as the host sent it
+	PromptQuestion question; // actorID as a network ID
+	std::vector<NetPromptVoter> voters; // at most PROMPT_MAX_VOTERS
+	uint8_t outcome = 0; // CLOSED: PromptOutcome
+	std::vector<int32_t> values; // CLOSED: the answer
+	std::string outcomeText; // CLOSED: "client-one decided: Yes."
+
+	void Write(NetWriter& w) const;
+	bool Read(NetReader& r);
+};
+
+struct GEM_EXPORT NetPromptAnswer {
+	static constexpr NetMsgType Type = NetMsgType::PromptAnswer;
+	uint32_t id = 0;
+	std::vector<int32_t> values; // at most PROMPT_MAX_FIELDS
 
 	void Write(NetWriter& w) const;
 	bool Read(NetReader& r);

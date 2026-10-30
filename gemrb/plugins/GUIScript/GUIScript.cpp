@@ -19,6 +19,7 @@
 #include "MusicMgr.h"
 #include "Palette.h"
 #include "PalettedImageMgr.h"
+#include "Prompts.h"
 #include "PythonCallbacks.h"
 #include "PythonConversions.h"
 #include "PythonErrors.h"
@@ -3833,6 +3834,255 @@ static PyObject* GemRB_Quit(PyObject* /*self*/, PyObject* /*args*/)
 {
 	core->QuitFlag |= QF_EXITGAME;
 	Py_RETURN_NONE;
+}
+
+// prompts ("ask the owning player") -----------------------------------------
+
+static const char* PromptKindName(PromptKind kind)
+{
+	switch (kind) {
+		case PromptKind::Choice:
+			return "choice";
+		case PromptKind::Integer:
+			return "int";
+		default:
+			return "yesno";
+	}
+}
+
+static int PyDictInt(PyObject* dict, const char* key, int fallback)
+{
+	PyObject* value = PyDict_GetItemString(dict, key); // borrowed
+	return value && PyLong_Check(value) ? int(PyLong_AsLong(value)) : fallback;
+}
+
+static std::string PyDictString(PyObject* dict, const char* key)
+{
+	return NetUtf8(PyDict_GetItemString(dict, key));
+}
+
+static bool PromptFromPy(PyObject* dict, PromptQuestion& q)
+{
+	if (!PyDict_Check(dict)) return false;
+	std::string kind = PyDictString(dict, "Kind");
+	q.kind = kind == "choice" ? PromptKind::Choice : kind == "int" ? PromptKind::Integer : PromptKind::YesNo;
+	q.tag = PyDictString(dict, "Tag");
+	q.title = PyDictString(dict, "Title");
+	q.text = PyDictString(dict, "Text");
+	q.defaultChoice = PyDictInt(dict, "Default", q.kind == PromptKind::YesNo ? 1 : 0);
+	q.timeout = uint32_t(std::max(0, PyDictInt(dict, "Timeout", 0)));
+	if (PyDictInt(dict, "StopOnNo", 0)) q.flags |= PromptQuestion::STOP_ON_NO;
+	PyObject* choices = PyDict_GetItemString(dict, "Choices");
+	if (choices && PyList_Check(choices)) {
+		for (Py_ssize_t i = 0; i < PyList_Size(choices); ++i) {
+			q.choices.push_back(NetUtf8(PyList_GetItem(choices, i)));
+		}
+	}
+	PyObject* fields = PyDict_GetItemString(dict, "Fields");
+	if (fields && PyList_Check(fields)) {
+		for (Py_ssize_t i = 0; i < PyList_Size(fields); ++i) {
+			PyObject* field = PyList_GetItem(fields, i);
+			if (!PyDict_Check(field)) return false;
+			q.fields.push_back(PromptField { PyDictString(field, "Label"), PyDictInt(field, "Min", 0), PyDictInt(field, "Max", 0), PyDictInt(field, "Value", 0) });
+		}
+	} else if (q.kind == PromptKind::Integer) {
+		// one value: Min, Max and Default at the top
+		q.fields.push_back(PromptField { PyDictString(dict, "Label"), PyDictInt(dict, "Min", 0), PyDictInt(dict, "Max", 0), q.defaultChoice });
+		q.defaultChoice = 0;
+	}
+	return true;
+}
+
+static PyObject* PyIntList(const std::vector<int32_t>& values)
+{
+	PyObject* list = PyList_New(0);
+	for (int32_t value : values) {
+		PyList_Append(list, DecRef(PyLong_FromLong, value));
+	}
+	return list;
+}
+
+static void PyDictSet(PyObject* dict, const char* key, PyObject* value)
+{
+	PyDict_SetItemString(dict, key, value);
+	Py_DecRef(value);
+}
+
+static void PromptQuestionToPy(PyObject* dict, const PromptQuestion& q)
+{
+	PyDictSet(dict, "Kind", NetPyString(PromptKindName(q.kind)));
+	PyDictSet(dict, "Tag", NetPyString(q.tag));
+	PyDictSet(dict, "Title", NetPyString(q.title));
+	PyDictSet(dict, "Text", NetPyString(q.text));
+	PyDictSet(dict, "Default", PyLong_FromLong(q.defaultChoice));
+	PyDictSet(dict, "Vote", PyBool_FromLong(q.flags & PromptQuestion::VOTE));
+	PyDictSet(dict, "Actor", PyLong_FromLong(long(q.actorID)));
+	PyObject* choices = PyList_New(0);
+	for (const auto& choice : q.choices) {
+		PyList_Append(choices, DecRef(NetPyString, choice));
+	}
+	PyDictSet(dict, "Choices", choices);
+	PyObject* fields = PyList_New(0);
+	for (const auto& field : q.fields) {
+		PyObject* entry = PyDict_New();
+		PyDictSet(entry, "Label", NetPyString(field.label));
+		PyDictSet(entry, "Min", PyLong_FromLong(field.min));
+		PyDictSet(entry, "Max", PyLong_FromLong(field.max));
+		PyDictSet(entry, "Value", PyLong_FromLong(field.value));
+		PyList_Append(fields, entry);
+		Py_DecRef(entry);
+	}
+	PyDictSet(dict, "Fields", fields);
+}
+
+static PyObject* PromptResultToPy(const PromptResult& result)
+{
+	PyObject* dict = PyDict_New();
+	PromptQuestionToPy(dict, result.question);
+	PyDictSet(dict, "ID", PyLong_FromLong(long(result.id)));
+	PyDictSet(dict, "Values", PyIntList(result.values));
+	PyDictSet(dict, "Value", PyLong_FromLong(result.Value()));
+	PyDictSet(dict, "Yes", PyBool_FromLong(result.Yes()));
+	PyDictSet(dict, "Slot", PyLong_FromLong(result.slot));
+	PyDictSet(dict, "Outcome", NetPyString(PromptOutcomeName(result.outcome)));
+	return dict;
+}
+
+// a Python function as a prompt's callback; it gets the result as a dict
+struct PythonPromptCallback {
+	PyObject* function = nullptr;
+
+	explicit PythonPromptCallback(PyObject* fn)
+		: function(fn && PyCallable_Check(fn) ? fn : nullptr)
+	{
+		Py_XINCREF(function);
+	}
+	PythonPromptCallback(const PythonPromptCallback& other)
+		: PythonPromptCallback(other.function) {}
+	PythonPromptCallback& operator=(const PythonPromptCallback&) = delete;
+	~PythonPromptCallback()
+	{
+		if (Py_IsInitialized()) Py_XDECREF(function);
+	}
+
+	void operator()(const PromptResult& result) const
+	{
+		if (!function) return;
+		CallPython(function, Py_BuildValue("(N)", PromptResultToPy(result)));
+	}
+};
+
+PyDoc_STRVAR(GemRB_AskPlayer__doc,
+	     "===== AskPlayer =====\n\
+\n\
+**Prototype:** GemRB.AskPlayer (Actor, Question[, Callback])\n\
+\n\
+**Description:** Asks the player who owns a party member a question and \n\
+carries on with the answer later: the game pauses, the owner gets the prompt \n\
+window (GUIScripts/Prompt.py) and Callback runs on a later tick. In single \n\
+player that is the local player; in co-op only the host asks, and the owner's \n\
+client answers (the host while the owner is away). A timeout answers with the \n\
+default. One prompt is open at a time, the rest wait in order.\n\
+\n\
+**Parameters:**\n\
+  * Actor - party slot or global ID (0: not about anyone, the host decides)\n\
+  * Question - a dict: Kind ('yesno', 'choice' or 'int'), Title, Text, Tag, \n\
+    Default, Timeout (ms, 0 for the config's PromptTimeout), Choices (list of \n\
+    strings), Fields (int: list of {Label, Min, Max, Value}, or Min/Max/Label \n\
+    at the top for one value), Vote (bool: a yes/no vote of every player)\n\
+  * Callback - called with the result: {ID, Tag, Values, Value, Yes, Slot, \n\
+    Outcome ('answered', 'timed out', 'host answered', 'cancelled'), ...}\n\
+\n\
+**Return value:** int, the prompt's id, 0 if it wasn't asked (malformed, or a client)\n\
+");
+
+static PyObject* GemRB_AskPlayer(PyObject* /*self*/, PyObject* args)
+{
+	int globalID = 0;
+	PyObject* question = nullptr;
+	PyObject* callback = Py_None;
+	PARSE_ARGS(args, "iO|O", &globalID, &question, &callback);
+
+	PromptQuestion q;
+	if (!PromptFromPy(question, q)) {
+		return RuntimeError("AskPlayer: the question must be a dict!");
+	}
+	PromptManager::Callback done;
+	if (callback != Py_None) done = PythonPromptCallback(callback);
+
+	PyObject* vote = PyDict_GetItemString(question, "Vote");
+	if (vote && PyObject_IsTrue(vote)) {
+		return PyLong_FromLong(long(core->GetPrompts().AskPlayers(PromptManager::Players(), std::move(q), std::move(done))));
+	}
+	const Actor* target = nullptr;
+	if (globalID) {
+		GET_GAME();
+		GET_ACTOR_GLOBAL();
+		target = actor;
+	}
+	return PyLong_FromLong(long(core->GetPrompts().Ask(target, std::move(q), std::move(done))));
+}
+
+PyDoc_STRVAR(GemRB_GetPrompt__doc,
+	     "===== GetPrompt =====\n\
+\n\
+**Prototype:** GemRB.GetPrompt ()\n\
+\n\
+**Description:** The open prompt as this player sees it, for the prompt window.\n\
+\n\
+**Return value:** None, or a dict: ID, Kind, Tag, Title, Text, Choices, Fields, \n\
+Default, Vote, Actor, Mine (ours to answer), Sent (our answer is on its way), \n\
+Waiting (who decides), For (whose decision the host makes), Remaining (ms)\n\
+");
+
+static PyObject* GemRB_GetPrompt(PyObject* /*self*/, PyObject* /*args*/)
+{
+	const PromptManager& prompts = core->GetPrompts();
+	const PromptManager::View* view = prompts.Current();
+	if (!view) {
+		Py_RETURN_NONE;
+	}
+	PyObject* dict = PyDict_New();
+	PromptQuestionToPy(dict, view->question);
+	PyDictSet(dict, "ID", PyLong_FromLong(long(view->id)));
+	PyDictSet(dict, "Mine", PyBool_FromLong(view->mine));
+	PyDictSet(dict, "Sent", PyBool_FromLong(view->sent));
+	PyDictSet(dict, "Waiting", NetPyString(view->waitingFor));
+	PyDictSet(dict, "For", NetPyString(view->askedName));
+	PyDictSet(dict, "Remaining", PyLong_FromLong(long(prompts.Remaining())));
+	return dict;
+}
+
+PyDoc_STRVAR(GemRB_AnswerPrompt__doc,
+	     "===== AnswerPrompt =====\n\
+\n\
+**Prototype:** GemRB.AnswerPrompt (ID, Values)\n\
+\n\
+**Description:** Our player's answer to the open prompt (the prompt window's \n\
+buttons): one value for yes/no (1/0) and choices (the index), one per field \n\
+for integers. A client sends it to the host, which checks it again.\n\
+\n\
+**Return value:** bool, whether it was taken (or sent)\n\
+");
+
+static PyObject* GemRB_AnswerPrompt(PyObject* /*self*/, PyObject* args)
+{
+	int id = 0;
+	PyObject* values = nullptr;
+	PARSE_ARGS(args, "iO", &id, &values);
+	std::vector<int32_t> answer;
+	if (PyLong_Check(values)) {
+		answer.push_back(int32_t(PyLong_AsLong(values)));
+	} else if (PyList_Check(values) || PyTuple_Check(values)) {
+		PyObject* seq = PySequence_Fast(values, "");
+		for (Py_ssize_t i = 0; i < PySequence_Fast_GET_SIZE(seq); ++i) {
+			answer.push_back(int32_t(PyLong_AsLong(PySequence_Fast_GET_ITEM(seq, i))));
+		}
+		Py_DecRef(seq);
+	} else {
+		return RuntimeError("AnswerPrompt: Values must be an int or a list of ints!");
+	}
+	RETURN_BOOL(core->GetPrompts().AnswerLocal(uint32_t(id), answer));
 }
 
 PyDoc_STRVAR(GemRB_NetChat__doc,
@@ -13220,7 +13470,9 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(ActOnPC, METH_VARARGS),
 	METHOD(AddGameTypeHint, METH_VARARGS),
 	METHOD(AddNewArea, METH_VARARGS),
+	METHOD(AnswerPrompt, METH_VARARGS),
 	METHOD(ApplyEffect, METH_VARARGS),
+	METHOD(AskPlayer, METH_VARARGS),
 	METHOD(ApplySpell, METH_VARARGS),
 	METHOD(CanUseItemType, METH_VARARGS),
 	METHOD(ChangeContainerItem, METH_VARARGS),
@@ -13328,6 +13580,7 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(GetPlayerStat, METH_VARARGS),
 	METHOD(GetPlayerStates, METH_VARARGS),
 	METHOD(GetPlayerString, METH_VARARGS),
+	METHOD(GetPrompt, METH_NOARGS),
 	METHOD(GetRumour, METH_VARARGS),
 	METHOD(GetSaveGames, METH_VARARGS),
 	METHOD(GetSelectedActors, METH_NOARGS),

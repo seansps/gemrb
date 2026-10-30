@@ -5,6 +5,7 @@
 #include "TextArea.h"
 
 #include "Interface.h"
+#include "Prompts.h"
 #include "Timer.h"
 
 #include "GUI/EventMgr.h"
@@ -104,6 +105,10 @@ bool TextArea::SpanSelector::KeyEvent(const Event& event)
 {
 	// co-op: keys typed into a text field (the chat line) aren't picks, eg. shift+1 for '!'
 	if (core->GetNetSession() && VideoDriver->InTextInput()) {
+		return false;
+	}
+	// an open prompt window has the number keys for its own choices
+	if (core->GetPrompts().TakesKeys()) {
 		return false;
 	}
 	return OnKeyPress(event.keyboard, 0);
