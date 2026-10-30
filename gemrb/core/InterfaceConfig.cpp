@@ -330,6 +330,9 @@ CoreSettings LoadFromDictionary(InterfaceConfig cfg)
 	CONFIG_STRING("NetHost", config.NetHost);
 	CONFIG_INT("NetPort", config.NetPort);
 	CONFIG_STRING("NetName", config.NetName);
+	CONFIG_INT("NetTimeout", config.NetTimeout);
+	CONFIG_INT("NetLightAreas", config.NetLightAreas);
+	CONFIG_STRING("NetTestLobby", config.NetTestLobby);
 	CONFIG_STRING("NetTestChat", config.NetTestChat);
 	CONFIG_STRING("NetTestMove", config.NetTestMove);
 	CONFIG_STRING("NetTestVar", config.NetTestVar);

@@ -380,7 +380,7 @@ NetGuiOpInfo NetGuiInfo(NetGuiOp op)
 		case NetGuiOp::SetEquippedQuickSlot:
 			return { 0, 2, NetPermission::Control, "SetEquippedQuickSlot" };
 		case NetGuiOp::UseItem:
-			return { 0, 3, NetPermission::Control, "UseItem" };
+			return { 0, 3, NetPermission::Control, "UseItem", true };
 		case NetGuiOp::MemorizeSpell:
 			return { 0, 4, NetPermission::CharacterRecords, "MemorizeSpell" };
 		case NetGuiOp::UnmemorizeSpell:
