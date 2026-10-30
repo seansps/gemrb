@@ -1541,7 +1541,7 @@ void AttackCore(Scriptable* Sender, Scriptable* target, int flags)
 		// the original didn't check for dead directly, but it did check area match (we move instead, below)
 		// only for Attack, AttackNoSound, AttackOneRound, maybe not AttackReevaluate
 		if (tar->IsInvisibleTo(Sender) ||
-		    (tar->GetSafeStat(IE_STATE_ID) & STATE_DEAD) ||
+		    (tar->GetSafeStat(IE_STATE_ID) & STATE_DEAD) || (tar->GetDCCStates() & DCC::STATE_DYING) ||
 		    (tar->GetInternalFlag() & (IF_ACTIVE | IF_VISIBLE)) != (IF_ACTIVE | IF_VISIBLE) ||
 		    tar->GetStat(IE_AVATARREMOVAL)) {
 			attacker->StopAttack();

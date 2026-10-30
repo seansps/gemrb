@@ -1,0 +1,33 @@
+2DA V1.0
+*
+     DICE   EFFECTS                                  SAVE        TEXT
+1    1d6    *                                        *           ribs_broken
+2    *      INITBOTTOM:1T                            *           stunned,_last_for_the_rest_of_the_fight
+3    *      PRONE:1                                  *           legs_knocked_away
+4    *      DISARM                                   *           disarmed
+5    *      DMG:1d6@NOSHIELD|NONE                    *           shield_arm_struck
+6    2d6    DELAYDMG:1d6:1                           *           impaled
+7    1d8    *                                        *           jaw_smashed
+8    1d6    TODO:ARM_USELESS                         *           forearm_shattered
+9    *      DMG:1d8@NOHELM|NONE,?UNCON:1d6@NOHELM    FORT:10:L   blow_to_the_head
+10   *      EXTRA                                    *           reeling,_struck_again
+11   *      MUTE:HEAL,NOATTACK:1                     *           throat_crushed
+12   1d10   SPEED:HALF:HEAL                          *           kneecap_smashed
+13   1d12   *                                        *           crushing_blow
+14   *      SUNDER                                   *           weapon_sundered
+15   1d12   ?UNCON:1d6                               FORT:15:L   organs_crushed
+16   1d16   *                                        *           devastating_strike
+17   *      SPEED:-25:HEAL                           *           tendon_torn
+18   1d12   EXTRA:4                                  *           seized_by_the_neck
+19   1d16   ?UNCON:1d6                               FORT:15:L   skull_struck
+20   *      DIEIN:1d4D                               *           slow_mortal_wound
+21   *      BLIND:PERM                               *           blinded_for_good
+22   2d12   SPEED:ZERO:PERM                          *           leg_torn_off
+23   3d12   NOATTACK:PERM                            *           arms_torn_off
+24   *      DIEIN:8                                  *           disemboweled
+25   *      ABIL:INT:1d8,ABIL:PER:1d8,UNCON:HEAL     *           skull_caved_in
+26   *      DIEIN:6                                  *           throat_crushed
+27   *      PARALYZE:PERM                            *           spine_snapped
+28   *      DIEIN:4                                  *           throat_torn
+29   *      DIE                                      *           heart_burst
+30   *      DIE,TODO:KEEP_ATTACKING_UNTIL_A_MISS     *           beheaded

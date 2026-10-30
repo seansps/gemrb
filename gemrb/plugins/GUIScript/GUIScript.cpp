@@ -6901,6 +6901,9 @@ static PyObject* GemRB_GetDCCStats(PyObject* /*self*/, PyObject* args)
 	Py_DecRef(dice);
 	DictInt(dict, "LuckDie", actor->GetStat(IE_DCC_LUCKDIE));
 	DictInt(dict, "States", actor->GetDCCStates());
+	DictInt(dict, "HD", actor->GetDCCHitDice());
+	DictInt(dict, "BleedRounds", actor->GetStat(IE_DCC_BLEED));
+	DictInt(dict, "Doomed", actor->GetStat(IE_DCC_DOOMED));
 
 	const DCC::LevelRow* row = rules->classes.Row(cls, level);
 	DictInt(dict, "SpellsKnown", row ? row->spellsKnown : 0);
@@ -7012,6 +7015,206 @@ static PyObject* GemRB_DCCLevelUp(PyObject* /*self*/, PyObject* args)
 		return PyLong_FromLong(-1);
 	}
 	return PyLong_FromLong(actor->DCCLevelUp(classID));
+}
+
+PyDoc_STRVAR(GemRB_DCCForceDice__doc,
+	     "===== DCCForceDice =====\n\
+\n\
+**Prototype:** GemRB.DCCForceDice (globalID, dice)\n\
+\n\
+**Description:** Queues die results for an actor's next DCC combat dice (attack, deed, damage, \n\
+crit and fumble dice and their results, initiative, saves against crits, the Luck check of \n\
+recovering the body), in the order they are rolled; each is clamped to its die. For tests. \n\
+\n\
+**Parameters:**\n\
+  * globalID - party ID or global ID of the actor to use\n\
+  * dice - a list of numbers; an empty list clears the queue\n\
+\n\
+**Return value:** N/A\n\
+\n\
+**See also:** [DCCAttack](DCCAttack.md)");
+
+static PyObject* GemRB_DCCForceDice(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	PyObject* list = nullptr;
+	PARSE_ARGS(args, "iO", &globalID, &list);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	if (!PyList_Check(list)) return RuntimeError("Expected a list of dice!");
+	std::vector<int> dice;
+	for (Py_ssize_t i = 0; i < PyList_Size(list); ++i) {
+		dice.push_back(static_cast<int>(PyLong_AsLong(PyList_GetItem(list, i))));
+	}
+	actor->DCCForceDice(std::move(dice));
+	Py_RETURN_NONE;
+}
+
+static PyObject* DCCAttackList(const Actor* actor)
+{
+	const auto& records = actor->GetDCCLastAttack();
+	PyObject* list = PyList_New(0);
+	for (const auto& record : records) {
+		PyObject* dict = PyDict_New();
+		DictInt(dict, "Serial", record.serial);
+		DictInt(dict, "Hand", record.hand);
+		DictInt(dict, "Die", record.die);
+		DictInt(dict, "Natural", record.natural);
+		DictInt(dict, "Deed", record.deed);
+		DictInt(dict, "Modifier", record.modifier);
+		DictInt(dict, "Total", record.total);
+		DictInt(dict, "AC", record.ac);
+		DictInt(dict, "Hit", record.hit);
+		DictInt(dict, "Critical", record.crit);
+		DictInt(dict, "Fumble", record.fumble);
+		DictInt(dict, "Cursed", record.cursed);
+		DictInt(dict, "Damage", record.damage);
+		DictInt(dict, "CritRoll", record.critRoll);
+		DictInt(dict, "CritTable", record.critTable);
+		DictInt(dict, "FumbleDie", record.fumbleDie);
+		DictInt(dict, "FumbleRoll", record.fumbleRoll);
+		PyDict_SetItemString(dict, "Result", DecRef(PyString_FromString, record.result.c_str()));
+		PyList_Append(list, dict);
+		Py_DecRef(dict);
+	}
+	return list;
+}
+
+PyDoc_STRVAR(GemRB_DCCAttack__doc,
+	     "===== DCCAttack =====\n\
+\n\
+**Prototype:** GemRB.DCCAttack (attackerID, targetID)\n\
+\n\
+**Description:** Makes one DCC attack action at once, with the same rules as a real attack \n\
+(both hands with two weapons, crits, fumbles), applying the damage directly instead of \n\
+through the weapon's projectile. DCCRules games only; for tests and scripted attacks.\n\
+\n\
+**Parameters:**\n\
+  * attackerID, targetID - party IDs or global IDs\n\
+\n\
+**Return value:** the rolls as in GetDCCLastAttack\n\
+\n\
+**See also:** [GetDCCLastAttack](GetDCCLastAttack.md), [DCCForceDice](DCCForceDice.md)");
+
+static PyObject* GemRB_DCCAttack(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int targetID;
+	PARSE_ARGS(args, "ii", &globalID, &targetID);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	Actor* target = targetID > 1000 ? game->GetActorByGlobalID(targetID) : game->FindPC(targetID);
+	if (!target) return RuntimeError("Target not found!");
+	if (!core->GetDCCRules()) Py_RETURN_NONE;
+	actor->DCCAttack(target, false);
+	return DCCAttackList(actor);
+}
+
+PyDoc_STRVAR(GemRB_GetDCCLastAttack__doc,
+	     "===== GetDCCLastAttack =====\n\
+\n\
+**Prototype:** GemRB.GetDCCLastAttack (globalID)\n\
+\n\
+**Description:** The rolls of an actor's last DCC attack action, one dict per hand: Serial \n\
+(counts attack actions), Hand, Die, Natural, Deed, Modifier, Total, AC, Hit, Critical, Fumble, \n\
+Cursed, Damage, CritRoll, CritTable, FumbleDie, FumbleRoll and Result (the table text).\n\
+\n\
+**Parameters:**\n\
+  * globalID - party ID or global ID of the actor to use\n\
+\n\
+**Return value:** list\n\
+\n\
+**See also:** [DCCAttack](DCCAttack.md)");
+
+static PyObject* GemRB_GetDCCLastAttack(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	PARSE_ARGS(args, "i", &globalID);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	return DCCAttackList(actor);
+}
+
+PyDoc_STRVAR(GemRB_GetDCCCombatLog__doc,
+	     "===== GetDCCCombatLog =====\n\
+\n\
+**Prototype:** GemRB.GetDCCCombatLog ([clear])\n\
+\n\
+**Description:** The DCC combat log lines so far (rolls, crits, fumbles, dying), oldest first. \n\
+\n\
+**Parameters:**\n\
+  * clear - 1 empties the log after reading it\n\
+\n\
+**Return value:** list of strings");
+
+static PyObject* GemRB_GetDCCCombatLog(PyObject* /*self*/, PyObject* args)
+{
+	int clear = 0;
+	PARSE_ARGS(args, "|i", &clear);
+	auto lines = Actor::DCCCombatLog(clear);
+	PyObject* list = PyList_New(0);
+	for (const auto& line : lines) {
+		PyObject* text = PyString_FromStringObj(line);
+		PyList_Append(list, text);
+		Py_DecRef(text);
+	}
+	return list;
+}
+
+PyDoc_STRVAR(GemRB_DCCRecoverBody__doc,
+	     "===== DCCRecoverBody =====\n\
+\n\
+**Prototype:** GemRB.DCCRecoverBody (deadID, allyID[, natural])\n\
+\n\
+**Description:** An ally rolls a dead DCC character's body over (combat.md): for a character of \n\
+level 1+, within an hour of death and once per death, a Luck check on the dead character's \n\
+Luck brings it back at 1 hp, with -1 Str, Agi or Sta for good and -4 to all rolls for an hour. \n\
+Host or single player only; the M2.8 GUI gets a button for it.\n\
+\n\
+**Parameters:**\n\
+  * deadID, allyID - party IDs or global IDs\n\
+  * natural - the d20 to use instead of rolling (for tests)\n\
+\n\
+**Return value:** 1 recovered, 0 the check failed, -1 not allowed");
+
+static PyObject* GemRB_DCCRecoverBody(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int allyID;
+	int natural = 0;
+	PARSE_ARGS(args, "ii|i", &globalID, &allyID, &natural);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	const Actor* ally = allyID > 1000 ? game->GetActorByGlobalID(allyID) : game->FindPC(allyID);
+	const NetSession* net = core->GetNetSession();
+	if (net && !net->IsHost()) {
+		Log(WARNING, "GUIScript", "DCCRecoverBody is not available to co-op clients yet.");
+		return PyLong_FromLong(-1);
+	}
+	return PyLong_FromLong(actor->DCCRecoverBody(ally, natural));
+}
+
+PyDoc_STRVAR(GemRB_DCCFindActor__doc,
+	     "===== DCCFindActor =====\n\
+\n\
+**Prototype:** GemRB.DCCFindActor (scriptName)\n\
+\n\
+**Description:** The global ID of the actor with that script name in the current area, \n\
+for the DCC calls that take one (tests and scripted fights).\n\
+\n\
+**Parameters:**\n\
+  * scriptName - the actor's script name (death variable)\n\
+\n\
+**Return value:** the global ID, 0 if there is no such actor");
+
+static PyObject* GemRB_DCCFindActor(PyObject* /*self*/, PyObject* args)
+{
+	char* name = nullptr;
+	PARSE_ARGS(args, "s", &name);
+	GET_GAME();
+	const Map* map = game->GetCurrentArea();
+	const Actor* actor = map ? map->GetActorByScriptName(ieVariable(name)) : nullptr;
+	return PyLong_FromLong(actor ? long(actor->GetGlobalID()) : 0);
 }
 
 PyDoc_STRVAR(GemRB_SetPlayerStat__doc,
@@ -13819,6 +14022,12 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(GetDCCStats, METH_VARARGS),
 	METHOD(DCCRoll, METH_VARARGS),
 	METHOD(DCCLevelUp, METH_VARARGS),
+	METHOD(DCCForceDice, METH_VARARGS),
+	METHOD(DCCAttack, METH_VARARGS),
+	METHOD(GetDCCLastAttack, METH_VARARGS),
+	METHOD(GetDCCCombatLog, METH_VARARGS),
+	METHOD(DCCRecoverBody, METH_VARARGS),
+	METHOD(DCCFindActor, METH_VARARGS),
 	METHOD(GetPlayerStates, METH_VARARGS),
 	METHOD(GetPlayerString, METH_VARARGS),
 	METHOD(GetPrompt, METH_NOARGS),

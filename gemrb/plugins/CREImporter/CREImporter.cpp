@@ -35,11 +35,16 @@ constexpr ieDword FAKE_VARIABLE_OPCODE = 187;
 // DCC (ethren, DCCRules): BG CREs keep 32 unused bytes for a tracking target, after the
 // tracking skill. A DCC game stores its character data there:
 //   0-3 'D' 'C' 'C' and version 1, 4 Luck score (natural maximum), 5 birth augur,
-//   6 frozen augur Luck modifier (signed), 7 reserved, 8-13 ability loss Str..Luck, 14-31 reserved
-// Creatures without the block get Luck 10 (modifier 0), no augur and no loss.
+//   6 frozen augur Luck modifier (signed), 7 reserved, 8-13 ability loss Str..Luck,
+//   monsters (M2.3): 14 attack bonus (signed), 15 HD (0: less than 1), 16 crit type (DCC::MonsterType),
+//   17 threat (0: 20), 18 action die (0: d20), 19 initiative modifier (signed),
+//   dying: 20-23 game time of death (ticks, 0: none), 24 body flags (1: rolled over), 25-31 reserved
+// Creatures without the block get Luck 10 (modifier 0), no augur and no loss; as monsters, their
+// IE level stands in for HD and attack bonus (HD 255 marks that).
 constexpr size_t DCC_BLOCK_SIZE = 32;
 constexpr ieByte DCC_BLOCK_VERSION = 1;
 constexpr ieDword DCC_DEFAULT_LUCK = 10;
+constexpr ieDword DCC_HD_FROM_LEVEL = 255; // no block: the IE level is the HD and the attack bonus
 
 static void ReadDCCBlock(DataStream* str, Actor* act)
 {
@@ -48,8 +53,12 @@ static void ReadDCCBlock(DataStream* str, Actor* act)
 	for (unsigned int stat = IE_DCC_LUCK; stat <= IE_DCC_LOSS_LCK; ++stat) {
 		act->BaseStats[stat] = 0;
 	}
+	for (unsigned int stat = IE_DCC_MATTACK; stat <= IE_DCC_BODY; ++stat) {
+		act->BaseStats[stat] = 0;
+	}
 	if (block[0] != 'D' || block[1] != 'C' || block[2] != 'C' || block[3] != DCC_BLOCK_VERSION) {
 		act->BaseStats[IE_DCC_LUCK] = DCC_DEFAULT_LUCK;
+		act->BaseStats[IE_DCC_HD] = DCC_HD_FROM_LEVEL;
 		return;
 	}
 	act->BaseStats[IE_DCC_LUCK] = block[4];
@@ -58,6 +67,14 @@ static void ReadDCCBlock(DataStream* str, Actor* act)
 	for (unsigned int i = 0; i < 6; ++i) {
 		act->BaseStats[IE_DCC_LOSS_STR + i] = block[8 + i];
 	}
+	act->BaseStats[IE_DCC_MATTACK] = static_cast<ieDwordSigned>(static_cast<ieByteSigned>(block[14]));
+	act->BaseStats[IE_DCC_HD] = block[15];
+	act->BaseStats[IE_DCC_MTYPE] = block[16];
+	act->BaseStats[IE_DCC_MTHREAT] = block[17];
+	act->BaseStats[IE_DCC_MACTDIE] = block[18];
+	act->BaseStats[IE_DCC_MINIT] = static_cast<ieDwordSigned>(static_cast<ieByteSigned>(block[19]));
+	act->BaseStats[IE_DCC_DIEDAT] = block[20] | (block[21] << 8) | (block[22] << 16) | (ieDword(block[23]) << 24);
+	act->BaseStats[IE_DCC_BODY] = block[24];
 }
 
 static void WriteDCCBlock(DataStream* stream, const Actor* act)
@@ -76,6 +93,20 @@ static void WriteDCCBlock(DataStream* stream, const Actor* act)
 	for (unsigned int i = 0; i < 6; ++i) {
 		block[8 + i] = byte(IE_DCC_LOSS_STR + i);
 	}
+	auto signedByte = [act](unsigned int stat) {
+		return static_cast<ieByte>(static_cast<ieByteSigned>(Clamp<ieDwordSigned>(static_cast<ieDwordSigned>(act->BaseStats[stat]), -128, 127)));
+	};
+	block[14] = signedByte(IE_DCC_MATTACK);
+	block[15] = byte(IE_DCC_HD);
+	block[16] = byte(IE_DCC_MTYPE);
+	block[17] = byte(IE_DCC_MTHREAT);
+	block[18] = byte(IE_DCC_MACTDIE);
+	block[19] = signedByte(IE_DCC_MINIT);
+	ieDword diedAt = act->BaseStats[IE_DCC_DIEDAT];
+	for (unsigned int i = 0; i < 4; ++i) {
+		block[20 + i] = static_cast<ieByte>((diedAt >> (8 * i)) & 0xff);
+	}
+	block[24] = byte(IE_DCC_BODY);
 	stream->Write(block.data(), block.size());
 }
 

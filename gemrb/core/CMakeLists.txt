@@ -21,6 +21,8 @@ FILE(GLOB gemrb_core_LIB_SRCS
 	DCC/Augur.cpp
 	DCC/Character.cpp
 	DCC/Classes.cpp
+	DCC/Combat.cpp
+	DCC/CombatTables.cpp
 	DCC/DiceChain.cpp
 	DCC/Rules.cpp
 	Debug.cpp
@@ -124,6 +126,7 @@ FILE(GLOB gemrb_core_LIB_SRCS
 	RNG.cpp
 	Scriptable/Actor.cpp
 	Scriptable/ActorDCC.cpp
+	Scriptable/ActorDCCCombat.cpp
 	Scriptable/CombatInfo.cpp
 	Scriptable/Container.cpp
 	Scriptable/Door.cpp

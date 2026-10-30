@@ -20,6 +20,7 @@
 #include "DCC/Augur.h"
 #include "DCC/Character.h"
 #include "DCC/Classes.h"
+#include "DCC/CombatTables.h"
 
 #include <array>
 
@@ -67,6 +68,7 @@ public:
 	AugurTable augurs;
 	SaveMap saves;
 	ThiefSkillTable thiefSkills;
+	CombatTables combat;
 
 	/** loads every table through gamedata; logs and returns false if one is missing or bad */
 	bool Load();

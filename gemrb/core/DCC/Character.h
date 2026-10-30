@@ -47,10 +47,11 @@ enum StateFlags : uint32_t {
 	STATE_IMMOBILE = 1, // Str or Agi at 0: can't move or attack, helpless
 	STATE_UNCONSCIOUS = 2, // Sta at 0: like sleep, but damage doesn't wake them
 	STATE_WITLESS = 4, // Int or Per at 0: can't act, cast or talk
-	STATE_CURSED = 8 // Luck at 0: every d20 roll fails and none crits
+	STATE_CURSED = 8, // Luck at 0: every d20 roll fails and none crits
+	STATE_DYING = 16 // at 0 hp and bleeding out (combat.md), not an ability state
 };
 // the states that take a character out of action (a party of these and the dead is wiped)
-constexpr uint32_t STATES_HELD = STATE_IMMOBILE | STATE_UNCONSCIOUS | STATE_WITLESS;
+constexpr uint32_t STATES_HELD = STATE_IMMOBILE | STATE_UNCONSCIOUS | STATE_WITLESS | STATE_DYING;
 
 /** the states for a set of current scores; only abilities with apply[i] set are looked at */
 GEM_EXPORT uint32_t StatesAtZero(const AbilityScores& current, const std::array<bool, ABILITY_COUNT>& apply);

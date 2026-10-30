@@ -391,12 +391,28 @@ IE_DCC_INIT                     = 281
 IE_DCC_LUCKDIE                  = 282
 IE_DCC_SPEED                    = 283
 IE_DCC_HITDIE                   = 284
+IE_DCC_BLEED                    = 285 # bleeding out: rounds left
+IE_DCC_DOOMED                   = 286
+IE_DCC_NOATTACK                 = 287
+IE_DCC_PRONE                    = 288
+IE_DCC_ATKMOD                   = 289
+IE_DCC_INITBOTTOM               = 290
+IE_DCC_ROLLMOD                  = 291
+IE_DCC_MATTACK                  = 292 # monsters: attack bonus, HD, crit type, threat, action die, initiative
+IE_DCC_HD                       = 293
+IE_DCC_MTYPE                    = 294
+IE_DCC_MTHREAT                  = 295
+IE_DCC_MACTDIE                  = 296
+IE_DCC_MINIT                    = 297
+IE_DCC_DIEDAT                   = 298 # game time of death (ticks)
+IE_DCC_BODY                     = 299 # 1: body rolled over already
 
 # DCC states at 0 (IE_DCC_STATE bits)
 DCC_STATE_IMMOBILE = 1
 DCC_STATE_UNCONSCIOUS = 2
 DCC_STATE_WITLESS = 4
 DCC_STATE_CURSED = 8
+DCC_STATE_DYING = 16
 
 #these stats exist only in PC's (but we access only PCs anyway)
 # make sure EXTRASETTINGS matches GUIScript.cpp

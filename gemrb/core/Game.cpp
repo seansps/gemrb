@@ -1777,7 +1777,12 @@ bool Game::CanPartyRest(RestChecks checks, ieStrRef* err) const
 
 	if (checks & RestChecks::InControl) {
 		for (const auto& pc : PCs) {
-			// DCC: those held at 0 by ability loss recover by resting, so they don't stop it
+			// DCC: those held at 0 by ability loss recover by resting, so they don't stop it;
+			// someone bleeding out has rounds left, not a night, so nobody rests then
+			if (core->HasFeature(GFFlags::RULES_DCC) && (pc->GetDCCStates() & DCC::STATE_DYING)) {
+				*err = DisplayMessage::GetStringReference(HCStrings::CantRestNoControl);
+				return false;
+			}
 			if (core->HasFeature(GFFlags::RULES_DCC) && pc->IsDCCHeld()) continue;
 			if (pc->GetStat(IE_STATE_ID) & STATE_MINDLESS || pc->GetStat(IE_CHECKFORBERSERK)) {
 				// You cannot rest at this time because you do not have control of all your party members
