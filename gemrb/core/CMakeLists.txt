@@ -17,6 +17,7 @@ FILE(GLOB gemrb_core_LIB_SRCS
 	Calendar.cpp
 	CharAnimations.cpp
 	Core.cpp
+	DCC/DiceChain.cpp
 	Debug.cpp
 	Dialog.cpp
 	DialogHandler.cpp
