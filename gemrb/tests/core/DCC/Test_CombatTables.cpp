@@ -96,12 +96,12 @@ TEST(DCC_CombatTables, ParseEffects)
 	std::vector<TableAlternatives> effects;
 	ASSERT_TRUE(ParseEffects("*", effects));
 	EXPECT_TRUE(effects.empty());
-	ASSERT_TRUE(ParseEffects("PRONE:1+EXTRA", effects));
+	ASSERT_TRUE(ParseEffects("PRONE:1,EXTRA", effects));
 	ASSERT_EQ(effects.size(), 2u);
 	EXPECT_EQ(effects[0][0].key, "PRONE");
 	EXPECT_EQ(effects[0][0].args, std::vector<std::string> { "1" });
 	EXPECT_EQ(effects[1][0].key, "EXTRA");
-	ASSERT_TRUE(ParseEffects("SHIELD|?UNCON:1d6+ABIL:INT:1d4:PERM@NOHELM+!DMG:2d6", effects));
+	ASSERT_TRUE(ParseEffects("SHIELD|?UNCON:1d6,ABIL:INT:1d4:PERM@NOHELM,!DMG:2d6", effects));
 	ASSERT_EQ(effects.size(), 3u);
 	ASSERT_EQ(effects[0].size(), 2u);
 	EXPECT_EQ(effects[0][0].key, "SHIELD");
@@ -110,7 +110,9 @@ TEST(DCC_CombatTables, ParseEffects)
 	EXPECT_EQ(effects[1][0].condition, "NOHELM");
 	EXPECT_EQ(effects[1][0].args.size(), 3u);
 	EXPECT_EQ(effects[2][0].gate, '!');
-	EXPECT_FALSE(ParseEffects("PRONE+", effects));
+	EXPECT_FALSE(ParseEffects("PRONE,", effects));
+	ASSERT_TRUE(ParseEffects("STUN:1d4+1,EXTRA", effects));
+	EXPECT_EQ(effects[0][0].args[0], "1d4+1");
 	EXPECT_FALSE(ParseEffects("A||B", effects));
 }
 

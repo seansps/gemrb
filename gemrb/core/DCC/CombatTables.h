@@ -22,7 +22,7 @@
  * - dcctwowp.2da (Table 4-3): rows by the highest Agility of the band, with
  *   the PRIMARY and OFF dice steps and the CRIT rule of the primary hand.
  *
- * EFFECTS: * or terms joined by +. A term may be a list of alternatives
+ * EFFECTS: * or terms joined by commas. A term may be a list of alternatives
  * joined by | (the first that applies wins, e.g. SHIELD|STUN:1d4 when the
  * target has no shield). A term is KEY[:ARG...][@COND], prefixed with ? when
  * it only applies on a failed save and ! when only on a passed one. Durations

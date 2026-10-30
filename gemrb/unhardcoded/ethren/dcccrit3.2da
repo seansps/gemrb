@@ -1,0 +1,32 @@
+2DA V1.0
+*
+     DICE   EFFECTS                              SAVE        TEXT
+0    1d12   ALLY:1d4,TODO:BATTLE_RAGE            *           wild_frenzy_catches_an_ally
+1    1d6    *                                    *           solid_blow
+2    *      PRONE:1                              *           knocked_down
+3    1d8    *                                    *           heavy_blow
+4    *      EXTRA                                *           driven_to_its_knees,_strike_again
+5    1d6    TODO:SENSE_OF_SMELL                  *           nose_smashed
+6    1d8    *                                    *           ribs_broken
+7    *      DISARM                               *           weapon_sent_flying
+8    1d6    DEAF:1d6D                            *           ear_ringing_blow
+9    2d6    SPEED:-10:HEAL                       *           leg_wound
+10   *      SUNDER                               *           weapon_shattered
+11   *      DIEIN:1d5H                           *           grievous_internal_wound
+12   *      ?UNCON:1d6                           FORT:10:L   blow_to_the_head
+13   1d8    *                                    *           punishing_blow
+14   2d8    *                                    *           crushing_blow
+15   1d8    SHIELD|NONE                          *           shield_arm_struck
+16   *      ATK:-4:HEAL                          *           weapon_hand_ruined
+17   *      PRONE:1,EXTRA                        *           knocked_flat,_strike_again
+18   1d8    ABIL:INT:1d4,ABIL:PER:1d4            *           skull_rattled
+19   2d8    *                                    *           devastating_blow
+20   1d8    STUN:1d3                             *           stunning_blow
+21   2d8    PRONE:1,SPEED:HALF:HEAL,EXTRA        *           legs_cut_out,_strike_again
+22   *      DISARM|NONE,NOATTACK:HEAL            *           weapon_arm_ruined
+23   2d8    ABIL:INT:1d4:PERM,ABIL:PER:1d4:PERM  *           brain_damage
+24   2d8    STUN:1d4                             *           gasping_and_staggering
+25   *      HALFHP                               *           terrible_wound
+26   2d8    BLIND:PERM                           *           eyes_destroyed
+27   3d8    ?UNCON:1d6                           FORT:15:L   crushing_head_blow
+28   3d8    ?PARALYZE:1d4H                       FORT:15:L   spine_struck

@@ -414,15 +414,20 @@ static bool TermApplies(const TableTerm& term, const RowContext& ctx)
 	return true;
 }
 
+// a crit entry can't happen when it has no damage of its own and none of its effects can
+// (results the engine doesn't have yet, TODO:..., don't count either way)
 static bool RowApplies(const ResultRow& row, const RowContext& ctx)
 {
-	if (!row.dice.IsNone() || row.effects.empty()) return true;
+	if (!row.dice.IsNone()) return true;
+	bool any = false;
 	for (const auto& alternatives : row.effects) {
+		if (alternatives.size() == 1 && alternatives[0].key == "TODO") continue;
+		any = true;
 		for (const auto& term : alternatives) {
 			if (TermApplies(term, ctx)) return true;
 		}
 	}
-	return false;
+	return !any;
 }
 
 static Duration TermDuration(const TableTerm& term, size_t arg)

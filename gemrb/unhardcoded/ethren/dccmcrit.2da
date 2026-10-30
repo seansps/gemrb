@@ -1,0 +1,25 @@
+2DA V1.0
+-
+     HUMANOID  DRAGON   DEMON   GIANT   UNDEAD  OTHER
+0    III/d4    DR/d4    DN/d3   -       U/d4    M/d4
+1    III/d6    DR/d6    DN/d4   -       U/d6    M/d6
+2    III/d8    DR/d8    DN/d4   -       U/d6    M/d8
+3    III/d8    DR/d10   DN/d4   -       U/d8    M/d8
+4    III/d10   DR/d12   DN/d4   G/d4    U/d8    M/d10
+5    III/d10   DR/d14   DN/d6   G/d4    U/d10   M/d10
+6    IV/d12    DR/d16   DN/d6   G/d4    U/d10   M/d12
+7    IV/d12    DR/d20   DN/d8   G/d4    U/d12   M/d12
+8    IV/d14    DR/d20   DN/d8   G/d4    U/d12   M/d14
+9    IV/d14    DR/d24   DN/d10  G/d4    U/d14   M/d14
+10   IV/d16    DR/d24   DN/d10  G/d4    U/d14   M/d16
+11   V/d16     DR/2d14  DN/d12  G/d4    U/d16   M/d16
+12   V/d20     DR/2d14  DN/d12  G/d6    U/d16   M/d20
+13   V/d20     DR/d30   DN/d14  G/d6    U/d20   M/d20
+14   V/2d10    DR/d30   DN/d14  G/d7    U/d20   M/d20
+15   V/2d10    DR/2d16  DN/d16  G/d7    U/d24   M/d20
+16   V/2d12    DR/2d16  DN/d16  G/d8    U/d24   M/d24
+17   V/2d12    DR/2d20  DN/d20  G/d8    U/d30   M/d24
+18   V/2d14    DR/2d20  DN/d20  G/d10   U/d30   M/d24
+19   V/2d14    DR/3d20  DN/d24  G/d10   U/d30   M/d30
+20   V/3d10    DR/3d20  DN/d24  G/d12   U/d30   M/d30
+21   V/3d10    DR/4d20  DN/d30  G/d12   U/d30   M/d30

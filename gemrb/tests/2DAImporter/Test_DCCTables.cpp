@@ -12,6 +12,8 @@
 
 #include <gtest/gtest.h>
 
+#include <set>
+
 namespace GemRB {
 namespace DCC {
 
@@ -357,6 +359,217 @@ TEST(DCC_Tables, SaveMap)
 	EXPECT_EQ(saves.Get(IESave::Wand), Save::Ref);
 	EXPECT_EQ(saves.Get(IESave::Polymorph), Save::Fort);
 	EXPECT_EQ(saves.Default(), Save::Will);
+}
+
+// --- combat (M2.3): crits-fumbles.md, combat.md Table 4-3, equipment.md Table 3-3
+
+// the extra damage dice of each roll, as the spec's tables print them ("" for none)
+static void ExpectDice(const char* name, int minRoll, const std::vector<std::string>& dice)
+{
+	auto table = Open2DA(name);
+	ASSERT_TRUE(table) << name;
+	ResultTable results;
+	ASSERT_TRUE(results.Load(*table)) << name;
+	EXPECT_EQ(results.MinRoll(), minRoll) << name;
+	EXPECT_EQ(results.MaxRoll(), minRoll + int(dice.size()) - 1) << name;
+	for (size_t i = 0; i < dice.size(); ++i) {
+		int roll = minRoll + int(i);
+		const ResultRow* row = results.Lookup(roll);
+		ASSERT_TRUE(row);
+		EXPECT_EQ(row->roll, roll);
+		std::string got = row->dice.IsNone() ? "" : DiceString(row->dice);
+		EXPECT_EQ(got, dice[i]) << name << " roll " << roll;
+		EXPECT_FALSE(row->text.empty()) << name << " roll " << roll;
+	}
+}
+
+TEST(DCC_Tables, CritTableI)
+{
+	ExpectDice("dcccrit1", 0, { "1d6", "1d3", "1d4", "1d3", "1d4", "1d6", "", "2d3", "", "2d4", "", "2d4", "", "", "", "", "", "", "2d6", "", "2d6" });
+}
+
+TEST(DCC_Tables, CritTableII)
+{
+	ExpectDice("dcccrit2", 0, { "", "2d3", "1d6", "2d6", "", "3d3", "", "3d4", "", "", "2d6", "", "", "", "", "2d6", "", "2d6", "1d8", "1d10", "2d6", "3d6", "2d6", "", "3d6" });
+}
+
+TEST(DCC_Tables, CritTableIII)
+{
+	ExpectDice("dcccrit3", 0, { "1d12", "1d6", "", "1d8", "", "1d6", "1d8", "", "1d6", "2d6", "", "", "", "1d8", "2d8", "1d8", "", "", "1d8", "2d8", "1d8", "2d8", "", "2d8", "2d8", "", "2d8", "3d8", "3d8" });
+}
+
+TEST(DCC_Tables, CritTableIV)
+{
+	ExpectDice("dcccrit4", 0, { "2d8", "2d12", "1d12", "1d12", "1d12", "", "", "2d12", "1d8", "2d12", "", "2d12", "1d12", "2d12", "", "", "2d12", "", "1d12", "", "3d12", "", "", "3d12", "3d12" });
+}
+
+TEST(DCC_Tables, CritTableV)
+{
+	ExpectDice("dcccrit5", 0, { "3d8", "", "", "1d12", "", "1d12", "", "", "1d12", "1d12", "1d12", "1d12", "1d12", "", "", "2d12", "", "", "", "", "2d12", "3d12", "2d12", "", "2d12", "", "", "4d12", "" });
+}
+
+TEST(DCC_Tables, CritTableM)
+{
+	ExpectDice("dcccritm", 1, { "1d6", "", "", "", "", "2d6", "1d8", "1d6", "", "", "", "1d10", "1d12", "", "1d12", "1d16", "", "1d12", "1d16", "", "", "2d12", "3d12", "", "", "", "", "", "", "" });
+}
+
+TEST(DCC_Tables, FumbleTable)
+{
+	ExpectDice("dccfumbl", 0, { "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "" });
+}
+
+// the saves the spec gives, as table name, roll, save, DC, + level
+TEST(DCC_Tables, CritAndFumbleSaves)
+{
+	struct Expected {
+		const char* table;
+		int roll;
+		Save save;
+		int dc;
+		bool plusLevel;
+	};
+	const Expected saves[] = {
+		{ "dcccrit1", 12, Save::Fort, 15, false }, { "dcccrit1", 19, Save::Fort, 20, false },
+		{ "dcccrit2", 12, Save::Fort, 10, true }, { "dcccrit2", 14, Save::Fort, 10, true }, { "dcccrit2", 18, Save::Fort, 10, true },
+		{ "dcccrit2", 19, Save::Fort, 10, true }, { "dcccrit2", 20, Save::Fort, 13, true }, { "dcccrit2", 21, Save::Fort, 15, true },
+		{ "dcccrit2", 22, Save::Fort, 13, true }, { "dcccrit2", 23, Save::Fort, 15, true }, { "dcccrit2", 24, Save::Fort, 20, true },
+		{ "dcccrit3", 12, Save::Fort, 10, true }, { "dcccrit3", 27, Save::Fort, 15, true }, { "dcccrit3", 28, Save::Fort, 15, true },
+		{ "dcccrit4", 6, Save::Fort, 15, true }, { "dcccrit4", 10, Save::Fort, 15, true }, { "dcccrit4", 18, Save::Fort, 15, true },
+		{ "dcccrit4", 20, Save::Fort, 15, true }, { "dcccrit4", 23, Save::Fort, 15, true }, { "dcccrit4", 24, Save::Fort, 20, true },
+		{ "dcccrit5", 4, Save::Fort, 20, true }, { "dcccrit5", 15, Save::Fort, 20, true },
+		{ "dcccritm", 9, Save::Fort, 10, true }, { "dcccritm", 15, Save::Fort, 15, true }, { "dcccritm", 19, Save::Fort, 15, true },
+		{ "dccfumbl", 2, Save::Ref, 10, false },
+	};
+	for (const auto& expected : saves) {
+		auto table = Open2DA(expected.table);
+		ASSERT_TRUE(table);
+		ResultTable results;
+		ASSERT_TRUE(results.Load(*table));
+		const ResultRow* row = results.Lookup(expected.roll);
+		ASSERT_TRUE(row);
+		EXPECT_EQ(row->save.save, expected.save) << expected.table << " " << expected.roll;
+		EXPECT_EQ(row->save.dc, expected.dc) << expected.table << " " << expected.roll;
+		EXPECT_EQ(row->save.plusLevel, expected.plusLevel) << expected.table << " " << expected.roll;
+	}
+}
+
+// every result key in the shipped tables is one the engine knows (ActorDCCCombat.cpp)
+TEST(DCC_Tables, CritAndFumbleKeysKnown)
+{
+	static const std::set<std::string> known { "NONE", "DMG", "PRONE", "NOATTACK", "INITBOTTOM", "STUN", "BLIND", "DEAF", "MUTE", "UNCON",
+						   "PARALYZE", "HELD", "SPEED", "ATK", "AC", "NEXTATK", "ENEMYBONUS", "DIEIN", "DIE", "HALFHP",
+						   "ABIL", "DISARM", "DISARMSELF", "SUNDER", "SUNDERSELF", "SHIELD", "WEAPONDMG", "ALLY", "SELF",
+						   "SELFHIT", "HITALLY", "DELAYDMG", "EXTRA", "TODO" };
+	static const std::set<std::string> conditions { "", "NOHELM", "NOSHIELD", "ARMORED", "HASWEAPON" };
+	for (const char* name : { "dcccrit1", "dcccrit2", "dcccrit3", "dcccrit4", "dcccrit5", "dcccritm", "dccfumbl" }) {
+		auto table = Open2DA(name);
+		ASSERT_TRUE(table);
+		ResultTable results;
+		ASSERT_TRUE(results.Load(*table)) << name;
+		for (int roll = results.MinRoll(); roll <= results.MaxRoll(); ++roll) {
+			for (const auto& alternatives : results.Lookup(roll)->effects) {
+				for (const auto& term : alternatives) {
+					EXPECT_TRUE(known.count(term.key)) << name << " " << roll << ": " << term.key;
+					EXPECT_TRUE(conditions.count(term.condition)) << name << " " << roll << ": @" << term.condition;
+					if (term.key == "STUN" || term.key == "PRONE" || term.key == "BLIND" || term.key == "UNCON" || term.key == "DIEIN") {
+						Duration duration;
+						EXPECT_TRUE(ParseDuration(term.args.empty() ? "" : term.args[0], duration)) << name << " " << roll;
+					}
+				}
+			}
+		}
+	}
+}
+
+TEST(DCC_Tables, CritSpotChecks)
+{
+	auto load = [](const char* name) {
+		ResultTable results;
+		auto table = Open2DA(name);
+		if (table) results.Load(*table);
+		return results;
+	};
+	ResultTable one = load("dcccrit1");
+	EXPECT_EQ(one.Lookup(10)->effects[0][0].key, "PRONE"); // I-10 prone
+	EXPECT_EQ(one.Lookup(14)->effects[0][0].key, "BLIND"); // I-14 blinded 1d3
+	EXPECT_EQ(one.Lookup(14)->effects[0][0].args[0], "1d3");
+	EXPECT_EQ(one.Lookup(-5)->roll, 0); // anything below 0 is the 0 row
+	ResultTable three = load("dcccrit3");
+	EXPECT_EQ(three.Lookup(25)->effects[0][0].key, "HALFHP");
+	EXPECT_EQ(three.Lookup(11)->effects[0][0].args[0], "1d5H"); // dies in 1d5 hours
+	EXPECT_EQ(three.Lookup(40)->roll, 28); // 28+
+	ResultTable four = load("dcccrit4");
+	EXPECT_EQ(four.Lookup(19)->effects[0][0].key, "WEAPONDMG");
+	EXPECT_EQ(four.Lookup(19)->effects[0][0].args[0], "3");
+	ResultTable five = load("dcccrit5");
+	EXPECT_EQ(five.Lookup(17)->effects[0][0].key, "DIE");
+	ResultTable fumbles = load("dccfumbl");
+	EXPECT_EQ(fumbles.Lookup(7)->effects[0][0].key, "DISARMSELF");
+	EXPECT_EQ(fumbles.Lookup(12)->effects[0][0].key, "HITALLY");
+	EXPECT_EQ(fumbles.Lookup(-2)->roll, 0);
+	EXPECT_EQ(fumbles.Lookup(20)->roll, 16); // 16+
+}
+
+TEST(DCC_Tables, MonsterCritMatrix)
+{
+	auto table = Open2DA("dccmcrit");
+	ASSERT_TRUE(table);
+	MonsterCritTable crits;
+	ASSERT_TRUE(crits.Load(*table));
+	auto text = [&crits](int hd, MonsterType type) {
+		MonsterCrit crit = crits.Lookup(hd, type);
+		if (crit.table == CritTableID::None) return std::string("-");
+		return std::string(CritTableName(crit.table)) + "/" + (crit.dice > 1 ? std::to_string(crit.dice) : "") + "d" + std::to_string(crit.die);
+	};
+	const char* humanoid[] = { "III/d4", "III/d6", "III/d8", "III/d8", "III/d10", "III/d10", "IV/d12", "IV/d12", "IV/d14", "IV/d14", "IV/d16",
+				   "V/d16", "V/d20", "V/d20", "V/2d10", "V/2d10", "V/2d12", "V/2d12", "V/2d14", "V/2d14", "V/3d10", "V/3d10" };
+	const char* other[] = { "M/d4", "M/d6", "M/d8", "M/d8", "M/d10", "M/d10", "M/d12", "M/d12", "M/d14", "M/d14", "M/d16",
+				"M/d16", "M/d20", "M/d20", "M/d20", "M/d20", "M/d24", "M/d24", "M/d24", "M/d30", "M/d30", "M/d30" };
+	for (int hd = 0; hd <= 21; ++hd) {
+		EXPECT_EQ(text(hd, MonsterType::Humanoid), humanoid[hd]) << "HD " << hd;
+		EXPECT_EQ(text(hd, MonsterType::Other), other[hd]) << "HD " << hd;
+	}
+	EXPECT_EQ(text(30, MonsterType::Other), "M/d30"); // 21+
+	EXPECT_EQ(text(21, MonsterType::Dragon), "DR/4d20");
+	EXPECT_EQ(text(11, MonsterType::Dragon), "DR/2d14");
+	EXPECT_EQ(text(0, MonsterType::Demon), "DN/d3");
+	EXPECT_EQ(text(3, MonsterType::Giant), "-");
+	EXPECT_EQ(text(12, MonsterType::Giant), "G/d6");
+	EXPECT_EQ(text(17, MonsterType::Undead), "U/d30");
+}
+
+TEST(DCC_Tables, ArmorFumbleDice)
+{
+	auto table = Open2DA("dccfumdi");
+	ASSERT_TRUE(table);
+	ArmorFumbleTable dice;
+	ASSERT_TRUE(dice.Load(*table));
+	// Table 3-3 by IE armor animation: robes none (d4), leather d8, chain d12, plate d16; shields d8
+	EXPECT_EQ(FumbleDie(dice.ArmorDie("", "1A"), 0), 4);
+	EXPECT_EQ(FumbleDie(dice.ArmorDie("", "2A"), 0), 8);
+	EXPECT_EQ(FumbleDie(dice.ArmorDie("", "3A"), 0), 12);
+	EXPECT_EQ(FumbleDie(dice.ArmorDie("", "4A"), 0), 16);
+	EXPECT_EQ(FumbleDie(0, dice.ShieldDie("")), 8);
+	EXPECT_EQ(FumbleDie(dice.ArmorDie("", "3A"), dice.ShieldDie("")), 12);
+}
+
+TEST(DCC_Tables, TwoWeaponTable43)
+{
+	auto table = Open2DA("dcctwowp");
+	ASSERT_TRUE(table);
+	TwoWeaponTable twoWeapons;
+	ASSERT_TRUE(twoWeapons.Load(*table));
+	// with a d20: <=8 d12/d10, 9-11 d14/d12, 12-15 d16/d14, 16-17 d16/d16, 18+ d20/d16
+	const int bands[][3] = { { 8, 12, 10 }, { 9, 14, 12 }, { 11, 14, 12 }, { 12, 16, 14 }, { 15, 16, 14 }, { 16, 16, 16 }, { 17, 16, 16 }, { 18, 20, 16 }, { 25, 20, 16 } };
+	for (const auto& band : bands) {
+		TwoWeaponDice dice = twoWeapons.Lookup(band[0], false);
+		EXPECT_EQ(AttackDie(20, dice.primarySteps), band[1]) << "Agi " << band[0];
+		EXPECT_EQ(AttackDie(20, dice.offSteps), band[2]) << "Agi " << band[0];
+	}
+	EXPECT_EQ(twoWeapons.Lookup(15, false).primaryCrit, CritRule::None);
+	EXPECT_EQ(twoWeapons.Lookup(16, false).primaryCrit, CritRule::MaxOnHit);
+	EXPECT_EQ(twoWeapons.Lookup(18, false).primaryCrit, CritRule::Normal);
+	EXPECT_EQ(twoWeapons.Lookup(10, true).primaryCrit, CritRule::MaxAutoHit); // halflings
 }
 
 }

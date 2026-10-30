@@ -179,7 +179,7 @@ bool ParseEffects(const std::string& text, std::vector<TableAlternatives>& effec
 {
 	effects.clear();
 	if (text.empty() || text == "*") return true;
-	for (const auto& termList : Split(text, '+')) {
+	for (const auto& termList : Split(text, ',')) {
 		TableAlternatives alternatives;
 		for (const auto& raw : Split(termList, '|')) {
 			if (raw.empty()) return false;
