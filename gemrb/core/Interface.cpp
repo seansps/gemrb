@@ -1065,6 +1065,10 @@ void Interface::Main()
 			GlobalColorCycle.AdvanceTime(time);
 			lastGameUpdate = time;
 		}
+		// co-op clients move actors between snapshots at the frame rate
+		if (netSession) {
+			netSession->Frame();
+		}
 
 		winmgr->DrawWindows();
 		if (config.DrawFPS) {
@@ -1898,6 +1902,11 @@ bool Interface::IsFreezed() const
 void Interface::GameLoop(void)
 {
 	TRACY(ZoneScoped);
+	// receive first, so orders (and pauses) forwarded by clients count in this very tick
+	if (netSession) {
+		netSession->PreTick();
+	}
+
 	update_scripts = false;
 	GameControl* gc = GetGameControl();
 	if (gc) {
@@ -1905,11 +1914,6 @@ void Interface::GameLoop(void)
 	}
 
 	bool do_update = GSUpdate(update_scripts);
-
-	// receive first, so orders forwarded by clients run in this very tick
-	if (netSession) {
-		netSession->PreTick();
-	}
 
 	if (game) {
 		if (gc && !game->selected.empty()) {
@@ -4086,6 +4090,10 @@ bool Interface::SetPause(PauseState pause, int flags) const
 		if (!(flags & PF_QUIET)) {
 			if (pause == PauseState::On) gc->SetDisplayText(strref, 0); // time 0 = removed instantly on unpause (for pst)
 			displaymsg->DisplayConstantString(strref, GUIColors::RED);
+		}
+		// in co-op everyone shares one pause
+		if (netSession) {
+			netSession->OnPause(pause == PauseState::On);
 		}
 		return true;
 	}

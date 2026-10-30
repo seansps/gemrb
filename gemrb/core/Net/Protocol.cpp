@@ -208,6 +208,7 @@ void NetActorTable::Write(NetWriter& w) const
 	for (size_t i = 0; i < count; ++i) {
 		const auto& entry = actors[i];
 		w.U32(entry.netID);
+		w.U8(uint8_t(entry.kind));
 		w.U8(entry.partySlot);
 		w.Str(entry.area);
 		w.Str(entry.scriptName);
@@ -224,6 +225,9 @@ bool NetActorTable::Read(NetReader& r)
 	actors.resize(count);
 	for (auto& entry : actors) {
 		entry.netID = r.U32();
+		uint8_t kind = r.U8();
+		if (kind >= uint8_t(NetObjectKind::count)) r.Fail();
+		entry.kind = NetObjectKind(kind);
 		entry.partySlot = r.U8();
 		entry.area = r.Str();
 		entry.scriptName = r.Str();
@@ -238,6 +242,29 @@ void NetCommand::Write(NetWriter& w) const
 	w.U32(actorID);
 	w.U8(flags);
 	w.Str(action);
+	w.I32(int0);
+	w.I32(int1);
+	w.I32(int2);
+	w.I32(x);
+	w.I32(y);
+	w.Str(string0);
+	w.Str(string1);
+	w.U32(actionFlags);
+	w.U8(objectMask);
+	for (size_t i = 0; i < NET_ACTION_OBJECTS; ++i) {
+		if (!(objectMask & (1 << i))) continue;
+		const NetActionObject& object = objects[i];
+		for (int32_t field : object.fields) {
+			w.I32(field);
+		}
+		for (int32_t filter : object.filters) {
+			w.I32(filter);
+		}
+		for (int32_t value : object.rect) {
+			w.I32(value);
+		}
+		w.Str(object.name);
+	}
 }
 
 bool NetCommand::Read(NetReader& r)
@@ -245,38 +272,99 @@ bool NetCommand::Read(NetReader& r)
 	actorID = r.U32();
 	flags = r.U8();
 	action = r.Str();
+	int0 = r.I32();
+	int1 = r.I32();
+	int2 = r.I32();
+	x = r.I32();
+	y = r.I32();
+	string0 = r.Str();
+	string1 = r.Str();
+	actionFlags = r.U32();
+	objectMask = r.U8();
+	if (objectMask >= (1 << NET_ACTION_OBJECTS)) r.Fail();
+	for (size_t i = 0; i < NET_ACTION_OBJECTS && r.Ok(); ++i) {
+		objects[i] = NetActionObject();
+		if (!(objectMask & (1 << i))) continue;
+		NetActionObject& object = objects[i];
+		for (int32_t& field : object.fields) {
+			field = r.I32();
+		}
+		for (int32_t& filter : object.filters) {
+			filter = r.I32();
+		}
+		for (int32_t& value : object.rect) {
+			value = r.I32();
+		}
+		object.name = r.Str();
+	}
 	return r.Ok();
 }
 
 void NetActorState::Write(NetWriter& w) const
 {
 	w.U32(tick);
+	w.U8(flags);
 	w.Str(area);
+	if (flags & CHECKSUM) {
+		w.U64(checksum);
+	}
 	size_t count = std::min(actors.size(), NET_MAX_ENTRIES);
 	w.U16(uint16_t(count));
 	for (size_t i = 0; i < count; ++i) {
 		const auto& entry = actors[i];
 		w.U32(entry.netID);
-		w.I32(entry.x);
-		w.I32(entry.y);
-		w.U8(entry.orientation);
-		w.U8(entry.stance);
+		w.U8(entry.fields);
+		if (entry.fields & NAF_POS) {
+			w.I32(entry.x);
+			w.I32(entry.y);
+		}
+		if (entry.fields & NAF_ORIENT) {
+			w.U8(entry.orientation);
+		}
+		if (entry.fields & NAF_STANCE) {
+			w.U8(entry.stance);
+		}
+		if (entry.fields & NAF_HP) {
+			w.I32(entry.hp);
+			w.I32(entry.maxHP);
+		}
+		if (entry.fields & NAF_STATE) {
+			w.U32(entry.state);
+		}
 	}
 }
 
 bool NetActorState::Read(NetReader& r)
 {
 	tick = r.U32();
+	flags = r.U8();
 	area = r.Str();
+	checksum = flags & CHECKSUM ? r.U64() : 0;
 	uint16_t count = r.U16();
 	if (!r.Ok() || count > NET_MAX_ENTRIES) return false;
 	actors.resize(count);
 	for (auto& entry : actors) {
+		entry = NetActorStateEntry();
 		entry.netID = r.U32();
-		entry.x = r.I32();
-		entry.y = r.I32();
-		entry.orientation = r.U8();
-		entry.stance = r.U8();
+		entry.fields = r.U8();
+		if (entry.fields & ~NAF_ALL) r.Fail();
+		if (entry.fields & NAF_POS) {
+			entry.x = r.I32();
+			entry.y = r.I32();
+		}
+		if (entry.fields & NAF_ORIENT) {
+			entry.orientation = r.U8();
+		}
+		if (entry.fields & NAF_STANCE) {
+			entry.stance = r.U8();
+		}
+		if (entry.fields & NAF_HP) {
+			entry.hp = r.I32();
+			entry.maxHP = r.I32();
+		}
+		if (entry.fields & NAF_STATE) {
+			entry.state = r.U32();
+		}
 	}
 	return r.Ok();
 }
@@ -317,12 +405,256 @@ void NetReady::Write(NetWriter& w) const
 {
 	w.U32(transferID);
 	w.U16(mapped);
+	size_t count = std::min(unmatched.size(), NET_MAX_ENTRIES);
+	w.U16(uint16_t(count));
+	for (size_t i = 0; i < count; ++i) {
+		w.U32(unmatched[i]);
+	}
 }
 
 bool NetReady::Read(NetReader& r)
 {
 	transferID = r.U32();
 	mapped = r.U16();
+	uint16_t count = r.U16();
+	if (!r.Ok() || count > NET_MAX_ENTRIES) return false;
+	unmatched.resize(count);
+	for (auto& id : unmatched) {
+		id = r.U32();
+	}
+	return r.Ok();
+}
+
+void NetResyncRequest::Write(NetWriter& w) const
+{
+	w.U8(reason);
+}
+
+bool NetResyncRequest::Read(NetReader& r)
+{
+	reason = r.U8();
+	return r.Ok();
+}
+
+void NetSpawn::Write(NetWriter& w) const
+{
+	w.U32(netID);
+	w.Str(area);
+	w.Str(scriptName);
+	w.I32(x);
+	w.I32(y);
+	w.U8(orientation);
+	w.Bytes(creature.data(), std::min(creature.size(), NET_MAX_CREATURE_SIZE));
+}
+
+bool NetSpawn::Read(NetReader& r)
+{
+	netID = r.U32();
+	area = r.Str();
+	scriptName = r.Str();
+	x = r.I32();
+	y = r.I32();
+	orientation = r.U8();
+	creature = r.Bytes(NET_MAX_CREATURE_SIZE);
+	return r.Ok();
+}
+
+void NetDespawn::Write(NetWriter& w) const
+{
+	w.U32(netID);
+}
+
+bool NetDespawn::Read(NetReader& r)
+{
+	netID = r.U32();
+	return r.Ok();
+}
+
+void NetProjectile::Write(NetWriter& w) const
+{
+	w.Str(name);
+	w.U16(index);
+	w.U8(flags);
+	w.U32(casterID);
+	w.U32(targetID);
+	w.I32(x);
+	w.I32(y);
+	w.I32(tx);
+	w.I32(ty);
+}
+
+bool NetProjectile::Read(NetReader& r)
+{
+	name = r.Str();
+	index = r.U16();
+	flags = r.U8();
+	casterID = r.U32();
+	targetID = r.U32();
+	x = r.I32();
+	y = r.I32();
+	tx = r.I32();
+	ty = r.I32();
+	return r.Ok();
+}
+
+void NetVfx::Write(NetWriter& w) const
+{
+	w.U32(key);
+	w.U8(flags);
+	if (flags & END) return;
+	w.U32(actorID);
+	w.Str(resource);
+	w.I32(x);
+	w.I32(y);
+	w.I32(xOffset);
+	w.I32(yOffset);
+	w.I32(zOffset);
+	w.U32(tint);
+	w.U32(transparency);
+	w.U32(sequenceFlags);
+	w.U32(duration);
+	w.U8(orientation);
+}
+
+bool NetVfx::Read(NetReader& r)
+{
+	key = r.U32();
+	flags = r.U8();
+	if (flags & END) return r.Ok();
+	actorID = r.U32();
+	resource = r.Str();
+	x = r.I32();
+	y = r.I32();
+	xOffset = r.I32();
+	yOffset = r.I32();
+	zOffset = r.I32();
+	tint = r.U32();
+	transparency = r.U32();
+	sequenceFlags = r.U32();
+	duration = r.U32();
+	orientation = r.U8();
+	return r.Ok();
+}
+
+void NetSound::Write(NetWriter& w) const
+{
+	w.Str(resource);
+	w.U8(flags);
+	if (flags & SPATIAL) {
+		w.I32(x);
+		w.I32(y);
+		w.I32(z);
+	}
+	w.U8(masterVolume);
+	w.U8(channelVolume);
+	w.U16(muteDistance);
+}
+
+bool NetSound::Read(NetReader& r)
+{
+	resource = r.Str();
+	flags = r.U8();
+	if (flags & SPATIAL) {
+		x = r.I32();
+		y = r.I32();
+		z = r.I32();
+	}
+	masterVolume = r.U8();
+	channelVolume = r.U8();
+	muteDistance = r.U16();
+	return r.Ok();
+}
+
+void NetText::Write(NetWriter& w) const
+{
+	w.U8(kind);
+	if (kind == OVERHEAD) {
+		w.U32(ownerID);
+		w.U32(color);
+	}
+	w.Str(text);
+}
+
+bool NetText::Read(NetReader& r)
+{
+	kind = r.U8();
+	if (kind > OVERHEAD) r.Fail();
+	if (kind == OVERHEAD) {
+		ownerID = r.U32();
+		color = r.U32();
+	}
+	text = r.Str();
+	return r.Ok();
+}
+
+void NetObjectState::Write(NetWriter& w) const
+{
+	w.U32(netID);
+	w.U8(uint8_t(kind));
+	w.U32(flags);
+	w.U8(trapDetected);
+	w.U8(trapped);
+	w.U16(items);
+}
+
+bool NetObjectState::Read(NetReader& r)
+{
+	netID = r.U32();
+	uint8_t raw = r.U8();
+	if (raw == uint8_t(NetObjectKind::Actor) || raw >= uint8_t(NetObjectKind::count)) r.Fail();
+	kind = NetObjectKind(raw);
+	flags = r.U32();
+	trapDetected = r.U8();
+	trapped = r.U8();
+	items = r.U16();
+	return r.Ok();
+}
+
+void NetPause::Write(NetWriter& w) const
+{
+	w.U8(on);
+	w.U8(slot);
+}
+
+bool NetPause::Read(NetReader& r)
+{
+	on = r.U8();
+	slot = r.U8();
+	return r.Ok();
+}
+
+void NetAreaChange::Write(NetWriter& w) const
+{
+	w.Str(area);
+}
+
+bool NetAreaChange::Read(NetReader& r)
+{
+	area = r.Str();
+	return r.Ok();
+}
+
+void NetOwnership::Write(NetWriter& w) const
+{
+	size_t count = std::min(entries.size(), NET_MAX_ENTRIES);
+	w.U16(uint16_t(count));
+	for (size_t i = 0; i < count; ++i) {
+		w.U32(entries[i].netID);
+		w.U8(entries[i].partySlot);
+		w.U8(entries[i].owner);
+	}
+}
+
+bool NetOwnership::Read(NetReader& r)
+{
+	uint16_t count = r.U16();
+	if (!r.Ok() || count > NET_MAX_ENTRIES) return false;
+	entries.resize(count);
+	for (auto& entry : entries) {
+		entry.netID = r.U32();
+		entry.partySlot = r.U8();
+		entry.owner = r.U8();
+	}
 	return r.Ok();
 }
 

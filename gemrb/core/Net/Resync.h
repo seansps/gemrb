@@ -93,8 +93,9 @@ public:
 /**
  * Matches the host's actor table to the actors the client got from loading the same save.
  * Both lists use NetActorTableEntry; for local entries netID is the local global ID.
- * Party members pair up by party slot. Everyone else pairs within the same area and
- * scripting name, closest positions first (at most maxDistance apart), so duplicates
+ * Party members pair up by party slot. Everyone else, and doors, containers and regions,
+ * pair within the same kind, area and scripting name, closest positions first (at most
+ * maxDistance apart), so duplicates
  * like a herd of rabbits still resolve, and load order doesn't matter.
  * Returns {network ID, local ID} pairs.
  */

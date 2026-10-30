@@ -9,6 +9,7 @@
 #include "Selectable.h"
 
 #include "GUI/GameControl.h"
+#include "Net/NetSession.h"
 
 namespace GemRB {
 
@@ -25,6 +26,12 @@ void OverHeadText::SetText(String newText, bool display, bool append, const Colo
 		messages[idx].pos.Invalidate();
 		Display(false, idx);
 		return;
+	}
+
+	// co-op: the host's overhead text shows on the clients too
+	NetSession* net = core->GetNetSession();
+	if (net && display) {
+		net->OnOverheadText(*owner, newText, newColor);
 	}
 
 	// always append for actors and areas ... unless it's the head hp ratio

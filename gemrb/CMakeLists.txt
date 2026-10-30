@@ -241,6 +241,7 @@ IF (BUILD_TESTING)
     tests/core/Test_Palette.cpp
     tests/core/Test_PathFinder.cpp
     tests/core/Net/Test_Protocol.cpp
+    tests/core/Net/Test_Replication.cpp
     tests/core/Net/Test_Resync.cpp
     tests/core/Test_SaveGame.cpp
     tests/core/Test_Spell.cpp

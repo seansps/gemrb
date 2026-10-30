@@ -34,6 +34,7 @@
 #include "GUI/WindowManager.h"
 #include "GameScript/GSUtils.h"
 #include "Logging/Logging.h"
+#include "Net/NetSession.h"
 #include "Scriptable/Container.h"
 #include "Scriptable/Door.h"
 #include "Scriptable/InfoPoint.h"
@@ -2492,6 +2493,10 @@ Projectile* Map::AddProjectile(std::unique_ptr<Projectile> pro, const Point& sou
 	pro->MoveTo(this, source);
 	pro->SetupZPos();
 	pro->SetTarget(actorID, fake);
+	// co-op: clients get a harmless copy to watch
+	if (NetSession* net = core->GetNetSession()) {
+		net->OnProjectile(*this, *pro, actorID, fake);
+	}
 	return AddProjectile(std::move(pro));
 }
 
@@ -2500,6 +2505,9 @@ Projectile* Map::AddProjectile(std::unique_ptr<Projectile> pro, const Point& sou
 	pro->MoveTo(this, source);
 	pro->SetupZPos();
 	pro->SetTarget(dest);
+	if (NetSession* net = core->GetNetSession()) {
+		net->OnProjectile(*this, *pro, 0, false);
+	}
 	return AddProjectile(std::move(pro));
 }
 
@@ -2534,6 +2542,10 @@ void Map::AddVVCell(std::unique_ptr<ScriptedAnimation> vvc)
 
 void Map::AddVVCell(std::unique_ptr<VEFObject> vvc)
 {
+	// co-op: effects on the ground show on the clients too
+	if (NetSession* net = core->GetNetSession()) {
+		net->OnAreaVfx(*this, *vvc);
+	}
 	scaIterator iter;
 
 	for (iter = vvcCells.begin(); iter != vvcCells.end() && (*iter)->Pos.y < vvc->Pos.y; iter++);

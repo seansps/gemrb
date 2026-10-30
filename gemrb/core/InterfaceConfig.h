@@ -120,10 +120,12 @@ struct CoreSettings {
 	// test hooks: send a chat line once joined; issue a party move ("x.y", or "x.y;x.y" for one per (re)sync)
 	// once in sync (host: once in game);
 	// set a global on the host and report it on both sides ("NAME=value", or just "NAME" to report);
-	// client: ask for a resync this many ticks after syncing; host: send saves in tiny chunks, one per tick
+	// client: ask for a resync this many ticks after syncing; host: send saves in tiny chunks, one per tick;
+	// scripted orders on either side ("tick:order;tick:order", see NetSession's RunTestOrders)
 	std::string NetTestChat;
 	std::string NetTestMove;
 	std::string NetTestVar;
+	std::string NetTestOrders;
 	int NetTestResync = 0;
 	int NetTestSlowTransfer = 0;
 

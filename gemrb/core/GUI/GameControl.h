@@ -114,9 +114,6 @@ private:
 	void ApplyKeyScrolling();
 	void Scroll(const Point& amt);
 
-	void HandleContainer(Container* container, Actor* actor);
-	void HandleDoor(Door* door, Actor* actor);
-
 	void UpdateCursor();
 	bool IsDisabledCursor() const override;
 
@@ -146,6 +143,9 @@ private:
 public:
 	/** orders the selected party to walk to p, as a ground click does; public for the co-op test hook */
 	void CommandSelectedMovement(const Point& p, bool formation = true, bool append = false, bool tryToRun = false) const;
+	/** what a click on a container or door does with the actor; public for the co-op test hooks */
+	void HandleContainer(Container* container, Actor* actor);
+	void HandleDoor(Door* door, Actor* actor);
 	explicit GameControl(const Region& frame);
 	~GameControl(void) override;
 

@@ -333,6 +333,7 @@ CoreSettings LoadFromDictionary(InterfaceConfig cfg)
 	CONFIG_STRING("NetTestChat", config.NetTestChat);
 	CONFIG_STRING("NetTestMove", config.NetTestMove);
 	CONFIG_STRING("NetTestVar", config.NetTestVar);
+	CONFIG_STRING("NetTestOrders", config.NetTestOrders);
 	CONFIG_INT("NetTestResync", config.NetTestResync);
 	CONFIG_INT("NetTestSlowTransfer", config.NetTestSlowTransfer);
 

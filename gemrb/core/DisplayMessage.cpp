@@ -14,6 +14,7 @@
 #include "GUI/Label.h"
 #include "GUI/TextArea.h"
 #include "Logging/Logging.h"
+#include "Net/NetSession.h"
 #include "Scriptable/Actor.h"
 
 namespace GemRB {
@@ -138,6 +139,10 @@ DisplayMessage::DisplayMessage()
 
 void DisplayMessage::DisplayMarkupString(String Text) const
 {
+	// co-op: what the host's simulation reports reaches the clients' message windows too
+	if (NetSession* net = core->GetNetSession()) {
+		net->OnFeedback(Text);
+	}
 	TextArea* ta = core->GetMessageTextArea();
 	if (ta)
 		ta->AppendText(std::move(Text));
