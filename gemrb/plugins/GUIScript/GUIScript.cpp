@@ -13904,6 +13904,10 @@ bool GUIScript::Init(void)
 		path2 = PathJoin(path, "iwd");
 	} else if (core->config.GameType == "bg2ee" || core->config.GameType == "bgee") {
 		path2 = PathJoin(path, "bg2");
+	} else if (core->config.GameType == "ethren") {
+		// ethren starts from the demo's scripts: its own dir first, then the demo's
+		PyList_Insert(sysPath, 0, PyString_FromStringObj(PathJoin(path, "demo")));
+		path2 = PathJoin(path, "ethren");
 	} else {
 		path2 = PathJoin(path, core->config.GameType);
 	}
