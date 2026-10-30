@@ -7,6 +7,8 @@
 #include "Interface.h"
 #include "Game.h"
 
+#include "Net/NetSession.h"
+
 namespace GemRB {
 
 PlaybackHandle::PlaybackHandle(Holder<SoundSourceHandle> source, time_t length, int32_t height)
@@ -95,6 +97,11 @@ Holder<PlaybackHandle> AudioPlayback::Play(StringView resource, const AudioPlayb
 {
 	Housekeeping();
 
+	// co-op: sounds of the host's simulation are heard on the clients too
+	if (NetSession* net = core->GetNetSession()) {
+		net->OnSound(resource, config, false);
+	}
+
 	if (resource.empty()) {
 		return {};
 	}
@@ -154,6 +161,10 @@ Holder<PlaybackHandle> AudioPlayback::PlayDefaultSound(size_t index, const Audio
 time_t AudioPlayback::PlaySpeech(StringView resource, const AudioPlaybackConfig& config, bool interrupt)
 {
 	Housekeeping();
+
+	if (NetSession* net = core->GetNetSession()) {
+		net->OnSound(resource, config, true);
+	}
 
 	if (!speech) {
 		speech = core->GetAudioDrv()->CreatePlaybackSource(config, true);

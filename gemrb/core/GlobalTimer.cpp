@@ -11,6 +11,7 @@
 
 #include "GUI/GameControl.h"
 #include "GUI/WindowManager.h"
+#include "Net/NetSession.h"
 
 namespace GemRB {
 
@@ -166,8 +167,13 @@ bool GlobalTimer::Update()
 	//do spell effects expire in dialogs?
 	//if yes, then we should remove this condition
 	if (!gc->InDialog() || !(gc->GetDialogueFlags() & DF_FREEZE_SCRIPTS)) {
+		// co-op clients only show the host's game: effects and party chatter are its business
+		const NetSession* net = core->GetNetSession();
+		bool replica = net && net->IsReplica();
 		map->UpdateFog();
-		map->UpdateEffects();
+		if (!replica) {
+			map->UpdateEffects();
+		}
 		map->UpdateProjectiles();
 
 		if (thisTime) {
@@ -175,10 +181,12 @@ bool GlobalTimer::Update()
 			game->AdvanceTime(1);
 			// drop an area comment, party oneliner or initiate party banter (with Interact)
 			// party comments have a priority, but they happen half of the time, at most
-			if (!game->CheckPartyBanter()) {
-				game->CheckAreaComment();
+			if (!replica) {
+				if (!game->CheckPartyBanter()) {
+					game->CheckAreaComment();
+				}
+				game->CheckBored();
 			}
-			game->CheckBored();
 		}
 	}
 	//this measures time spent in the game (including pauses)
