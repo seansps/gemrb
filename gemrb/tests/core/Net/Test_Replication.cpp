@@ -443,4 +443,48 @@ TEST(NetReplicationTest, MessageHashes)
 	EXPECT_NE(ready, NetMessageHash(book));
 }
 
+TEST(NetReplicationTest, AreaChangePayload)
+{
+	NetAreaChangeInfo info;
+	// only moving, everyone in sync: the area is enough
+	EXPECT_EQ(NetAreaChangeKind(info), NetAreaFollow::Area);
+	NetAreaChangeInfo other = info;
+	other.lightEnabled = false;
+	EXPECT_EQ(NetAreaChangeKind(other), NetAreaFollow::Save);
+	other = info;
+	other.partyChanged = true;
+	EXPECT_EQ(NetAreaChangeKind(other), NetAreaFollow::Save);
+	other = info;
+	other.oneArea = false;
+	EXPECT_EQ(NetAreaChangeKind(other), NetAreaFollow::Save);
+	other = info;
+	other.noSave = true;
+	EXPECT_EQ(NetAreaChangeKind(other), NetAreaFollow::Save);
+	other = info;
+	other.peerLive = false;
+	EXPECT_EQ(NetAreaChangeKind(other), NetAreaFollow::Save);
+
+	// the table: everything in the new area and the party, nothing from elsewhere
+	std::vector<NetActorTableEntry> all(5);
+	all[0].netID = 1;
+	all[0].area = "MPT02";
+	all[0].partySlot = 1;
+	all[1].netID = 2;
+	all[1].area = "MPT01";
+	all[2].netID = 3;
+	all[2].area = "MPT02";
+	all[2].kind = NetObjectKind::Door;
+	all[3].netID = 4;
+	all[3].area = "MPT01";
+	all[3].partySlot = 2; // left behind, still the party's
+	all[4].netID = 5;
+	all[4].area = "MPT02";
+	auto table = NetAreaTable(all, "MPT02");
+	ASSERT_EQ(table.size(), 4U);
+	EXPECT_EQ(table[0].netID, 1U);
+	EXPECT_EQ(table[1].netID, 3U);
+	EXPECT_EQ(table[2].netID, 4U);
+	EXPECT_EQ(table[3].netID, 5U);
+}
+
 }

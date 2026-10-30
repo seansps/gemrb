@@ -1000,6 +1000,11 @@ struct NetSession::Impl {
 						info = FindPeer(peer);
 						break;
 					}
+					// nobody loses characters to a newcomer: the round robin only hands out the host's
+					for (uint8_t partySlot = 1; partySlot <= NET_PARTY_SLOTS; ++partySlot) {
+						uint8_t owner = NetSlotOwner(partySlot, assigned, roster);
+						if (owner != NET_HOST_SLOT) assigned[partySlot] = owner;
+					}
 					bool rejoined = false;
 					uint8_t slot = roster.Join(hello.name, hello.token, NewToken(), rejoined);
 					if (!slot) {
@@ -2454,12 +2459,18 @@ struct NetSession::Impl {
 		partyMembers = std::move(members);
 
 		if (areaSettle && --areaSettle == 0) {
-			bool light = lightAreas && !partyChanged && oneArea && !(map->AreaFlags & AF_NOSAVE);
+			NetAreaChangeInfo change;
+			change.lightEnabled = lightAreas;
+			change.partyChanged = partyChanged;
+			change.oneArea = oneArea;
+			change.noSave = map->AreaFlags & AF_NOSAVE;
+			bool light = NetAreaChangeKind(change) == NetAreaFollow::Area;
 			size_t count = 0;
 			for (auto& info : peers) {
 				if (!info.welcomed) continue;
 				// players in sync get the area, the others (joining, loading) a save anyway
-				if (light && info.live && !info.transfer && !info.wantsSave) {
+				change.peerLive = info.live && !info.transfer && !info.wantsSave;
+				if (NetAreaChangeKind(change) == NetAreaFollow::Area) {
 					info.wantsArea = true;
 				} else {
 					info.wantsSave = true;
@@ -2500,9 +2511,7 @@ struct NetSession::Impl {
 			if (!pc) continue;
 			out.party.push_back(NetAreaPartyEntry { pc->GetGlobalID(), uint8_t(slot), pc->Pos.x, pc->Pos.y, uint8_t(pc->GetOrientation()) });
 		}
-		for (auto& entry : ListActors()) {
-			if (entry.area == out.area || entry.partySlot) table.actors.push_back(std::move(entry));
-		}
+		table.actors = NetAreaTable(ListActors(), out.area);
 		Log(MESSAGE, "Net", "Area data of {} written in {} ms: ARE {} bytes, {} party members, {} actors and objects.", out.area, GetMilliseconds() - start, size, out.party.size(), table.actors.size());
 		return true;
 	}
@@ -3088,7 +3097,11 @@ struct NetSession::Impl {
 		ResRef area(msg.area.c_str());
 		// our copy is stale; it can't be the one we look at, all of the party left that
 		int idx = game->FindMap(area);
-		if (idx >= 0 && (game->GetMap(unsigned(idx)) == game->GetCurrentArea() || game->DelMap(unsigned(idx), true) != 0)) {
+		if (idx >= 0 && game->GetMap(unsigned(idx)) != game->GetCurrentArea()) {
+			// its return value doesn't say whether it did, so look
+			game->DelMap(unsigned(idx), true);
+		}
+		if (game->FindMap(area) >= 0) {
 			AreaDataFailed(fmt::format("our copy of {} can't be unloaded", area));
 			return;
 		}
@@ -3375,6 +3388,8 @@ struct NetSession::Impl {
 
 	void CompareChecksum(const Map* map, const NetActorState& snapshot)
 	{
+		// the party moved, our copy of the area it is in may be stale until the new one is in
+		if (areaChangeAt) return;
 		size_t count = 0;
 		uint64_t mine = Checksum(map, count);
 		if (mine == snapshot.checksum) {
@@ -4504,7 +4519,7 @@ except Exception as e:
 	{
 		const Game* game = core->GetGame();
 		const char* side = mode == Mode::Host ? "host" : "client";
-		Log(MESSAGE, "Net", "Report ({}): party gold {}, reputation {}.", side, game->PartyGold, game->Reputation);
+		Log(MESSAGE, "Net", "Report ({}): party gold {}, reputation {}, formation {}, {} journal entries, {} map notes in {}, game time {}.", side, game->PartyGold, game->Reputation, game->WhichFormation, game->GetJournalCount(), game->GetCurrentArea()->GetMapNoteCount(), game->GetCurrentArea()->GetScriptRef(), game->GameTime);
 		for (int pcSlot = 1; pcSlot <= game->GetPartySize(false); ++pcSlot) {
 			const Actor* pc = game->FindPC(pcSlot);
 			if (!pc) continue;
@@ -4514,7 +4529,7 @@ except Exception as e:
 				items += fmt::format(" {}:{}x{}", item.slot, item.resref, item.usages[0]);
 			}
 			NetSpellbook book = SpellbookMessage(pc);
-			Log(MESSAGE, "Net", "Report ({}): PC {} {} XP {} hp {} equipped {}, {} spells ready, items:{}", side, pcSlot, fmt::WideToChar { pc->GetShortName() }, pc->GetStat(IE_XP), pc->GetStat(IE_HITPOINTS), inv.equipped, CountReady(book), items);
+			Log(MESSAGE, "Net", "Report ({}): PC {} {} (net id {}) XP {} hp {} modal {} equipped {}, {} spells ready, items:{}", side, pcSlot, fmt::WideToChar { pc->GetShortName() }, mode == Mode::Host ? pc->GetGlobalID() : ids.Net(pc->GetGlobalID()), pc->GetStat(IE_XP), pc->GetStat(IE_HITPOINTS), int(pc->Modal.State), inv.equipped, CountReady(book), items);
 		}
 		for (const auto& holder : game->GetCurrentArea()->GetTileMap()->GetContainers()) {
 			const Container* container = holder.get();

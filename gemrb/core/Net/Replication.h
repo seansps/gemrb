@@ -194,6 +194,26 @@ struct NetGuiOpInfo {
 
 GEM_EXPORT NetGuiOpInfo NetGuiInfo(NetGuiOp op);
 
+// how a player follows the party to another area: the area alone (lighter) when it is in
+// sync and only the area changed, else a whole save (party changes, a split party,
+// areas that aren't saved, players still loading)
+enum class NetAreaFollow : uint8_t {
+	Area,
+	Save
+};
+
+struct NetAreaChangeInfo {
+	bool lightEnabled = true; // NetLightAreas
+	bool partyChanged = false; // members joined, left or changed places
+	bool oneArea = true; // the whole party is in the new area
+	bool noSave = false; // the area is AF_NOSAVE, the client would load a fresh one
+	bool peerLive = true; // the player is in sync, not loading or about to
+};
+
+GEM_EXPORT NetAreaFollow NetAreaChangeKind(const NetAreaChangeInfo& info);
+// the actor table that goes with the area: its actors and objects plus the party
+GEM_EXPORT std::vector<NetActorTableEntry> NetAreaTable(const std::vector<NetActorTableEntry>& all, const std::string& area);
+
 // the variables that are new or changed since before
 GEM_EXPORT std::vector<NetVariable> NetVariablesDiff(const std::map<std::string, int32_t>& before, const std::map<std::string, int32_t>& now);
 

@@ -328,6 +328,21 @@ uint8_t NetSlotController(uint8_t partySlot, const std::map<uint8_t, uint8_t>& a
 	return roster.Connected(owner) ? owner : NET_HOST_SLOT;
 }
 
+NetAreaFollow NetAreaChangeKind(const NetAreaChangeInfo& info)
+{
+	if (!info.lightEnabled || info.partyChanged || !info.oneArea || info.noSave || !info.peerLive) return NetAreaFollow::Save;
+	return NetAreaFollow::Area;
+}
+
+std::vector<NetActorTableEntry> NetAreaTable(const std::vector<NetActorTableEntry>& all, const std::string& area)
+{
+	std::vector<NetActorTableEntry> table;
+	for (const auto& entry : all) {
+		if (entry.area == area || entry.partySlot) table.push_back(entry);
+	}
+	return table;
+}
+
 std::vector<NetVariable> NetVariablesDiff(const std::map<std::string, int32_t>& before, const std::map<std::string, int32_t>& now)
 {
 	std::vector<NetVariable> changed;
