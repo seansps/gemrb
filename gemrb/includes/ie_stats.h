@@ -594,7 +594,25 @@ namespace GemRB {
 #define IE_DCC_LUCKDIE   282 // thieves' luck die sides
 #define IE_DCC_SPEED     283 // in feet
 #define IE_DCC_HITDIE    284 // the hit die of the next level
-#define IE_DCC_LAST      284
+// combat (M2.3): set by DCC:Combat effects while they last (modified only)
+#define IE_DCC_BLEED      285 // bleeding out: rounds left (DCC::STATE_DYING)
+#define IE_DCC_DOOMED     286 // dies when a crit's countdown ends, unless healed
+#define IE_DCC_NOATTACK   287 // can't attack
+#define IE_DCC_PRONE      288 // prone: attackers +2 melee, -2 missile; can't attack
+#define IE_DCC_ATKMOD     289 // flat attack roll modifier
+#define IE_DCC_INITBOTTOM 290 // swings last in the round
+#define IE_DCC_ROLLMOD    291 // modifier to every d20 roll (the hour after recovering the body)
+// monsters (from the CRE's DCC block; base): attack bonus, HD, crit type, threat, action die, initiative
+#define IE_DCC_MATTACK    292
+#define IE_DCC_HD         293
+#define IE_DCC_MTYPE      294 // DCC::MonsterType: the Table 9-10 column
+#define IE_DCC_MTHREAT    295 // 0: 20
+#define IE_DCC_MACTDIE    296 // 0: d20
+#define IE_DCC_MINIT      297
+// dying (kept in the CRE): the game time of death and whether the body was rolled over
+#define IE_DCC_DIEDAT     298 // game time in ticks, 0: not dead (or not a DCC death)
+#define IE_DCC_BODY       299 // 1: rolled over already
+#define IE_DCC_LAST       299
 
 }
 

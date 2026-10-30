@@ -237,6 +237,8 @@ IF (BUILD_TESTING)
     tests/core/DCC/Test_Augur.cpp
     tests/core/DCC/Test_Character.cpp
     tests/core/DCC/Test_Classes.cpp
+    tests/core/DCC/Test_Combat.cpp
+    tests/core/DCC/Test_CombatTables.cpp
     tests/core/DCC/Test_DiceChain.cpp
     tests/core/Test_BucketPriorityQueue.cpp
     tests/core/Test_Map.cpp

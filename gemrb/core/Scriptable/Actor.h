@@ -24,6 +24,7 @@
 #include "Audio/Playback.h"
 #include "DCC/Augur.h"
 #include "DCC/Character.h"
+#include "DCC/Combat.h"
 #include "Scriptable/Movable.h"
 #include "Scriptable/PCStatStruct.h"
 
@@ -584,6 +585,25 @@ private:
 	bool GetSavingThrowDCC(ieDword type, int modifier, const Effect* fx);
 	int dccDerivedClass = -1; // class and level CreateDerivedStatsDCC last ran for
 	int dccDerivedLevel = -1;
+	/* DCC combat state (ActorDCCCombat.cpp), not saved: forced dice for tests, the encounter's
+	 * initiative, this round's deed die and the last attack action */
+	std::vector<int> dccForcedDice;
+	DCC::InitiativeEntry dccInitiative;
+	ieDword dccInitiativeTime = 0; // game time of the last round this actor attacked in
+	int dccDeedRoll = 0;
+	int dccAttackSerial = 0;
+	std::vector<DCC::AttackRecord> dccLastAttack;
+	/* DCC: the start of an IE attack round (InitRound): initiative for a new fight, the deed die */
+	void InitRoundDCC(ieDword gameTime);
+	/* DCC: ticks into the round of the first swing, from the initiative */
+	int DCCInitiativeDelay() const;
+	/* DCC: attacks per round (doubled, like IE_NUMBEROFATTACKS) */
+	int DCCNumberOfAttacks() const;
+	/* DCC: Die() records the time of death for recovering the body */
+	void DCCOnDeath();
+	/* DCC: one roll of an attack action, see ActorDCCCombat.cpp */
+	struct DCCSwing;
+	void DCCResolveSwing(DCCSwing& swing, Actor* target, int depth);
 	/* Returns true if the dual class is backwards */
 	bool IsDualSwap() const;
 	int GetNonProficiencyPenalty(int stars) const;
@@ -681,6 +701,32 @@ public:
 	int DCCLevelUp(int classID, const DCC::Roller* roller = nullptr);
 	/** a night's rest heals ability loss (Luck excepted): 1 point, 2 with bed rest */
 	void DCCRestHeal(bool bedRest);
+
+	// DCC combat (M2.3, ActorDCCCombat.cpp)
+	/** characters: their level; monsters: their HD (0 for less than 1) */
+	int GetDCCHitDice() const;
+	/** a die for DCC combat: the next forced die if any (tests, see DCCForceDice), else random */
+	int DCCDie(int sides);
+	/** queues dice results the next DCCDie calls use, in order (clamped to each die); empty clears */
+	void DCCForceDice(std::vector<int> dice);
+	size_t DCCForcedDiceLeft() const { return dccForcedDice.size(); }
+	/** one attack action against target: rolls, damage, crits and fumbles; both hands when fighting
+	 * with two weapons. viaProjectile: the damage rides the weapon's projectile like a stock
+	 * attack (PerformAttack), else it's applied at once (scripted and test attacks) */
+	void DCCAttack(Actor* target, bool viaProjectile);
+	/** the rolls of the last attack action, one per hand */
+	const std::vector<DCC::AttackRecord>& GetDCCLastAttack() const { return dccLastAttack; }
+	/** at 0 hp: starts (or keeps) bleeding out; false if the actor dies instead */
+	bool DCCStartBleeding();
+	/** hp went up from old to now: a heal stops bleeding out (and a crit's countdown) */
+	void DCCHealed(int oldHP, int newHP);
+	/** a bleed-out or crit countdown ran out */
+	void DCCCountdownOver(DCC::CombatEffect kind);
+	/** an ally rolls the body over: a Luck check brings a level 1+ character back at 1 hp;
+	 * returns -1 if not allowed, else 1 on a success and 0 on a failure */
+	int DCCRecoverBody(const Actor* ally, int natural = 0);
+	/** the DCC combat log lines so far (the last few hundred); clear empties it */
+	static std::vector<String> DCCCombatLog(bool clear = false);
 	/* returns the weapon proficiency stat of the actor */
 	int GetProficiency(ieByte proftype) const;
 	/** Returns true if the actor is targetable */

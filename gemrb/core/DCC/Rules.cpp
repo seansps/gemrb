@@ -102,6 +102,7 @@ bool RulesData::Load()
 		table = gamedata->LoadTable(ResRef(entry.second));
 		if (!table || !thiefSkills.Load(entry.first, *table)) fail(entry.second);
 	}
+	if (!combat.Load()) ok = false;
 	return ok;
 }
 

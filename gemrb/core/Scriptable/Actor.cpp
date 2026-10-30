@@ -1158,8 +1158,16 @@ static void pcf_hitpoint(Actor* actor, ieDword oldValue, ieDword hp)
 		hp = minhp;
 	}
 	if ((signed) hp <= 0) {
-		actor->Die(nullptr);
+		// DCC: characters of level 1+ bleed out at 0 hp instead (combat.md)
+		if (core->HasFeature(GFFlags::RULES_DCC) && actor->DCCStartBleeding()) {
+			hp = 0;
+		} else {
+			actor->Die(nullptr);
+		}
 	} else {
+		if (core->HasFeature(GFFlags::RULES_DCC)) {
+			actor->DCCHealed(static_cast<int>(oldValue), static_cast<int>(hp));
+		}
 		// in testing it popped up somewhere between 39% and 25.3% (single run) -> 1/3
 		if (signed(3 * oldValue) > maxhp && signed(3 * hp) < maxhp) {
 			actor->VerbalConstant(Verbal::Hurt, gamedata->GetVBData("SPECIAL_COUNT"), DS_QUEUE);
@@ -4143,7 +4151,7 @@ void Actor::GetHit(int damage, bool killingBlow)
 	}
 
 	if (Modified[IE_STATE_ID] & STATE_SLEEP) {
-		if (Modified[IE_EXTSTATE_ID] & (EXTSTATE_NO_WAKEUP | EXTSTATE_DOESNT_AWAKEN_ON_DAMAGE) || HasSpellState(SS_NOAWAKE) || (GetDCCStates() & DCC::STATE_UNCONSCIOUS)) {
+		if (Modified[IE_EXTSTATE_ID] & (EXTSTATE_NO_WAKEUP | EXTSTATE_DOESNT_AWAKEN_ON_DAMAGE) || HasSpellState(SS_NOAWAKE) || (GetDCCStates() & (DCC::STATE_UNCONSCIOUS | DCC::STATE_DYING))) {
 			return;
 		}
 		auto fx = EffectQueue::CreateEffect(fx_cure_sleep_ref, 0, 0, FX_DURATION_INSTANT_PERMANENT);
@@ -5637,6 +5645,9 @@ void Actor::Die(Scriptable* killer, bool grantXP)
 	if (InternalFlags & IF_REALLYDIED) {
 		return; //can die only once
 	}
+	if (core->HasFeature(GFFlags::RULES_DCC)) {
+		DCCOnDeath();
+	}
 
 	//Can't simply set Selected to false, game has its own little list
 	Game* game = core->GetGame();
@@ -6315,6 +6326,8 @@ bool Actor::ValidTarget(int ga_flags, const Scriptable* checker) const
 	if (ga_flags & GA_NO_DEAD) {
 		if (InternalFlags & IF_REALLYDIED) return false;
 		if (Modified[IE_STATE_ID] & STATE_DEAD) return false;
+		// DCC: the fallen bleeding out are out of the fight
+		if (Modified[IE_DCC_STATE] & DCC::STATE_DYING) return false;
 	}
 	if (ga_flags & GA_SELECT) {
 		if (UnselectableTimer) return false;
@@ -6728,6 +6741,9 @@ ieDword Actor::GetNumberOfAttacks()
 		if (fx) bonus -= 2;
 		// iwd2 uses only regular haste
 		if (GetStat(IE_STATE_ID) & STATE_HASTED) bonus += 2;
+	} else if (core->HasFeature(GFFlags::RULES_DCC)) {
+		// DCC: one attack per action die (two weapons resolve both hands in one attack)
+		base = DCCNumberOfAttacks();
 	} else {
 		base = GetStat(IE_NUMBEROFATTACKS);
 		if (inventory.FistsEquipped()) {
@@ -6869,6 +6885,11 @@ void Actor::InitRound(ieDword gameTime)
 	// this might not be the right place, but let's give it a go
 	if (attacksperround && InParty) {
 		core->Autopause(AUTOPAUSE::ENDROUND, this);
+	}
+
+	// DCC: initiative for a new fight, and the round's deed die
+	if (core->HasFeature(GFFlags::RULES_DCC)) {
+		InitRoundDCC(gameTime);
 	}
 }
 
@@ -7476,7 +7497,13 @@ void Actor::PerformAttack(ieDword gameTime)
 	}
 
 	//if this is the first call of the round, we need to update next attack
-	if (Timers.nextAttack == 0) {
+	if (Timers.nextAttack == 0 && core->HasFeature(GFFlags::RULES_DCC)) {
+		// DCC: the initiative order spreads the first swings over the round, highest first
+		Timers.nextAttack = gameTime + DCCInitiativeDelay();
+		if (Timers.nextAttack > gameTime) {
+			return;
+		}
+	} else if (Timers.nextAttack == 0) {
 		// initiative calculation (lucky 1d6-1 + item speed + speed stat + constant):
 		// speed contains the bonus from the physical speed stat and the proficiency level
 		int spdfactor = hittingheader->Speed + speed;
@@ -7523,6 +7550,14 @@ void Actor::PerformAttack(ieDword gameTime)
 		ResetState();
 		buffer.append("[Missed (puppet)]");
 		Log(COMBAT, "Attack", "{}", buffer);
+		return;
+	}
+
+	// DCC: the attack roll, damage, crits and fumbles (ActorDCCCombat.cpp)
+	if (core->HasFeature(GFFlags::RULES_DCC)) {
+		Log(COMBAT, "Attack", "{}", buffer);
+		DCCAttack(target, true);
+		ResetState();
 		return;
 	}
 

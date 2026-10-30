@@ -401,6 +401,7 @@ int fx_uncanny_dodge(Scriptable* Owner, Actor* target, Effect* fx); // 1cb - 459
 
 int fx_unknown(Scriptable* Owner, Actor* target, Effect* fx); //???
 int fx_dcc_ability_loss(Scriptable* Owner, Actor* target, Effect* fx); // DCC (ethren)
+int fx_dcc_combat(Scriptable* Owner, Actor* target, Effect* fx);
 
 static EffectDesc effectnames[] = {
 	EffectDesc("*Crash*", fx_crash, EFFECT_NO_ACTOR, -1),
@@ -508,6 +509,7 @@ static EffectDesc effectnames[] = {
 	EffectDesc("CurrentHPModifier", fx_current_hp_modifier, EFFECT_DICED, -1),
 	EffectDesc("Damage", fx_damage, EFFECT_DICED, -1),
 	EffectDesc("DCC:AbilityLoss", fx_dcc_ability_loss, 0, -1),
+	EffectDesc("DCC:Combat", fx_dcc_combat, 0, -1),
 	EffectDesc("DamageAnimation", fx_damage_animation, 0, -1),
 	EffectDesc("DamageBonusModifier", fx_damage_bonus_modifier, 0, -1),
 	EffectDesc("DamageBonusModifier2", fx_damage_bonus_modifier2, 0, -1), // 49 (iwd, ee)
@@ -8698,6 +8700,64 @@ int fx_dcc_ability_loss(Scriptable* Owner, Actor* target, Effect* fx)
 		target->Die(Owner);
 	}
 	return permanent ? FX_NOT_APPLIED : FX_APPLIED;
+}
+
+// DCC:Combat (ethren, DCCRules; unhardcoded/ethren/effects.ids 0x1c1)
+// the combat states of crits, fumbles and dying: docs/architecture/rules-dcc.md, "Combat (M2.3)"
+// Parameter2: the kind (DCC::CombatEffect), Parameter1: its value
+// Bleed and Doomed kill the target when they run out; a heal removes them (Actor::DCCHealed)
+int fx_dcc_combat(Scriptable* /*Owner*/, Actor* target, Effect* fx)
+{
+	if (!core->HasFeature(GFFlags::RULES_DCC)) return FX_NOT_APPLIED;
+	if (STATE_GET(STATE_DEAD)) return FX_NOT_APPLIED;
+	bool over = fx->TimingMode == FX_DURATION_JUST_EXPIRED;
+	int value = static_cast<ieDwordSigned>(fx->Parameter1);
+	using DCC::CombatEffect;
+	switch (static_cast<CombatEffect>(fx->Parameter2)) {
+		case CombatEffect::Bleed:
+		case CombatEffect::Doomed:
+			if (over) {
+				target->DCCCountdownOver(static_cast<CombatEffect>(fx->Parameter2));
+				return FX_NOT_APPLIED;
+			}
+			if (fx->Parameter2 == ieDword(CombatEffect::Bleed)) {
+				// rounds left, for the record screen and the state
+				ieDword now = core->GetGame()->GameTime;
+				ieDword round = core->Time.round_size;
+				STAT_SET(IE_DCC_BLEED, fx->Duration > now ? (fx->Duration - now + round - 1) / round : 1);
+			} else {
+				STAT_SET(IE_DCC_DOOMED, 1);
+			}
+			break;
+		case CombatEffect::NoAttack:
+			STAT_SET(IE_DCC_NOATTACK, 1);
+			break;
+		case CombatEffect::Prone:
+			if (fx->FirstApply) target->SetStance(IE_ANI_SLEEP);
+			if (over) {
+				target->SetStance(IE_ANI_GET_UP);
+				return FX_NOT_APPLIED;
+			}
+			STAT_SET(IE_DCC_PRONE, 1);
+			break;
+		case CombatEffect::AttackMod:
+		case CombatEffect::NextAttack:
+			STAT_ADD(IE_DCC_ATKMOD, value);
+			break;
+		case CombatEffect::ACMod:
+		case CombatEffect::NextDefense:
+			STAT_ADD(IE_DCC_AC, value);
+			break;
+		case CombatEffect::InitBottom:
+			STAT_SET(IE_DCC_INITBOTTOM, 1);
+			break;
+		case CombatEffect::RollMod:
+			STAT_ADD(IE_DCC_ROLLMOD, value);
+			break;
+		default:
+			return FX_NOT_APPLIED;
+	}
+	return FX_APPLIED;
 }
 
 // unknown

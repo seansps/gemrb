@@ -15,6 +15,7 @@
 #include "Map.h"
 #include "RNG.h"
 
+#include "DCC/Combat.h"
 #include "DCC/Rules.h"
 #include "DCC/Stats.h"
 #include "Scriptable/Actor.h"
@@ -95,7 +96,7 @@ void Actor::CreateDerivedStatsDCC()
 	const LevelRow* row = rules->classes.Row(BaseStats[IE_CLASS], BaseStats[IE_LEVEL]);
 	if (!row) {
 		// monsters keep their own saves, stored as DCC bonuses in the IE save fields
-		// (Fort death, Ref breath, Will spell); everything else is M2.3 data
+		// (Fort death, Ref breath, Will spell)
 		for (int i = 0; i < SAVE_COUNT; ++i) {
 			Save save = static_cast<Save>(i);
 			BaseStats[SaveStat(save)] = BaseStats[SaveBonusStat(save)];
@@ -104,6 +105,19 @@ void Actor::CreateDerivedStatsDCC()
 					   IE_DCC_CRITTABLE, IE_DCC_THREAT, IE_DCC_ACTDIE1, IE_DCC_ACTDIE2, IE_DCC_ACTDIE3, IE_DCC_LUCKDIE, IE_DCC_HITDIE }) {
 			BaseStats[stat] = 0;
 		}
+		// and their combat numbers from the CRE's DCC block: attack bonus, threat, action die,
+		// initiative, and the crit die and table their HD and type give (Table 9-10)
+		int hd = GetDCCHitDice();
+		bool fromLevel = BaseStats[IE_DCC_HD] == HD_FROM_LEVEL;
+		BaseStats[IE_DCC_ATTACK] = fromLevel ? hd : BaseStats[IE_DCC_MATTACK];
+		BaseStats[IE_DCC_THREAT] = BaseStats[IE_DCC_MTHREAT] ? BaseStats[IE_DCC_MTHREAT] : 20;
+		BaseStats[IE_DCC_ACTDIE1] = BaseStats[IE_DCC_MACTDIE] ? BaseStats[IE_DCC_MACTDIE] : 20;
+		BaseStats[IE_DCC_INIT] = BaseStats[IE_DCC_MINIT];
+		MonsterType type = static_cast<MonsterType>(std::min<ieDword>(BaseStats[IE_DCC_MTYPE], MONSTER_TYPE_COUNT - 1));
+		MonsterCrit crit = rules->combat.monsterCrits.Lookup(hd, type);
+		BaseStats[IE_DCC_CRITDICE] = crit.dice;
+		BaseStats[IE_DCC_CRITDIE] = crit.die;
+		BaseStats[IE_DCC_CRITTABLE] = static_cast<ieDword>(crit.table);
 		return;
 	}
 
@@ -169,6 +183,7 @@ void Actor::RefreshDCCStats(const stats_t& previous)
 
 	// the states at 0 (combat.md, Ethren design proposal); the dead and dying are past them
 	uint32_t states = StatesAtZero(current, apply);
+	if (Modified[IE_DCC_BLEED]) states |= STATE_DYING;
 	Modified[IE_DCC_STATE] = states;
 	if ((InternalFlags & IF_REALLYDIED) || (Modified[IE_STATE_ID] & STATE_DEAD)) {
 		return;
@@ -192,12 +207,19 @@ void Actor::RefreshDCCStats(const stats_t& previous)
 	if (states & STATE_CURSED) {
 		AddPortraitIcon(PI::HOPELESS);
 	}
+	if (states & STATE_DYING) {
+		// down at 0 hp: helpless, can't act, and damage doesn't wake them
+		Modified[IE_HELD] = 1;
+		Modified[IE_STATE_ID] |= STATE_HELPLESS | STATE_SLEEP;
+		Modified[IE_EXTSTATE_ID] |= EXTSTATE_DOESNT_AWAKEN_ON_DAMAGE;
+		AddPortraitIcon(PI::SLEEP);
+	}
 	if (IsHeld(states)) {
 		InterruptCasting = true;
 	}
 
-	bool wasOut = previous[IE_DCC_STATE] & STATE_UNCONSCIOUS;
-	bool isOut = states & STATE_UNCONSCIOUS;
+	bool wasOut = previous[IE_DCC_STATE] & (STATE_UNCONSCIOUS | STATE_DYING);
+	bool isOut = states & (STATE_UNCONSCIOUS | STATE_DYING);
 	if (isOut && !wasOut) {
 		SetStance(IE_ANI_SLEEP);
 	} else if (!isOut && wasOut) {
@@ -210,6 +232,8 @@ RollResult Actor::DCCRoll(RollKind kind, int modifier, int target, int natural, 
 	if (dieSides < 1) dieSides = 20;
 	if (natural <= 0) natural = RAND(1, dieSides);
 	bool cursed = GetDCCStates() & STATE_CURSED;
+	// the hour after recovering the body: -4 to all rolls
+	modifier += Signed(GetStat(IE_DCC_ROLLMOD));
 	return ResolveRoll(kind, natural, dieSides, modifier, target, cursed, threat);
 }
 
@@ -312,6 +336,8 @@ int Actor::DCCLevelUp(int classID, const Roller* roller)
 
 void Actor::DCCRestHeal(bool bedRest)
 {
+	// crit injuries that last "until healed" heal with a night's rest (Ethren decision)
+	fxqueue.RemoveAllEffects(ResRef("DCCHEAL"));
 	for (int i = 0; i < ABILITY_COUNT; ++i) {
 		Ability ability = static_cast<Ability>(i);
 		int loss = Signed(BaseStats[LossStat(ability)]);
