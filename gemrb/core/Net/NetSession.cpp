@@ -961,6 +961,9 @@ struct NetSession::Impl {
 			full.netID = pc->GetGlobalID();
 			full.stats = NetStatsDiff({}, ActorStats(pc), SNAPSHOT_STATS);
 			Send(info.peer, full);
+			// the equipped slot is worked out again on load, not always the same way
+			Send(info.peer, InventoryMessage(pc));
+			Send(info.peer, SpellbookMessage(pc));
 		}
 		const Game* game = core->GetGame();
 		for (uint32_t netID : ready.unmatched) {
@@ -1497,6 +1500,8 @@ struct NetSession::Impl {
 			// the client changed its copy already; resend the truth
 			if (actor) ForgetActor(actor->GetGlobalID());
 			ForgetContainer(info.container);
+			partyDirty = true;
+			storeHashes.erase(std::string(info.store.c_str()));
 			return;
 		}
 		if (actor) info.guiActor = actor->GetGlobalID();
@@ -3681,9 +3686,12 @@ except Exception as e:
 			if (selected && region) gc->HandleActiveRegion(region, selected, region->Pos);
 		} else if (verb == "gui") {
 			// GUI script code, | for line breaks: the GemRB.* calls the windows make
-			std::string code = arg;
-			std::replace(code.begin(), code.end(), '|', '\n');
-			core->GetGUIScriptEngine()->ExecString("import GemRB\n" + code);
+			std::string code = "try:\n\timport GemRB\n\t" + arg + "\nexcept Exception as e:\n\tprint ('[Net] test hook code failed:', repr (e))\n";
+			size_t bar;
+			while ((bar = code.find('|')) != std::string::npos) {
+				code.replace(bar, 1, "\n\t");
+			}
+			core->GetGUIScriptEngine()->ExecString(code);
 		} else if (verb == "report") {
 			Report();
 		} else {

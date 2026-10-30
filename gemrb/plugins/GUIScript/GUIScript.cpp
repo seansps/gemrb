@@ -13580,17 +13580,20 @@ bool GUIScript::ExecString(const std::string& string, bool feedback)
 		// failure
 		PyObject *ptype, *pvalue, *ptraceback;
 		PyErr_Fetch(&ptype, &pvalue, &ptraceback);
+		PyErr_NormalizeException(&ptype, &pvalue, &ptraceback);
 
-		//Get error message
-		String errorString = PyString_AsStringObj(pvalue);
+		//Get error message; the value is an exception object, not a string
+		PyObject* text = pvalue ? PyObject_Str(pvalue) : nullptr;
+		String errorString = text ? PyString_AsStringObj(text) : u"unknown error";
+		Py_XDECREF(text);
 		if (displaymsg) {
 			displaymsg->DisplayString(u"Error: " + errorString, GUIColors::RED, nullptr);
 		} else {
 			Log(ERROR, "GUIScript", "{}", fmt::WideToChar { errorString });
 		}
 
-		Py_DECREF(ptype);
-		Py_DECREF(pvalue);
+		Py_XDECREF(ptype);
+		Py_XDECREF(pvalue);
 		Py_XDECREF(ptraceback);
 	}
 	PyErr_Clear();
