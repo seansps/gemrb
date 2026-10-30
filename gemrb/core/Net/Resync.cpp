@@ -146,16 +146,17 @@ std::vector<std::pair<uint32_t, uint32_t>> NetMatchActors(const std::vector<NetA
 
 	// the party is saved in the GAM in slot order, so slots are exact
 	for (size_t h = 0; h < host.size(); ++h) {
-		if (!host[h].partySlot) continue;
+		if (!host[h].partySlot || host[h].kind != NetObjectKind::Actor) continue;
 		for (size_t l = 0; l < local.size(); ++l) {
-			if (localDone[l] || local[l].partySlot != host[h].partySlot) continue;
+			if (localDone[l] || local[l].kind != NetObjectKind::Actor || local[l].partySlot != host[h].partySlot) continue;
 			matches.emplace_back(host[h].netID, local[l].netID);
 			hostDone[h] = localDone[l] = true;
 			break;
 		}
 	}
 
-	// everyone else: all candidate pairs with the same area and name, nearest first;
+	// everyone else, doors, containers and regions too: all candidate pairs of the same kind,
+	// area and name, nearest first;
 	// ties keep list order, so identical stacks of actors pair up in load order
 	using Candidate = std::tuple<int64_t, size_t, size_t>;
 	std::vector<Candidate> candidates;
@@ -164,7 +165,7 @@ std::vector<std::pair<uint32_t, uint32_t>> NetMatchActors(const std::vector<NetA
 		if (hostDone[h]) continue;
 		for (size_t l = 0; l < local.size(); ++l) {
 			if (localDone[l] || local[l].partySlot) continue;
-			if (local[l].area != host[h].area || local[l].scriptName != host[h].scriptName) continue;
+			if (local[l].kind != host[h].kind || local[l].area != host[h].area || local[l].scriptName != host[h].scriptName) continue;
 			int64_t dx = int64_t(local[l].x) - host[h].x;
 			int64_t dy = int64_t(local[l].y) - host[h].y;
 			int64_t dist2 = dx * dx + dy * dy;

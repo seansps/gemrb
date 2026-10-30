@@ -29,6 +29,7 @@
 #include "GUI/WindowManager.h"
 #include "GameScript/GSUtils.h"
 #include "Net/NetSession.h"
+#include "Net/Protocol.h"
 #include "Scriptable/Container.h"
 #include "Scriptable/Door.h"
 #include "Scriptable/InfoPoint.h"
@@ -86,6 +87,18 @@ static Actor* GetMainSelectedActor()
 	auto actor = core->GetFirstSelectedPC(false);
 	if (actor) return actor;
 	return core->GetFirstSelectedActor();
+}
+
+// co-op clients don't simulate: they send player orders to the host instead (flags say
+// how it queues them, see NetCommand), and drop what can't be sent, since nothing would run it
+static bool ForwardOrder(const Actor* actor, const Holder<Action>& action, uint8_t flags = NetCommand::NONE)
+{
+	NetSession* net = core->GetNetSession();
+	if (!net || !net->IsReplica()) return false;
+	if (actor && action) {
+		net->ForwardAction(*actor, *action, flags);
+	}
+	return true;
 }
 
 //If one of the actors has tracking on, the gamecontrol needs to display
@@ -262,24 +275,6 @@ void GameControl::CreateMovement(Actor* actor, const Point& p, bool append, bool
 	Holder<Action> action;
 	tryToRun = tryToRun || AlwaysRun;
 
-	// co-op clients don't simulate, they send the order to the host instead
-	// (and drop it if it can't be sent, since nothing would ever run it locally)
-	NetSession* net = core->GetNetSession();
-	if (net && net->IsReplica()) {
-		std::string order;
-		if (append) {
-			order = fmt::format("AddWayPoint([{}.{}])", p.x, p.y);
-		} else if (tryToRun && CanRun(actor)) {
-			order = fmt::format("RunToPoint([{}.{}])", p.x, p.y);
-		} else {
-			order = fmt::format("MoveToPoint([{}.{}])", p.x, p.y);
-		}
-		if (net->ForwardCommand(*actor, order, append)) {
-			actor->Destination = p; // just to force target reticle drawing
-		}
-		return;
-	}
-
 	if (append) {
 		action = GenerateAction(fmt::format("AddWayPoint([{}.{}])", p.x, p.y));
 		assert(action);
@@ -299,8 +294,12 @@ void GameControl::CreateMovement(Actor* actor, const Point& p, bool append, bool
 		}
 	}
 
-	actor->CommandActor(std::move(action), !append);
 	actor->Destination = p; // just to force target reticle drawing if paused
+	// CommandSelectedMovement already stopped the actor unless appending
+	if (ForwardOrder(actor, action, append ? NetCommand::KEEP_PATH : NetCommand::STOP)) {
+		return;
+	}
+	actor->CommandActor(std::move(action), !append);
 }
 
 // can we handle it (no movement impairments)?
@@ -1824,14 +1823,18 @@ Region GameControl::Viewport() const
 void GameControl::TryToAttack(Actor* source, const Actor* tgt) const
 {
 	if (source->GetStat(IE_SEX) == SEX_ILLUSION) return;
-	source->CommandActor(GenerateActionDirect("NIDSpecial3()", tgt));
+	auto action = GenerateActionDirect("NIDSpecial3()", tgt);
+	if (ForwardOrder(source, action)) return;
+	source->CommandActor(std::move(action));
 }
 
 //generate action code for source actor to try to defend a target
 void GameControl::TryToDefend(Actor* source, const Actor* tgt) const
 {
 	source->SetModal(Modal::None);
-	source->CommandActor(GenerateActionDirect("NIDSpecial4()", tgt));
+	auto action = GenerateActionDirect("NIDSpecial4()", tgt);
+	if (ForwardOrder(source, action)) return;
+	source->CommandActor(std::move(action));
 }
 
 // generate action code for source actor to try to pick pockets of a target (if an actor)
@@ -1858,7 +1861,9 @@ void GameControl::TryToPick(Actor* source, const Scriptable* tgt) const
 			Log(ERROR, "GameControl", "Invalid pick target of type {}", tgt->Type);
 			return;
 	}
-	source->CommandActor(GenerateActionDirect(std::move(cmdString), tgt));
+	auto action = GenerateActionDirect(std::move(cmdString), tgt);
+	if (ForwardOrder(source, action)) return;
+	source->CommandActor(std::move(action));
 }
 
 //generate action code for source actor to try to disable trap (only trap type active regions)
@@ -1867,7 +1872,9 @@ void GameControl::TryToDisarm(Actor* source, const InfoPoint* tgt) const
 	if (tgt->Type != ST_PROXIMITY) return;
 
 	source->SetModal(Modal::None);
-	source->CommandActor(GenerateActionDirect("RemoveTraps([-1])", tgt));
+	auto action = GenerateActionDirect("RemoveTraps([-1])", tgt);
+	if (ForwardOrder(source, action)) return;
+	source->CommandActor(std::move(action));
 }
 
 //generate action code for source actor to use item/cast spell on a point
@@ -1920,7 +1927,9 @@ void GameControl::TryToCast(Actor* source, const Point& tgt)
 			action->int2Parameter |= UI_NOAURA | UI_NOCHARGE;
 		}
 	}
-	source->AddAction(std::move(action));
+	if (!ForwardOrder(source, action, NetCommand::STOP | NetCommand::QUEUE)) {
+		source->AddAction(std::move(action));
+	}
 	if (!spellCount) {
 		ResetTargetMode();
 	}
@@ -1989,7 +1998,9 @@ void GameControl::TryToCast(Actor* source, const Actor* tgt)
 			action->int2Parameter |= UI_NOAURA | UI_NOCHARGE;
 		}
 	}
-	source->AddAction(std::move(action));
+	if (!ForwardOrder(source, action, NetCommand::STOP | NetCommand::QUEUE)) {
+		source->AddAction(std::move(action));
+	}
 	if (!spellCount) {
 		ResetTargetMode();
 	}
@@ -2006,8 +2017,11 @@ void GameControl::TryToTalk(Actor* source, const Actor* tgt) const
 	//i found no fitting action which would emulate this kind of
 	// dialog initiation
 	source->SetModal(Modal::None);
+	auto action = GenerateActionDirect("NIDSpecial1()", tgt);
+	// TODO: M1.5 dialog runs on the host and is shown to its owner
+	if (ForwardOrder(source, action)) return;
 	dialoghandler->SetTarget(tgt); //this is a hack, but not so deadly
-	source->CommandActor(GenerateActionDirect("NIDSpecial1()", tgt));
+	source->CommandActor(std::move(action));
 }
 
 //generate action code for actor appropriate for the target mode when the target is a container
@@ -2033,7 +2047,9 @@ void GameControl::HandleContainer(Container* container, Actor* actor)
 
 	if (targetMode == TargetMode::Attack) {
 		std::string Tmp = fmt::format("BashDoor(\"{}\")", container->GetScriptName());
-		actor->CommandActor(GenerateAction(std::move(Tmp)));
+		auto action = GenerateAction(std::move(Tmp));
+		if (ForwardOrder(actor, action)) return;
+		actor->CommandActor(std::move(action));
 		return;
 	}
 
@@ -2048,9 +2064,12 @@ void GameControl::HandleContainer(Container* container, Actor* actor)
 		return;
 	}
 
+	// TODO: M1.5 the container window, with the host moving the items
+	auto action = GenerateAction("UseContainer()");
+	if (ForwardOrder(actor, action)) return;
 	container->AddTrigger(TriggerEntry(trigger_clicked, actor->GetGlobalID()));
 	core->SetCurrentContainer(actor, container);
-	actor->CommandActor(GenerateAction("UseContainer()"));
+	actor->CommandActor(std::move(action));
 }
 
 //generate action code for actor appropriate for the target mode when the target is a door
@@ -2069,7 +2088,9 @@ void GameControl::HandleDoor(Door* door, Actor* actor)
 
 	if (targetMode == TargetMode::Attack) {
 		std::string Tmp = fmt::format("BashDoor(\"{}\")", door->GetScriptName());
-		actor->CommandActor(GenerateAction(std::move(Tmp)));
+		auto action = GenerateAction(std::move(Tmp));
+		if (ForwardOrder(actor, action)) return;
+		actor->CommandActor(std::move(action));
 		return;
 	}
 
@@ -2078,10 +2099,11 @@ void GameControl::HandleDoor(Door* door, Actor* actor)
 		return;
 	}
 
-	door->AddTrigger(TriggerEntry(trigger_clicked, actor->GetGlobalID()));
 	// internal gemrb toggle door action hack - should we use UseDoor instead?
 	auto toggle = GenerateAction("NIDSpecial9()");
 	toggle->int0Parameter = door->GetGlobalID();
+	if (ForwardOrder(actor, toggle)) return;
+	door->AddTrigger(TriggerEntry(trigger_clicked, actor->GetGlobalID()));
 	actor->CommandActor(std::move(toggle));
 }
 
@@ -2146,7 +2168,10 @@ bool GameControl::HandleActiveRegion(InfoPoint* trap, Actor* actor, const Point&
 
 			if (trap->GetUsePoint()) {
 				std::string Tmp = fmt::format("TriggerWalkTo(\"{}\")", trap->GetScriptName());
-				actor->CommandActor(GenerateAction(std::move(Tmp)));
+				auto action = GenerateAction(std::move(Tmp));
+				if (!ForwardOrder(actor, action)) {
+					actor->CommandActor(std::move(action));
+				}
 				return true;
 			}
 			return true;
@@ -2398,16 +2423,25 @@ void GameControl::PerformSelectedAction(const Point& p)
 		HandleContainer(Scriptable::As<Container>(overMe), selectedActor);
 	} else if (overMe->Type == ST_TRAVEL && targetMode == TargetMode::None) {
 		ieDword exitID = overMe->GetGlobalID();
+		// co-op clients tell the host who may pass; it also checks the whole party is near
+		NetSession* net = core->GetNetSession();
+		auto useExit = [net, exitID, this](Actor* actor) {
+			if (net && net->IsReplica()) {
+				net->ForwardUseExit(*actor, *overMe);
+			} else {
+				actor->UseExit(exitID);
+			}
+		};
 		if (core->HasFeature(GFFlags::TEAM_MOVEMENT)) {
 			// pst forces everyone to travel (eg. ar0201 outside_portal)
 			int i = game->GetPartySize(false);
 			while (i--) {
-				game->GetPC(i, false)->UseExit(exitID);
+				useExit(game->GetPC(i, false));
 			}
 		} else {
 			size_t i = game->selected.size();
 			while (i--) {
-				game->selected[i]->UseExit(exitID);
+				useExit(game->selected[i]);
 			}
 		}
 		if (HandleActiveRegion(Scriptable::As<InfoPoint>(overMe), selectedActor, p)) {
@@ -2468,7 +2502,10 @@ void GameControl::CommandSelectedMovement(const Point& p, bool formation, bool a
 
 	// p is a searchmap travel region or a plain travel region in pst (matching several other criteria)
 	if (party[0]->GetCurrentArea()->GetCursor(p) == IE_CURSOR_TRAVEL || doWorldMap) {
-		party[0]->AddAction("NIDSpecial2()");
+		auto action = GenerateAction("NIDSpecial2()");
+		if (!ForwardOrder(party[0], action, NetCommand::QUEUE)) {
+			party[0]->AddAction(std::move(action));
+		}
 	}
 }
 

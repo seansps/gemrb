@@ -49,6 +49,7 @@ FILE(GLOB gemrb_core_LIB_SRCS
 	MurmurHash.cpp
 	Net/NetSession.cpp
 	Net/Protocol.cpp
+	Net/Replication.cpp
 	Net/Resync.cpp
 	Palette.cpp
 	PalettedImageMgr.cpp
