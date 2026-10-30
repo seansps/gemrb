@@ -51,6 +51,8 @@ static constexpr size_t SLOW_CHUNK = 64;
 static constexpr int MATCH_DISTANCE = 128;
 // keep the per-actor join logs readable in big areas
 static constexpr size_t MAX_LOGGED_ACTORS = 40;
+// both sides log every actor of every snapshot with a multiple of this sequence number, for comparing logs
+static constexpr uint32_t SYNC_CHECK_INTERVAL = 75;
 
 // one written save, ready to stream to every peer that asked for it in this tick
 struct NetSnapshot {
@@ -620,6 +622,9 @@ struct NetSession::Impl {
 			entry.stance = actor->GetStance();
 			state.actors.push_back(entry);
 			LogMovement("host", entry);
+			if (state.tick % SYNC_CHECK_INTERVAL == 0) {
+				Log(MESSAGE, "Net", "Sync check #{}: net id {} at ({}, {}) stance {}", state.tick, entry.netID, entry.x, entry.y, entry.stance);
+			}
 		}
 		Broadcast(state, NetChannel::State);
 	}
@@ -905,6 +910,9 @@ struct NetSession::Impl {
 				actor->SetStance(entry.stance);
 			}
 			LogMovement("client", entry);
+			if (snapshot.tick % SYNC_CHECK_INTERVAL == 0) {
+				Log(MESSAGE, "Net", "Sync check #{}: net id {} (local {}) at {} stance {}", snapshot.tick, entry.netID, it->second, actor->Pos, actor->GetStance());
+			}
 		}
 	}
 
