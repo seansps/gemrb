@@ -1,0 +1,33 @@
+2DA V1.0
+0
+    NAME                     TARGET
+1   Harsh_winter             ATTACK_ALL
+2   The_bull                 ATTACK_MELEE
+3   Fortunate_date           ATTACK_MISSILE
+4   Raised_by_wolves         ATTACK_UNARMED
+5   Conceived_on_horseback   ATTACK_MOUNTED
+6   Born_on_the_battlefield  DAMAGE_ALL
+7   Path_of_the_bear         DAMAGE_MELEE
+8   Hawkeye                  DAMAGE_MISSILE
+9   Pack_hunter              OCCUPATION_WEAPON
+10  Born_under_the_loom      SKILL_CHECKS
+11  Foxs_cunning             TRAPS
+12  Four-leafed_clover       SECRET_DOORS
+13  Seventh_son              SPELL_CHECKS
+14  The_raging_storm         SPELL_DAMAGE
+15  Righteous_heart          TURN_UNHOLY
+16  Survived_the_plague      HEALING
+17  Lucky_sign               SAVES_ALL
+18  Guardian_angel           SAVES_TRAPS
+19  Survived_a_spider_bite   SAVES_POISON
+20  Struck_by_lightning      SAVE_REF
+21  Lived_through_famine     SAVE_FORT
+22  Resisted_temptation      SAVE_WILL
+23  Charmed_house            AC
+24  Speed_of_the_cobra       INITIATIVE
+25  Bountiful_harvest        HIT_POINTS
+26  Warriors_arm             CRIT_TABLES
+27  Unholy_house             CORRUPTION
+28  The_Broken_Star          FUMBLES
+29  Birdsong                 LANGUAGES
+30  Wild_child               SPEED

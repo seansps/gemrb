@@ -74,6 +74,10 @@ class WindowManager;
 class WorldMap;
 class WorldMapArray;
 
+namespace DCC {
+class RulesData;
+}
+
 struct Symbol {
 	PluginHolder<SymbolMgr> sm;
 	ResRef symbolName;
@@ -604,6 +608,8 @@ public:
 	int GetWisdomBonus(int column, int value) const;
 	/** DCC Table 1-1, see DCC/AbilityMod.h; 0 unless DCCRules is set */
 	int GetDCCAbilityBonus(int column, int value) const;
+	/** the DCC class, XP, augur, save and thief skill tables (DCC/Rules.h); nullptr unless DCCRules is set */
+	const DCC::RulesData* GetDCCRules() const;
 
 	/** applies the spell on the target */
 	void ApplySpell(const ResRef& spellRef, Actor* target, Scriptable* caster, int level) const;

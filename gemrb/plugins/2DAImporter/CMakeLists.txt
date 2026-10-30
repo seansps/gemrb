@@ -8,9 +8,10 @@ ADD_GEMRB_PLUGIN_TEST(2DAImporter
   2DAImporter.cpp
   ../../tests/2DAImporter/Test_2DAImporter.cpp
   ../../tests/2DAImporter/Test_DCCAbilityMod.cpp
+  ../../tests/2DAImporter/Test_DCCTables.cpp
 )
 
 IF (BUILD_TESTING)
-  # the DCC table test reads the shipped unhardcoded/ethren/abilmod.2da from the source tree
+  # the DCC table tests read the shipped unhardcoded/ethren tables from the source tree
   target_compile_definitions(Test_2DAImporter PRIVATE GEMRB_UNHARDCODED_DIR="${CMAKE_SOURCE_DIR}/gemrb/unhardcoded")
 ENDIF()

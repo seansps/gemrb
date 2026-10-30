@@ -18,7 +18,11 @@ FILE(GLOB gemrb_core_LIB_SRCS
 	CharAnimations.cpp
 	Core.cpp
 	DCC/AbilityMod.cpp
+	DCC/Augur.cpp
+	DCC/Character.cpp
+	DCC/Classes.cpp
 	DCC/DiceChain.cpp
+	DCC/Rules.cpp
 	Debug.cpp
 	Dialog.cpp
 	DialogHandler.cpp
