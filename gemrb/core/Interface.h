@@ -214,6 +214,11 @@ enum class AUTOPAUSE : ieDword {
 #define STAT_DEX_MISSILE  1
 #define STAT_DEX_AC       2
 
+// DCC (abilmod.2da): one curve for all abilities
+#define STAT_DCC_MOD             0
+#define STAT_DCC_WIZARD_SPELLS   1
+#define STAT_DCC_MAX_SPELL_LEVEL 2
+
 #define STAT_INT_LEARN     0
 #define STAT_INT_MAXLEVEL  1
 #define STAT_INT_MAXNUMBER 2
@@ -597,6 +602,8 @@ public:
 	int GetCharismaBonus(int column, int value) const;
 	int GetLoreBonus(int column, int value) const;
 	int GetWisdomBonus(int column, int value) const;
+	/** DCC Table 1-1, see DCC/AbilityMod.h; 0 unless DCCRules is set */
+	int GetDCCAbilityBonus(int column, int value) const;
 
 	/** applies the spell on the target */
 	void ApplySpell(const ResRef& spellRef, Actor* target, Scriptable* caster, int level) const;

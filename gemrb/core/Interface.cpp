@@ -38,6 +38,7 @@
 #include "TileMap.h"
 #include "WorldMapMgr.h"
 
+#include "DCC/AbilityMod.h"
 #include "GUI/EventMgr.h"
 #include "GUI/GUIFactory.h"
 #include "GUI/GUIScriptInterface.h"
@@ -86,6 +87,7 @@ struct AbilityTables {
 	AbilityTable chrmod;
 	AbilityTable lorebon;
 	AbilityTable wisbon;
+	DCC::AbilityModTable dccmod;
 
 	explicit AbilityTables(int MaximumAbility) noexcept
 		: tableSize(MaximumAbility + 1),
@@ -134,6 +136,13 @@ struct AbilityTables {
 		if (gamedata->Exists("wisxpbon", IE_2DA_CLASS_ID, true)) {
 			if (!ReadAbilityTable("wisxpbon", wisbon, 1, tableSize)) {
 				Log(ERROR, "Interface", "unable to read 'wisxpbon' ability table!");
+			}
+		}
+
+		if (core->HasFeature(GFFlags::RULES_DCC)) {
+			AutoTable tab = gamedata->LoadTable("abilmod");
+			if (!tab || !dccmod.Load(*tab)) {
+				Log(ERROR, "Interface", "unable to read 'abilmod' ability table!");
 			}
 		}
 	}
@@ -4108,6 +4117,21 @@ int Interface::GetWisdomBonus(int column, int value) const
 	if (column != 0) return -9999;
 
 	return abilityTables->wisbon[value];
+}
+
+int Interface::GetDCCAbilityBonus(int column, int value) const
+{
+	// modifier, wizard spells known adjustment, max spell level; for any ability score
+	switch (column) {
+		case STAT_DCC_MOD:
+			return abilityTables->dccmod.Modifier(value);
+		case STAT_DCC_WIZARD_SPELLS:
+			return abilityTables->dccmod.WizardSpells(value);
+		case STAT_DCC_MAX_SPELL_LEVEL:
+			return abilityTables->dccmod.MaxSpellLevel(value);
+		default:
+			return -9999;
+	}
 }
 
 PauseState Interface::TogglePause() const
