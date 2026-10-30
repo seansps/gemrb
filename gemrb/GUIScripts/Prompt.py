@@ -23,8 +23,6 @@ ButtonColor = {'r': 70, 'g': 60, 'b': 45, 'a': 255}
 SelectedColor = {'r': 150, 'g': 120, 'b': 60, 'a': 255}
 WaitColor = {'r': 24, 'g': 22, 'b': 30, 'a': 200}
 
-PromptWindow = None
-WaitWindow = None
 Shown = None # what the windows show: (id, ours to answer)
 Prompt = None # GemRB.GetPrompt () as shown
 Selected = 0 # yes/no and choices: what Enter takes
@@ -42,21 +40,15 @@ def _Call (function, *args):
 	# a button handler without parameters (handlers that take one get the button)
 	return lambda: function (*args)
 
-def _Valid (win):
-	if not win:
-		return False
-	try:
-		win.GetFrame ()
-		return True
-	except RuntimeError:
-		return False # gone with the game
+def _Window (alias):
+	# looked up by alias, so a window that went with the game is simply not there
+	return GemRB.GetView (alias)
 
 def _Close ():
-	global PromptWindow, WaitWindow
-	for win in (PromptWindow, WaitWindow):
-		if _Valid (win):
+	for alias in ("PROMPTWIN", "PROMPTWAIT"):
+		win = _Window (alias)
+		if win:
 			win.Close ()
-	PromptWindow = WaitWindow = None
 
 def _Seconds ():
 	prompt = GemRB.GetPrompt ()
@@ -69,7 +61,7 @@ def OnChange ():
 	prompt = GemRB.GetPrompt ()
 	mine = bool (prompt and prompt["Mine"] and not prompt["Sent"])
 	key = (prompt["ID"], mine) if prompt else None
-	if key == Shown and (_Valid (PromptWindow) or _Valid (WaitWindow)):
+	if key == Shown and (_Window ("PROMPTWIN") or _Window ("PROMPTWAIT")):
 		# the same window, eg. another voter answered: only its text changes
 		Prompt = prompt
 		_Tick ()
@@ -100,10 +92,12 @@ def _Tick ():
 	if not prompt or prompt["ID"] != Shown[0]:
 		OnChange ()
 		return
-	if _Valid (PromptWindow):
-		PromptWindow.GetControl (0x10000002).SetText ("%d s" % _Seconds ())
-	elif _Valid (WaitWindow):
-		WaitWindow.GetControl (0x10000000).SetText (_WaitText (prompt))
+	win = _Window ("PROMPTWIN")
+	wait = _Window ("PROMPTWAIT")
+	if win:
+		win.GetControl (0x10000002).SetText ("%d s" % _Seconds ())
+	elif wait:
+		wait.GetControl (0x10000000).SetText (_WaitText (prompt))
 
 ###################################################
 # read only: someone else decides
@@ -117,10 +111,10 @@ def _WaitText (prompt):
 	return "Waiting for %s to decide%s: %s (%d s)" % (who, extra, what, _Seconds ())
 
 def _OpenWaiting (prompt):
-	global WaitWindow
 	width = min (520, GemRB.GetSystemVariable (SV_WIDTH) - 20)
 	frame = {'x': (GemRB.GetSystemVariable (SV_WIDTH) - width) // 2, 'y': 8, 'w': width, 'h': 26}
-	WaitWindow = win = GemRB.CreateView (95, 255, frame)
+	win = GemRB.CreateView (95, 255, frame)
+	win.AddAlias ("PROMPTWAIT")
 	win.SetBackground (WaitColor)
 	win.CreateLabel (0x10000000, 6, 0, width - 12, 26, Font, _WaitText (prompt), IE_FONT_ALIGN_CENTER | IE_FONT_ALIGN_MIDDLE)
 	# shown on top, but the keys stay with the game (and the chat line)
@@ -150,7 +144,7 @@ def _Key (win, id, key, action):
 	return button
 
 def _OpenPrompt (prompt):
-	global PromptWindow, Selected, Values, Field
+	global Selected, Values, Field
 	kind = prompt["Kind"]
 	Selected = prompt["Default"]
 	Values = [field["Value"] for field in prompt["Fields"]]
@@ -165,7 +159,8 @@ def _OpenPrompt (prompt):
 	height = 24 + 50 + body + 30
 	screen = GemRB.GetSystemVariable (SV_WIDTH), GemRB.GetSystemVariable (SV_HEIGHT)
 	frame = {'x': (screen[0] - width) // 2, 'y': max (0, (screen[1] - height) // 3), 'w': width, 'h': height}
-	PromptWindow = win = GemRB.CreateView (94, 255, frame)
+	win = GemRB.CreateView (94, 255, frame)
+	win.AddAlias ("PROMPTWIN")
 	win.SetBackground (WindowColor)
 	win.CreateLabel (0x10000000, 10, 4, width - 80, 20, Font, prompt["Title"], IE_FONT_ALIGN_LEFT | IE_FONT_ALIGN_MIDDLE)
 	win.CreateLabel (0x10000002, width - 70, 4, 60, 20, Font, "%d s" % _Seconds (), IE_FONT_ALIGN_RIGHT | IE_FONT_ALIGN_MIDDLE)
@@ -215,19 +210,20 @@ def _OpenPrompt (prompt):
 	_Log ("ours to answer: prompt #%d '%s' (%s), %d s" % (prompt["ID"], prompt["Title"], kind, _Seconds ()))
 
 def _Highlight ():
-	if not _Valid (PromptWindow) or not Prompt:
+	win = _Window ("PROMPTWIN")
+	if not win or not Prompt:
 		return
 	kind = Prompt["Kind"]
 	if kind == "yesno":
-		PromptWindow.GetControl (1).SetBackground (SelectedColor if Selected == 1 else ButtonColor)
-		PromptWindow.GetControl (2).SetBackground (SelectedColor if Selected == 0 else ButtonColor)
+		win.GetControl (1).SetBackground (SelectedColor if Selected == 1 else ButtonColor)
+		win.GetControl (2).SetBackground (SelectedColor if Selected == 0 else ButtonColor)
 	elif kind == "choice":
 		for i in range (len (Prompt["Choices"])):
-			PromptWindow.GetControl (i + 1).SetBackground (SelectedColor if Selected == i else ButtonColor)
+			win.GetControl (i + 1).SetBackground (SelectedColor if Selected == i else ButtonColor)
 	else:
 		for i in range (len (Prompt["Fields"])):
-			PromptWindow.GetControl (0x10000020 + i).SetText (str (Values[i]))
-			PromptWindow.GetControl (0x10000010 + i).SetColor ({'r': 255, 'g': 220, 'b': 140} if i == Field else {'r': 255, 'g': 255, 'b': 255})
+			win.GetControl (0x10000020 + i).SetText (str (Values[i]))
+			win.GetControl (0x10000010 + i).SetColor ({'r': 255, 'g': 220, 'b': 140} if i == Field else {'r': 255, 'g': 255, 'b': 255})
 
 def _Select (index):
 	global Selected

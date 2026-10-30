@@ -202,7 +202,7 @@ std::string PromptManager::OutcomeText(const PromptResult& result) const
 	if (q.flags & PromptQuestion::VOTE) {
 		std::string votes;
 		for (const auto& voter : result.voters) {
-			std::string said = voter.state == PromptVoter::State::Answered ? PromptAnswerText(q, voter.values) : fmt::format("no answer ({})", PromptAnswerText(q, voter.values));
+			std::string said = voter.state == PromptVoter::State::Answered ? PromptAnswerText(q, voter.values) : fmt::format("{} (no answer)", PromptAnswerText(q, voter.values));
 			votes += fmt::format("{}{} {}", votes.empty() ? "" : ", ", Name(voter.slot), said);
 		}
 		if (result.outcome == PromptOutcome::Cancelled) return fmt::format("{}: called off.", title);
@@ -377,9 +377,11 @@ void PromptManager::OnRemoteAnswer(uint8_t slot, const NetPromptAnswer& msg)
 
 void PromptManager::Reset()
 {
-	if (haveView) guiDirty = true;
+	bool had = haveView;
 	haveView = false;
 	view = View();
+	// the window goes now, while the game it is in is still there
+	if (had) Notify();
 }
 
 void PromptManager::Shutdown()
@@ -474,8 +476,9 @@ bool PromptManager::HoldTravel(Actor* actor, InfoPoint* exit)
 	if (travel.approved && travel.actorID == actor->GetGlobalID() && travel.exitID == exit->GetGlobalID()) {
 		return false;
 	}
-	// asking already: nobody leaves meanwhile (the game is paused anyway)
-	if (travel.pending) return true;
+	// asking already: nobody leaves meanwhile (the game is paused anyway); a question that went
+	// with its game (a load) doesn't hold travel up for good
+	if (travel.pending && queue.Busy() && travel.game == core->GetGame()) return true;
 
 	uint8_t owner = actor->InParty ? net->OwnerSlot(*actor) : PROMPT_LOCAL_SLOT;
 	std::vector<uint8_t> others;
@@ -486,6 +489,7 @@ bool PromptManager::HoldTravel(Actor* actor, InfoPoint* exit)
 
 	travel = Travel();
 	travel.pending = true;
+	travel.game = core->GetGame();
 	travel.actorID = actor->GetGlobalID();
 	travel.exitID = exit->GetGlobalID();
 	travel.owner = owner;
@@ -504,7 +508,7 @@ bool PromptManager::HoldTravel(Actor* actor, InfoPoint* exit)
 	q.text = fmt::format("{} is at the exit to {}. Travel there now? The whole party goes.", ActorName(actor), travel.destination);
 	q.defaultChoice = 0; // no answer: nobody leaves
 	Ask(actor, std::move(q), [this](const PromptResult& result) {
-		if (!result.Yes()) {
+		if (!result.Yes() || result.outcome == PromptOutcome::Cancelled) {
 			ResumeTravel(false, "the traveller didn't confirm");
 			return;
 		}
@@ -540,7 +544,8 @@ void PromptManager::TravelVote()
 	q.defaultChoice = 1; // no answer counts as ready
 	q.actorID = travel.actorID;
 	AskPlayers(std::move(others), std::move(q), [this](const PromptResult& result) {
-		ResumeTravel(result.Yes(), result.Yes() ? "everyone is ready" : "someone isn't ready");
+		bool go = result.Yes() && result.outcome != PromptOutcome::Cancelled;
+		ResumeTravel(go, go ? "everyone is ready" : "someone isn't ready");
 	});
 }
 

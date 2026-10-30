@@ -119,6 +119,7 @@ private:
 	struct Travel {
 		bool pending = false;
 		bool approved = false;
+		const Game* game = nullptr;
 		uint32_t actorID = 0;
 		uint32_t exitID = 0;
 		uint8_t owner = 0;
