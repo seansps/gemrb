@@ -31,7 +31,9 @@
 #include "Audio/Playback.h"
 #include "Audio/PlaybackConfig.h"
 #include "GUI/GameControl.h"
+#include "GUI/EventMgr.h"
 #include "GUI/TextArea.h"
+#include "GUI/WindowManager.h"
 #include "GameScript/GSUtils.h"
 #include "GameScript/GameScript.h"
 #include "Logging/Logging.h"
@@ -46,12 +48,14 @@
 #include "Streams/MemoryStream.h"
 #include "Strings/StringConversion.h"
 #include "System/VFS.h"
+#include "Video/Video.h"
 
 #ifdef HAVE_ENET
 	#include <enet/enet.h>
 #endif
 
 #include <algorithm>
+#include <deque>
 #include <map>
 #include <random>
 #include <set>
@@ -100,8 +104,8 @@ static constexpr const char* READONLY_REPLY = "[p][color=A0A0A0FF]   {}. {}[/col
 static constexpr tick_t HEARTBEAT_INTERVAL = 1000;
 // ENet's own timeout is a little longer than ours, as a backstop
 static constexpr tick_t ENET_TIMEOUT_SLACK = 2000;
-// lines of chat kept for the lobby window
-static constexpr size_t CHAT_LOG_LINES = 50;
+// the host keeps more chat than a player sees, since whispers are only for two of them
+static constexpr size_t HOST_CHAT_LINES = 4 * NET_CHAT_HISTORY;
 // the lobby goes out again this often anyway, for the pings (ms)
 static constexpr tick_t LOBBY_REFRESH = 5000;
 // "X is controlled by player N" at most this often per party member (ms)
@@ -332,7 +336,9 @@ struct NetSession::Impl {
 	NetPhase phase = NetPhase::Game;
 	NetLobbyState lobby;
 	uint32_t lobbyRevision = 1;
-	std::vector<std::string> chatLog;
+	std::deque<NetChat> chatLines; // what our player saw, the newest NET_CHAT_HISTORY
+	std::vector<std::string> chatLog; // the same as plain text, for the lobby
+	int lastWhisperer = -1; // for /r
 	std::string status;
 	std::map<ieDword, tick_t> refusals; // when we last told our player an actor isn't theirs
 	bool localMessage = false; // what we tell our own player isn't replicated
@@ -393,6 +399,7 @@ struct NetSession::Impl {
 	NetPartyState party;
 	bool partyDirty = false;
 	std::map<std::string, uint64_t> storeHashes; // stores remote players have open
+	std::deque<NetChat> hostChat; // every line, whispers too, for joining players' history
 
 	// client side
 	ENetPeer* server = nullptr;
@@ -601,32 +608,153 @@ struct NetSession::Impl {
 		lobbyRevision++;
 	}
 
-	void ShowChat(const NetChat& chat)
+	uint8_t MySlot() const
 	{
-		Log(MESSAGE, "Net", "Chat <{}#{}>: {}", chat.name, chat.slot, chat.text);
-		chatLog.push_back(fmt::format("{}: {}", chat.name, chat.text));
-		if (chatLog.size() > CHAT_LOG_LINES) chatLog.erase(chatLog.begin());
-		lobbyRevision++;
-		if (core->GetGame()) {
-			displaymsg->DisplayMarkupString(fmt::format(u"[p][color=80C0FFFF]{}:[/color] {}[/p]", StringFromUtf8(chat.name.c_str()), StringFromUtf8(chat.text.c_str())));
-		}
+		return mode == Mode::Host ? NET_HOST_SLOT : slot;
 	}
 
-	void SendChat(const std::string& text)
+	void RebuildChatLog()
+	{
+		chatLog.clear();
+		for (const auto& line : chatLines) {
+			chatLog.push_back(NetChatPlain(line, MySlot()));
+		}
+		lobbyRevision++;
+	}
+
+	// into the message window, if there is one; ours alone, never replicated
+	void DisplayChatMarkup(const std::string& markup)
+	{
+		if (!core->GetGame() || !displaymsg) return;
+		localMessage = true;
+		displaymsg->DisplayMarkupString(StringFromUtf8(markup.c_str()));
+		localMessage = false;
+	}
+
+	// a line for our player: the log, the lobby and the message window
+	void ShowChat(const NetChat& chat)
+	{
+		uint8_t me = MySlot();
+		std::string markup = NetChatMarkup(chat, me);
+		Log(MESSAGE, "Net", "Chat <{}#{}>{}: {}", chat.name, chat.slot, chat.flags & NetChat::WHISPER ? fmt::format(" whisper to <{}#{}>", chat.targetName, chat.target) : chat.flags & NetChat::SYSTEM ? " system" : "", chat.text);
+		Log(MESSAGE, "Net", "Chat line for slot {}: {}", me, markup);
+		if (chat.flags & NetChat::WHISPER && chat.target == me) {
+			lastWhisperer = chat.slot;
+		}
+		chatLines.push_back(chat);
+		if (chatLines.size() > NET_CHAT_HISTORY) chatLines.pop_front();
+		RebuildChatLog();
+		DisplayChatMarkup(markup);
+	}
+
+	// something only our player is told (a typo, an unknown name): a system line in our own
+	// chat (so the lobby shows it too), never sent anywhere
+	void ShowNotice(const std::string& text)
+	{
+		Log(MESSAGE, "Net", "Chat notice: {}", text);
+		NetChat notice;
+		notice.slot = MySlot();
+		notice.flags = NetChat::SYSTEM;
+		notice.name = name;
+		notice.text = text;
+		ShowChat(notice);
+	}
+
+	// host: remember a line for the history of players who join later
+	void RecordChat(const NetChat& chat)
+	{
+		hostChat.push_back(chat);
+		if (hostChat.size() > HOST_CHAT_LINES) hostChat.pop_front();
+	}
+
+	// host: someone joined, left or rejoined; everyone hears it, in the chat's neutral colour
+	void SystemLine(uint8_t who, const std::string& who_name, const std::string& text)
 	{
 		NetChat chat;
-		chat.slot = mode == Mode::Host ? NET_HOST_SLOT : slot;
-		chat.name = name;
+		chat.slot = who;
+		chat.flags = NetChat::SYSTEM;
+		chat.name = who_name;
 		chat.text = text;
-		if (mode == Mode::Host) {
-			Broadcast(chat);
-			ShowChat(chat);
-		} else if (server && state != ClientState::Connecting) {
-			Send(server, chat);
-			ShowChat(chat); // the host relays it to everyone else
-		} else {
-			Log(WARNING, "Net", "Not connected, chat dropped: {}", text);
+		RecordChat(chat);
+		Broadcast(chat);
+		ShowChat(chat);
+	}
+
+	// host: what a joining player missed (lobby chat included), only what it may see
+	void SendChatHistory(const NetPeerInfo& info)
+	{
+		NetChatHistory history;
+		for (auto it = hostChat.rbegin(); it != hostChat.rend() && history.lines.size() < NET_CHAT_HISTORY; ++it) {
+			if (NetChatVisibleTo(*it, info.slot)) history.lines.insert(history.lines.begin(), *it);
 		}
+		Send(info.peer, history);
+		Log(MESSAGE, "Net", "Sent slot {} the last {} chat line(s).", info.slot, history.lines.size());
+	}
+
+	// the message window was made anew (a game was loaded): the recent chat goes back in
+	size_t ReplayChat()
+	{
+		for (const auto& line : chatLines) {
+			DisplayChatMarkup(NetChatMarkup(line, MySlot()));
+		}
+		Log(MESSAGE, "Net", "Replayed {} chat line(s) into the message window.", chatLines.size());
+		return chatLines.size();
+	}
+
+	// host: a whisper goes to its target alone; false if the target isn't here
+	bool RouteWhisper(const NetChat& chat)
+	{
+		if (chat.target == NET_HOST_SLOT) {
+			return true; // that's us, ShowChat does the rest
+		}
+		for (const auto& info : peers) {
+			if (info.welcomed && info.slot == chat.target) {
+				Send(info.peer, chat);
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// what our player typed: a line for everyone, a whisper or a command
+	void SendChat(const std::string& line)
+	{
+		bool connected = mode == Mode::Host || (server && state != ClientState::Connecting);
+		if (!connected) {
+			Log(WARNING, "Net", "Not connected, chat dropped: {}", line);
+			return;
+		}
+		std::vector<NetLobbyPlayer> players = mode == Mode::Host ? BuildLobby().players : lobby.players;
+		NetChatCommand cmd = NetParseChat(line, players, MySlot(), lastWhisperer);
+		if (cmd.kind == NetChatCommand::Kind::Nothing) return;
+		if (cmd.kind == NetChatCommand::Kind::Notice) {
+			ShowNotice(cmd.text);
+			return;
+		}
+
+		NetChat chat;
+		chat.slot = MySlot();
+		chat.name = name;
+		chat.text = cmd.text;
+		if (cmd.kind == NetChatCommand::Kind::Whisper) {
+			chat.flags = NetChat::WHISPER;
+			chat.target = cmd.target;
+			chat.targetName = cmd.targetName;
+		}
+		if (mode == Mode::Host) {
+			if (chat.flags & NetChat::WHISPER) {
+				if (!RouteWhisper(chat)) {
+					ShowNotice(chat.targetName + " is away.");
+					return;
+				}
+			} else {
+				Broadcast(chat);
+			}
+			RecordChat(chat);
+		} else {
+			Send(server, chat); // the host relays it to everyone else (or the target)
+		}
+		ShowChat(chat);
 	}
 
 	// a game with a party in a loaded area, not in the middle of being replaced
@@ -885,13 +1013,17 @@ struct NetSession::Impl {
 			Log(MESSAGE, "Net", "Slot {} had container {} open: closed.", info.slot, info.container);
 		}
 		uint8_t slot = info.slot;
+		std::string who = info.name;
 		roster.Leave(slot);
 		peers.erase(it);
 		if (dialog.active && dialog.owner == slot) {
 			HandDialogToHost(slot);
 		}
-		if (core->GetGame()) {
-			displaymsg->DisplayMarkupString(StringFromUtf8(fmt::format("[p][color=FFC080FF]Player {} left; its characters are yours until it returns.[/color][/p]", slot).c_str()));
+		// a reconnect is followed by "rejoined" at once
+		if (std::string(how) != "reconnected") {
+			std::string left = std::string(how) == "timed out" ? "dropped (timed out)" : "left";
+			std::string note = phase == NetPhase::Game ? "; the host looks after their characters until they return" : "";
+			SystemLine(slot, who, fmt::format("{} {}{}.", who, left, note));
 		}
 	}
 
@@ -955,6 +1087,10 @@ struct NetSession::Impl {
 	{
 		NetMsgType type;
 		if (!NetPeekType(data, size, type)) {
+			if (size >= NET_HEADER_SIZE && data[0] == NET_MAGIC && data[1] != NET_PROTOCOL_VERSION) {
+				Log(WARNING, "Net", "Dropping a packet from {}: it speaks protocol v{}, we speak v{}.", PeerAddress(peer), data[1], NET_PROTOCOL_VERSION);
+				return;
+			}
 			Log(WARNING, "Net", "Dropping malformed or incompatible packet ({} bytes) from {}.", size, PeerAddress(peer));
 			return;
 		}
@@ -1028,7 +1164,9 @@ struct NetSession::Impl {
 					welcome.flags = (rejoined ? NetWelcome::REJOINED : 0) | (phase == NetPhase::Game ? NetWelcome::IN_GAME : 0);
 					Send(peer, welcome);
 					Log(MESSAGE, "Net", "Player '{}' {} slot {}{}.", info->name, rejoined ? "rejoined in its old" : "joined in", info->slot, phase == NetPhase::Game ? ", the game follows" : ", waiting in the lobby");
+					SendChatHistory(*info);
 					SendLobby(true);
+					SystemLine(info->slot, info->name, fmt::format("{} {}.", info->name, rejoined ? "rejoined" : "joined"));
 					if (!testChat.empty()) {
 						SendChat(testChat);
 						testChat.clear();
@@ -1039,9 +1177,24 @@ struct NetSession::Impl {
 				{
 					NetChat chat;
 					if (!info->welcomed || !NetDecode(data, size, chat)) return false;
-					// trust the session for identity, not the packet
+					// trust the session for identity, not the packet; only the host has system lines
 					chat.slot = info->slot;
 					chat.name = info->name;
+					chat.flags &= NetChat::WHISPER;
+					if (chat.flags & NetChat::WHISPER) {
+						const NetPlayer* target = roster.Find(chat.target);
+						chat.targetName = target ? target->name : std::string();
+						if (chat.target == chat.slot || !target || !RouteWhisper(chat)) {
+							Log(MESSAGE, "Net", "Slot {} whispered to slot {}, who isn't here.", chat.slot, chat.target);
+							Notify(*info, fmt::format("{} isn't here; nobody heard that.", target ? target->name : fmt::format("Player {}", chat.target)));
+							return true;
+						}
+						Log(MESSAGE, "Net", "Routed a whisper from slot {} to slot {} only.", chat.slot, chat.target);
+						RecordChat(chat);
+						if (chat.target == NET_HOST_SLOT) ShowChat(chat);
+						return true;
+					}
+					RecordChat(chat);
 					ShowChat(chat);
 					Broadcast(chat, NetChannel::Reliable, peer);
 					return true;
@@ -2870,6 +3023,20 @@ struct NetSession::Impl {
 					ShowChat(chat);
 					return true;
 				}
+			case NetMsgType::ChatHistory:
+				{
+					NetChatHistory history;
+					if (!NetDecode(data, size, history)) return false;
+					// what the host has replaces ours (a rejoin would repeat it); a game being
+					// loaded shows it once its message window is made
+					chatLines.assign(history.lines.begin(), history.lines.end());
+					RebuildChatLog();
+					Log(MESSAGE, "Net", "Got the last {} chat line(s) from the host.", chatLines.size());
+					for (const auto& line : chatLines) {
+						Log(MESSAGE, "Net", "History: {}", NetChatPlain(line, slot));
+					}
+					return true;
+				}
 			case NetMsgType::SaveBegin:
 				{
 					NetSaveBegin begin;
@@ -4325,6 +4492,44 @@ except Exception as e:
 		}
 	}
 
+	// types like a player at the keyboard: Enter, the text key by key, then Enter (type) or Esc
+	// (typeesc), through the event manager, so the keys go wherever the windows send them.
+	// Each key is sent the way SDLVideoDriver does: a key press (with shift for capitals and
+	// !@#...), left out for unshifted keys while text input is on, then the key's text
+	void TestType(const std::string& text, bool send) const
+	{
+		const WindowManager* wm = core->GetWindowManager();
+		if (!wm) return;
+		auto press = [wm](KeyboardKey key) {
+			wm->InjectEvent(EventMgr::CreateKeyEvent(key, true));
+			wm->InjectEvent(EventMgr::CreateKeyEvent(key, false));
+		};
+		press(GEM_RETURN);
+		Log(MESSAGE, "Net", "Test typing: pressed Enter, text input is {}.", VideoDriver->InTextInput() ? "on" : "off");
+		static const std::string shifted = ")!@#$%^&*(";
+		int pressesSent = 0;
+		for (char c : text) {
+			KeyboardKey key = KeyboardKey(c);
+			int mod = 0;
+			if (c >= 'A' && c <= 'Z') {
+				key = KeyboardKey(c - 'A' + 'a');
+				mod = GEM_MOD_SHIFT;
+			} else if (shifted.find(c) != std::string::npos) {
+				key = KeyboardKey('0' + shifted.find(c));
+				mod = GEM_MOD_SHIFT;
+			}
+			bool sendPress = mod != 0 || !VideoDriver->InTextInput();
+			if (sendPress) {
+				wm->InjectEvent(EventMgr::CreateKeyEvent(key, true, mod));
+				pressesSent++;
+			}
+			wm->InjectEvent(EventMgr::CreateTextEvent(std::string(1, c).c_str()));
+			wm->InjectEvent(EventMgr::CreateKeyEvent(key, false, mod));
+		}
+		press(send ? GEM_RETURN : GEM_ESCAPE);
+		Log(MESSAGE, "Net", "Test typing: typed '{}' ({} key presses got through, as SDL lets them) and pressed {}, text input is {}.", text, pressesSent, send ? "Enter" : "Esc", VideoDriver->InTextInput() ? "on" : "off");
+	}
+
 	void SelectOnly(Actor* actor) const
 	{
 		Game* game = core->GetGame();
@@ -4336,7 +4541,8 @@ except Exception as e:
 	// give an order through the same GameControl calls a click makes. Orders:
 	// select N | selectall | selectmine | move X.Y | attack NAME | cast SPELL NAME | door NAME | pick NAME |
 	// travel REGION | pause | unpause | desync | resync | chat TEXT | spawn CRE X.Y [NAME] | remove NAME|spawned |
-	// jump N X.Y | say NAME TEXT | toggledoor NAME | owner N SLOT
+	// jump N X.Y | say NAME TEXT | toggledoor NAME | owner N SLOT | type TEXT | typeesc TEXT (M1.7: the chat line,
+	// typed key by key)
 	void RunTestOrders()
 	{
 		size_t start = 0;
@@ -4394,6 +4600,8 @@ except Exception as e:
 			RequestResync(NetResyncRequest::MANUAL);
 		} else if (verb == "chat") {
 			SendChat(arg);
+		} else if (verb == "type" || verb == "typeesc") {
+			TestType(arg, verb == "type");
 		} else if (verb == "spawn") {
 			// spawn CRE X.Y [NAME], what CreateCreature does
 			Point p;
@@ -4674,6 +4882,11 @@ void NetSession::SendChat(const std::string& text)
 	impl->SendChat(text);
 }
 
+size_t NetSession::ReplayChat()
+{
+	return impl->ReplayChat();
+}
+
 bool NetSession::ForwardAction(const Actor& actor, const Action& action, uint8_t flags)
 {
 	return impl->ForwardAction(actor, action, flags);
@@ -4864,6 +5077,11 @@ void NetSession::PreTick() {}
 void NetSession::PostTick() {}
 void NetSession::Frame() {}
 void NetSession::SendChat(const std::string&) {}
+
+size_t NetSession::ReplayChat()
+{
+	return 0;
+}
 
 bool NetSession::ForwardAction(const Actor&, const Action&, uint8_t)
 {

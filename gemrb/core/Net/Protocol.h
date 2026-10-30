@@ -29,7 +29,7 @@
 namespace GemRB {
 
 constexpr uint8_t NET_MAGIC = 0xE7;
-constexpr uint8_t NET_PROTOCOL_VERSION = 5;
+constexpr uint8_t NET_PROTOCOL_VERSION = 6;
 constexpr uint16_t NET_DEFAULT_PORT = 27015;
 constexpr size_t NET_HEADER_SIZE = 3;
 constexpr size_t NET_MAX_STRING = 1024;
@@ -54,6 +54,8 @@ constexpr size_t NET_GUI_ARGS = 8;
 constexpr uint8_t NET_PARTY_SLOTS = 6;
 // a lighter area change carries the area as an ARE file
 constexpr size_t NET_MAX_AREA_SIZE = 16 * 1024 * 1024;
+// chat lines a player keeps, and gets from the host on joining (lobby and game alike)
+constexpr size_t NET_CHAT_HISTORY = 40;
 
 enum class NetChannel : uint8_t {
 	Reliable = 0, // ordered and reliable: handshake, chat, commands, events
@@ -98,6 +100,7 @@ enum class NetMsgType : uint8_t {
 	LobbyReady, // client -> host, the player's ready toggle
 	AreaData, // host -> client, the party moved: the new area as an ARE, instead of a whole save
 	Globals, // host -> client, global variables that changed
+	ChatHistory, // host -> client, the recent chat a joining player missed
 	count
 };
 
@@ -200,10 +203,18 @@ struct GEM_EXPORT NetReject {
 	bool Read(NetReader& r);
 };
 
+// a chat line; clients send text (and a whisper's target), the host fills in who said it
 struct GEM_EXPORT NetChat {
 	static constexpr NetMsgType Type = NetMsgType::Chat;
+	enum Flags : uint8_t {
+		WHISPER = 1, // to the target only; the host routes it and relays it to nobody else
+		SYSTEM = 2 // the host says so: someone joined, left or rejoined (slot and name are theirs)
+	};
 	uint8_t slot = 0;
+	uint8_t flags = 0;
+	uint8_t target = 0; // whispers
 	std::string name;
+	std::string targetName; // whispers, filled in by the host
 	std::string text;
 
 	void Write(NetWriter& w) const;
@@ -771,6 +782,16 @@ struct NetVariable {
 struct GEM_EXPORT NetGlobals {
 	static constexpr NetMsgType Type = NetMsgType::Globals;
 	std::vector<NetVariable> vars; // at most NET_MAX_ACTORS
+
+	void Write(NetWriter& w) const;
+	bool Read(NetReader& r);
+};
+
+// what a joining player missed: the last NET_CHAT_HISTORY lines it may see, oldest first;
+// replaces what it had (a rejoin)
+struct GEM_EXPORT NetChatHistory {
+	static constexpr NetMsgType Type = NetMsgType::ChatHistory;
+	std::vector<NetChat> lines;
 
 	void Write(NetWriter& w) const;
 	bool Read(NetReader& r);

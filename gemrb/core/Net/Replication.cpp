@@ -450,4 +450,181 @@ uint64_t NetMessageHash(const NetStoreState& msg)
 	return EncodedHash(msg);
 }
 
+// chat --------------------------------------------------------------------
+
+// names: a palette that stays apart on the dark message window; the host gets gold
+static constexpr const char* CHAT_COLORS[] = { "F0C850FF", "70B8FFFF", "7CE07CFF", "F090E0FF", "50E0D0FF", "FFA050FF" };
+static constexpr const char* CHAT_SYSTEM_COLOR = "B4B4AAFF";
+static constexpr const char* CHAT_WHISPER_COLOR = "C8A8FFFF";
+
+bool NetChatVisibleTo(const NetChat& chat, uint8_t slot)
+{
+	if (!(chat.flags & NetChat::WHISPER)) return true;
+	return chat.slot == slot || chat.target == slot;
+}
+
+const char* NetChatColor(uint8_t slot)
+{
+	return CHAT_COLORS[slot % (sizeof(CHAT_COLORS) / sizeof(CHAT_COLORS[0]))];
+}
+
+// player text may not open or close tags: the markup parser has no escapes
+static std::string Defuse(const std::string& text)
+{
+	std::string out = text;
+	for (char& c : out) {
+		if (c == '[') {
+			c = '(';
+		} else if (c == ']') {
+			c = ')';
+		} else if (c == '\n' || c == '\r' || c == '\t') {
+			c = ' ';
+		}
+	}
+	return out;
+}
+
+static std::string Colored(const char* color, const std::string& text)
+{
+	return "[color=" + std::string(color) + "]" + text + "[/color]";
+}
+
+std::string NetSystemMarkup(const std::string& text)
+{
+	return "[p]" + Colored(CHAT_SYSTEM_COLOR, "* " + Defuse(text)) + "[/p]";
+}
+
+std::string NetChatMarkup(const NetChat& chat, uint8_t viewer)
+{
+	std::string name = Defuse(chat.name);
+	std::string text = Defuse(chat.text);
+	if (chat.flags & NetChat::SYSTEM) {
+		return NetSystemMarkup(chat.text);
+	}
+	if (!(chat.flags & NetChat::WHISPER)) {
+		return "[p]" + Colored(NetChatColor(chat.slot), name + ":") + " " + text + "[/p]";
+	}
+	if (chat.slot == viewer) {
+		// our own whisper: who it went to
+		return "[p]" + Colored(CHAT_WHISPER_COLOR, "(to ") + Colored(NetChatColor(chat.target), Defuse(chat.targetName)) + Colored(CHAT_WHISPER_COLOR, ") " + text) + "[/p]";
+	}
+	if (chat.target == viewer) {
+		return "[p]" + Colored(NetChatColor(chat.slot), name) + Colored(CHAT_WHISPER_COLOR, " whispers: " + text) + "[/p]";
+	}
+	return "[p]" + Colored(NetChatColor(chat.slot), name) + Colored(CHAT_WHISPER_COLOR, " to " + Defuse(chat.targetName) + ": " + text) + "[/p]";
+}
+
+std::string NetChatPlain(const NetChat& chat, uint8_t viewer)
+{
+	if (chat.flags & NetChat::SYSTEM) {
+		return "* " + chat.text;
+	}
+	if (!(chat.flags & NetChat::WHISPER)) {
+		return chat.name + ": " + chat.text;
+	}
+	if (chat.slot == viewer) {
+		return "(to " + chat.targetName + ") " + chat.text;
+	}
+	if (chat.target == viewer) {
+		return chat.name + " whispers: " + chat.text;
+	}
+	return chat.name + " to " + chat.targetName + ": " + chat.text;
+}
+
+static std::string Lower(std::string text)
+{
+	for (char& c : text) {
+		if (c >= 'A' && c <= 'Z') c = char(c - 'A' + 'a');
+	}
+	return text;
+}
+
+static std::string TrimLeft(const std::string& text)
+{
+	size_t start = text.find_first_not_of(' ');
+	return start == std::string::npos ? std::string() : text.substr(start);
+}
+
+static std::string Trim(const std::string& text)
+{
+	std::string out = TrimLeft(text);
+	size_t end = out.find_last_not_of(' ');
+	return end == std::string::npos ? std::string() : out.substr(0, end + 1);
+}
+
+static NetChatCommand Notice(const std::string& text)
+{
+	NetChatCommand cmd;
+	cmd.kind = NetChatCommand::Kind::Notice;
+	cmd.text = text;
+	return cmd;
+}
+
+static const NetLobbyPlayer* PlayerBySlot(const std::vector<NetLobbyPlayer>& players, int slot)
+{
+	for (const auto& player : players) {
+		if (player.slot == slot) return &player;
+	}
+	return nullptr;
+}
+
+static NetChatCommand Whisper(const NetLobbyPlayer* player, const std::string& text, uint8_t self)
+{
+	if (player->slot == self) return Notice("You can't whisper to yourself.");
+	if (!(player->flags & NetLobbyPlayer::CONNECTED)) return Notice(player->name + " is away.");
+	if (text.empty()) return Notice("Whisper what? /w " + player->name + " text");
+	NetChatCommand cmd;
+	cmd.kind = NetChatCommand::Kind::Whisper;
+	cmd.target = player->slot;
+	cmd.targetName = player->name;
+	cmd.text = text;
+	return cmd;
+}
+
+static constexpr const char* CHAT_HELP = "Chat: /w NAME text whispers to one player, /r text answers the last whisper.";
+
+NetChatCommand NetParseChat(const std::string& line, const std::vector<NetLobbyPlayer>& players, uint8_t self, int lastWhisperer)
+{
+	std::string text = Trim(line);
+	NetChatCommand cmd;
+	if (text.empty()) return cmd;
+	if (text[0] != '/' || text.compare(0, 2, "//") == 0) {
+		cmd.kind = NetChatCommand::Kind::Say;
+		cmd.text = text[0] == '/' ? text.substr(1) : text;
+		return cmd;
+	}
+
+	size_t space = text.find(' ');
+	std::string verb = Lower(text.substr(1, space == std::string::npos ? std::string::npos : space - 1));
+	std::string rest = space == std::string::npos ? std::string() : TrimLeft(text.substr(space + 1));
+	if (verb == "w" || verb == "whisper" || verb == "tell" || verb == "t") {
+		if (rest.empty()) return Notice(CHAT_HELP);
+		// the longest name the rest starts with, followed by a space or nothing
+		const NetLobbyPlayer* best = nullptr;
+		std::string lowRest = Lower(rest);
+		for (const auto& player : players) {
+			std::string name = Lower(player.name);
+			if (name.empty() || lowRest.compare(0, name.size(), name) != 0) continue;
+			if (lowRest.size() > name.size() && lowRest[name.size()] != ' ') continue;
+			if (!best || name.size() > best->name.size()) best = &player;
+		}
+		if (best) return Whisper(best, TrimLeft(rest.substr(best->name.size())), self);
+		// or a player number
+		size_t end = rest.find(' ');
+		std::string word = rest.substr(0, end);
+		if (!word.empty() && word.size() <= 2 && word.find_first_not_of("0123456789") == std::string::npos) {
+			const NetLobbyPlayer* player = PlayerBySlot(players, std::stoi(word));
+			if (player) return Whisper(player, end == std::string::npos ? std::string() : TrimLeft(rest.substr(end)), self);
+		}
+		return Notice("Nobody here is called '" + word + "'.");
+	}
+	if (verb == "r" || verb == "reply") {
+		const NetLobbyPlayer* player = lastWhisperer < 0 ? nullptr : PlayerBySlot(players, lastWhisperer);
+		if (!player) return Notice("Nobody has whispered to you yet.");
+		return Whisper(player, rest, self);
+	}
+	if (verb == "help" || verb == "?") return Notice(CHAT_HELP);
+	return Notice("Unknown command '/" + verb + "'. " + CHAT_HELP);
+}
+
 }

@@ -742,6 +742,12 @@ bool GameControl::OnKeyPress(const KeyboardEvent& Key, unsigned short mod)
 		return true;
 	}
 
+	// co-op: Enter opens the chat line (BG style); text fields have the key to themselves
+	if (keycode == GEM_RETURN && core->GetNetSession()) {
+		core->GetGUIScriptEngine()->RunFunction("NetChat", "OpenInput");
+		return true;
+	}
+
 	switch (keycode) {
 		case GEM_UP:
 		case GEM_DOWN:

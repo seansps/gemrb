@@ -841,4 +841,61 @@ TEST(NetProtocolTest, AreaDataAndGlobalsRoundTrip)
 	EXPECT_EQ(call2.text, call.text);
 }
 
+TEST(NetProtocolTest, ChatWhisperAndHistoryRoundTrip)
+{
+	NetChat whisper;
+	whisper.slot = 2;
+	whisper.flags = NetChat::WHISPER;
+	whisper.target = 1;
+	whisper.name = "client-two";
+	whisper.targetName = "client-one";
+	whisper.text = "psst";
+	auto data = NetEncode(whisper);
+	// header, slot, flags, target, then three strings
+	EXPECT_EQ(data.size(), NET_HEADER_SIZE + 3 + 2 + 10 + 2 + 10 + 2 + 4);
+	EXPECT_EQ(data[1], 6);
+	NetChat out;
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), out));
+	EXPECT_EQ(out.slot, 2);
+	EXPECT_EQ(out.flags, NetChat::WHISPER);
+	EXPECT_EQ(out.target, 1);
+	EXPECT_EQ(out.targetName, "client-one");
+	EXPECT_EQ(out.text, "psst");
+
+	// unknown flags and slots past the last player are refused
+	auto bad = data;
+	bad[NET_HEADER_SIZE + 1] = 4;
+	EXPECT_FALSE(NetDecode(bad.data(), bad.size(), out));
+	bad = data;
+	bad[NET_HEADER_SIZE + 2] = NET_MAX_PEERS + 1;
+	EXPECT_FALSE(NetDecode(bad.data(), bad.size(), out));
+	// a v5 peer's chat (no flags, target or target name) doesn't decode, and its version is refused
+	bad = data;
+	bad[1] = 5;
+	NetMsgType type;
+	EXPECT_FALSE(NetPeekType(bad.data(), bad.size(), type));
+
+	NetChatHistory history;
+	for (int i = 0; i < 50; ++i) {
+		NetChat line;
+		line.slot = uint8_t(i % 4);
+		line.flags = i % 10 == 0 ? NetChat::SYSTEM : 0;
+		line.name = "p" + std::to_string(i % 4);
+		line.text = "line " + std::to_string(i);
+		history.lines.push_back(line);
+	}
+	data = NetEncode(history);
+	NetChatHistory history2;
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), history2));
+	// only the newest NET_CHAT_HISTORY go out, oldest first
+	ASSERT_EQ(history2.lines.size(), NET_CHAT_HISTORY);
+	EXPECT_EQ(history2.lines.front().text, "line 10");
+	EXPECT_EQ(history2.lines.front().flags, NetChat::SYSTEM);
+	EXPECT_EQ(history2.lines.back().text, "line 49");
+	EXPECT_EQ(history2.lines.back().slot, 1);
+	for (size_t len = 0; len < data.size(); len += 7) {
+		EXPECT_FALSE(NetDecode(data.data(), len, history2)) << "len " << len;
+	}
+}
+
 }

@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <map>
+#include <set>
 
 namespace GemRB {
 
@@ -485,6 +486,104 @@ TEST(NetReplicationTest, AreaChangePayload)
 	EXPECT_EQ(table[1].netID, 3U);
 	EXPECT_EQ(table[2].netID, 4U);
 	EXPECT_EQ(table[3].netID, 5U);
+}
+
+static std::vector<NetLobbyPlayer> ChatPlayers()
+{
+	std::vector<NetLobbyPlayer> players(4);
+	const char* names[] = { "Host Player", "client-one", "client-two", "Host" };
+	for (uint8_t i = 0; i < 4; ++i) {
+		players[i].slot = i;
+		players[i].name = names[i];
+		players[i].flags = NetLobbyPlayer::CONNECTED;
+	}
+	players[3].flags = 0; // away
+	return players;
+}
+
+TEST(NetReplicationTest, ChatCommands)
+{
+	auto players = ChatPlayers();
+	NetChatCommand cmd = NetParseChat("  hello there ", players, 1, -1);
+	EXPECT_EQ(cmd.kind, NetChatCommand::Kind::Say);
+	EXPECT_EQ(cmd.text, "hello there");
+	EXPECT_EQ(NetParseChat("   ", players, 1, -1).kind, NetChatCommand::Kind::Nothing);
+	cmd = NetParseChat("//slash", players, 1, -1);
+	EXPECT_EQ(cmd.kind, NetChatCommand::Kind::Say);
+	EXPECT_EQ(cmd.text, "/slash");
+
+	// by name, any case, the longest name that fits: "Host Player" over "Host"
+	cmd = NetParseChat("/w host player meet at the gate", players, 1, -1);
+	EXPECT_EQ(cmd.kind, NetChatCommand::Kind::Whisper);
+	EXPECT_EQ(cmd.target, 0);
+	EXPECT_EQ(cmd.targetName, "Host Player");
+	EXPECT_EQ(cmd.text, "meet at the gate");
+	cmd = NetParseChat("/tell CLIENT-TWO hi", players, 1, -1);
+	EXPECT_EQ(cmd.kind, NetChatCommand::Kind::Whisper);
+	EXPECT_EQ(cmd.target, 2);
+	EXPECT_EQ(cmd.text, "hi");
+	// by number
+	cmd = NetParseChat("/whisper 2 hi", players, 1, -1);
+	EXPECT_EQ(cmd.kind, NetChatCommand::Kind::Whisper);
+	EXPECT_EQ(cmd.target, 2);
+	// a name must end at a space: "client-ones" is nobody
+	EXPECT_EQ(NetParseChat("/w client-ones hi", players, 2, -1).kind, NetChatCommand::Kind::Notice);
+	EXPECT_EQ(NetParseChat("/w client-one hi", players, 1, -1).text, "You can't whisper to yourself.");
+	EXPECT_EQ(NetParseChat("/w Host hi", players, 1, -1).text, "Host is away.");
+	EXPECT_EQ(NetParseChat("/w client-two", players, 1, -1).kind, NetChatCommand::Kind::Notice);
+	EXPECT_EQ(NetParseChat("/w", players, 1, -1).kind, NetChatCommand::Kind::Notice);
+	EXPECT_EQ(NetParseChat("/w 9 hi", players, 1, -1).kind, NetChatCommand::Kind::Notice);
+	// replies go to whoever whispered last
+	EXPECT_EQ(NetParseChat("/r thanks", players, 1, -1).kind, NetChatCommand::Kind::Notice);
+	cmd = NetParseChat("/r thanks", players, 1, 2);
+	EXPECT_EQ(cmd.kind, NetChatCommand::Kind::Whisper);
+	EXPECT_EQ(cmd.target, 2);
+	EXPECT_EQ(cmd.text, "thanks");
+	EXPECT_EQ(NetParseChat("/dance", players, 1, -1).kind, NetChatCommand::Kind::Notice);
+}
+
+TEST(NetReplicationTest, ChatLines)
+{
+	NetChat say;
+	say.slot = 2;
+	say.name = "client-two";
+	say.text = "look [color=FF0000FF]red[/color]";
+	EXPECT_EQ(NetChatPlain(say, 0), "client-two: look [color=FF0000FF]red[/color]");
+	// player markup is defused, the name is in the slot's colour
+	EXPECT_EQ(NetChatMarkup(say, 0), std::string("[p][color=") + NetChatColor(2) + "]client-two:[/color] look (color=FF0000FF)red(/color)[/p]");
+
+	// every slot has its own colour, the host too
+	std::set<std::string> colors;
+	for (uint8_t s = 0; s <= NET_MAX_PEERS; ++s) {
+		colors.insert(NetChatColor(s));
+	}
+	EXPECT_EQ(colors.size(), size_t(NET_MAX_PEERS) + 1);
+
+	NetChat whisper;
+	whisper.slot = 1;
+	whisper.flags = NetChat::WHISPER;
+	whisper.target = 2;
+	whisper.name = "client-one";
+	whisper.targetName = "client-two";
+	whisper.text = "psst";
+	EXPECT_TRUE(NetChatVisibleTo(whisper, 1));
+	EXPECT_TRUE(NetChatVisibleTo(whisper, 2));
+	EXPECT_FALSE(NetChatVisibleTo(whisper, 0));
+	EXPECT_FALSE(NetChatVisibleTo(whisper, 3));
+	EXPECT_TRUE(NetChatVisibleTo(say, 3));
+	EXPECT_EQ(NetChatPlain(whisper, 1), "(to client-two) psst");
+	EXPECT_EQ(NetChatPlain(whisper, 2), "client-one whispers: psst");
+	EXPECT_NE(NetChatMarkup(whisper, 1).find(std::string("[color=") + NetChatColor(2) + "]client-two[/color]"), std::string::npos);
+	EXPECT_NE(NetChatMarkup(whisper, 2).find(" whispers: psst"), std::string::npos);
+
+	NetChat system;
+	system.slot = 1;
+	system.flags = NetChat::SYSTEM;
+	system.name = "client-one";
+	system.text = "client-one joined.";
+	EXPECT_EQ(NetChatPlain(system, 0), "* client-one joined.");
+	EXPECT_EQ(NetChatMarkup(system, 3), NetSystemMarkup("client-one joined."));
+	EXPECT_EQ(NetChatMarkup(system, 3).find(NetChatColor(1)), std::string::npos); // neutral, not the slot's
 }
 
 }

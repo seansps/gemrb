@@ -75,7 +75,10 @@ public:
 	/** once per drawn frame: clients smooth actor movement between snapshots */
 	void Frame();
 
+	/** what the player typed: said to everyone, or a command (/w NAME text whispers, /r replies) */
 	void SendChat(const std::string& text);
+	/** the message window was made anew: shows the recent chat (lobby included) in it again */
+	size_t ReplayChat();
 	/** client: send a player order (NetCommand::Flags) for a local actor to the host; false if it wasn't forwarded */
 	bool ForwardAction(const Actor& actor, const Action& action, uint8_t flags);
 	/** client: the player sent the actor through a travel region */

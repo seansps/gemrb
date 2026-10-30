@@ -10,6 +10,7 @@
 #include "GUI/EventMgr.h"
 #include "GUI/ScrollBar.h"
 #include "Logging/Logging.h"
+#include "Video/Video.h"
 
 #include <utility>
 
@@ -101,6 +102,10 @@ void TextArea::SpanSelector::SizeChanged(const Size&)
 
 bool TextArea::SpanSelector::KeyEvent(const Event& event)
 {
+	// co-op: keys typed into a text field (the chat line) aren't picks, eg. shift+1 for '!'
+	if (core->GetNetSession() && VideoDriver->InTextInput()) {
+		return false;
+	}
 	return OnKeyPress(event.keyboard, 0);
 }
 

@@ -3840,8 +3840,11 @@ PyDoc_STRVAR(GemRB_NetChat__doc,
 \n\
 **Prototype:** GemRB.NetChat (Text)\n\
 \n\
-**Description:** Sends a chat line to the other players of a co-op session. \n\
-Does nothing in single player.\n\
+**Description:** Sends a chat line to the other players of a co-op session, \n\
+as the player typed it: '/w NAME text' (or /whisper, /tell) whispers to one \n\
+player, '/r text' answers the last whisper, '//text' says '/text'. Mistakes \n\
+(unknown names or commands) are shown to this player only. Does nothing in \n\
+single player.\n\
 \n\
 **Parameters:**\n\
   * Text - the message (UTF-8)\n\
@@ -3860,6 +3863,24 @@ static PyObject* GemRB_NetChat(PyObject* /*self*/, PyObject* args)
 	}
 	net->SendChat(text);
 	Py_RETURN_TRUE;
+}
+
+PyDoc_STRVAR(GemRB_NetChatReplay__doc,
+	     "===== NetChatReplay =====\n\
+\n\
+**Prototype:** GemRB.NetChatReplay ()\n\
+\n\
+**Description:** Shows the recent chat of a co-op session (the lobby's \n\
+included) in the message window again, for a message window that was just \n\
+made, eg. after loading the host's game. Does nothing in single player.\n\
+\n\
+**Return value:** int, the number of lines shown\n\
+");
+
+static PyObject* GemRB_NetChatReplay(PyObject* /*self*/, PyObject* /*args*/)
+{
+	NetSession* net = core->GetNetSession();
+	return PyLong_FromLong(net ? long(net->ReplayChat()) : 0);
 }
 
 PyDoc_STRVAR(GemRB_NetGetMode__doc,
@@ -4697,8 +4718,9 @@ static PyObject* GemRB_SaveGame(PyObject* /*self*/, PyObject* args)
 		return RuntimeError("No savegame iterator");
 	}
 
+	// the preview is optional: left out, or None
 	Holder<Sprite2D> areaPic;
-	if (preview != Py_None) {
+	if (preview && preview != Py_None) {
 		areaPic = SpriteFromPy(preview);
 	}
 
@@ -13355,6 +13377,7 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(NetAllowed, METH_VARARGS),
 	METHOD(NetAssign, METH_VARARGS),
 	METHOD(NetChat, METH_VARARGS),
+	METHOD(NetChatReplay, METH_NOARGS),
 	METHOD(NetGetConfig, METH_NOARGS),
 	METHOD(NetGetLobby, METH_NOARGS),
 	METHOD(NetGetMode, METH_NOARGS),
