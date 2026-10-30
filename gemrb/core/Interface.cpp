@@ -1503,6 +1503,7 @@ static const EnumArray<GFFlags, StringView> game_flags {
 	"GreyDisabledControls", // GFFlags::GREY_DISABLED_CONTROLS
 	"NameEveryoneOnTab", // GFFlags::NAME_EVERYONE_ON_TAB
 	"OrderedKnownSpells", // GFFlags::ORDERED_KNOWN_SPELLS
+	"DCCRules", // GFFlags::RULES_DCC
 };
 
 /** Loads gemrb.ini */
@@ -1599,6 +1600,13 @@ void Interface::LoadGemRBINI()
 			SetFeature(flag);
 		} else {
 			ClearFeature(flag);
+		}
+	}
+
+	if (HasFeature(GFFlags::RULES_DCC)) {
+		Log(MESSAGE, "Core", "DCC ruleset active.");
+		if (HasFeature(GFFlags::RULES_3ED)) {
+			Log(WARNING, "Core", "Both DCCRules and 3EdRules are set; the 3rd edition paths will run too.");
 		}
 	}
 
