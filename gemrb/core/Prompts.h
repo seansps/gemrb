@@ -149,6 +149,9 @@ private:
 	bool haveView = false;
 	bool guiDirty = false;
 	bool pausedByUs = false;
+	// the key that answered still goes to the event taps after the window (the dialog's numbered
+	// replies): we keep the keys until the next tick
+	bool keyGrace = false;
 	Travel travel;
 	unsigned int testTicks = 0;
 };

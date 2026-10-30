@@ -118,6 +118,7 @@ bool PromptManager::Busy() const
 
 void PromptManager::Update()
 {
+	keyGrace = false;
 	if (IsClient()) {
 		if (guiDirty) Notify();
 		return;
@@ -403,7 +404,7 @@ uint32_t PromptManager::Remaining() const
 
 bool PromptManager::TakesKeys() const
 {
-	return haveView && view.mine && !view.sent;
+	return haveView && view.mine && (!view.sent || keyGrace);
 }
 
 bool PromptManager::AnswerLocal(uint32_t id, const std::vector<int32_t>& values)
@@ -423,6 +424,7 @@ bool PromptManager::AnswerLocal(uint32_t id, const std::vector<int32_t>& values)
 		answer.values = values;
 		if (!net->SendPromptAnswer(answer)) return false;
 		view.sent = true;
+		keyGrace = true;
 		guiDirty = true;
 		Log(MESSAGE, "Prompt", "Answered prompt #{}: {} (sent to the host).", id, PromptAnswerText(view.question, values));
 		return true;
@@ -431,6 +433,7 @@ bool PromptManager::AnswerLocal(uint32_t id, const std::vector<int32_t>& values)
 	Log(MESSAGE, "Prompt", "Answered prompt #{}: {} ({}).", id, PromptAnswerText(view.question, values), PromptQueue::StatusName(status));
 	if (status != PromptQueue::Status::Accepted) return false;
 	view.sent = true;
+	keyGrace = true;
 	guiDirty = true;
 	return true;
 }

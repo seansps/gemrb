@@ -4075,10 +4075,14 @@ static PyObject* GemRB_AnswerPrompt(PyObject* /*self*/, PyObject* args)
 		answer.push_back(int32_t(PyLong_AsLong(values)));
 	} else if (PyList_Check(values) || PyTuple_Check(values)) {
 		PyObject* seq = PySequence_Fast(values, "");
+		bool ints = true;
 		for (Py_ssize_t i = 0; i < PySequence_Fast_GET_SIZE(seq); ++i) {
-			answer.push_back(int32_t(PyLong_AsLong(PySequence_Fast_GET_ITEM(seq, i))));
+			PyObject* item = PySequence_Fast_GET_ITEM(seq, i);
+			ints = ints && PyLong_Check(item);
+			if (ints) answer.push_back(int32_t(PyLong_AsLong(item)));
 		}
 		Py_DecRef(seq);
+		if (!ints) return RuntimeError("AnswerPrompt: Values must be an int or a list of ints!");
 	} else {
 		return RuntimeError("AnswerPrompt: Values must be an int or a list of ints!");
 	}
