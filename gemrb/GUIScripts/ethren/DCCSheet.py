@@ -10,7 +10,7 @@ import GemRB
 Abilities = ("Str", "Agi", "Sta", "Per", "Int", "Luck")
 AbilityNames = ("Strength", "Agility", "Stamina", "Personality", "Intelligence", "Luck")
 States = ((1, "immobile"), (2, "unconscious"), (4, "witless"), (8, "cursed by fortune"))
-CritTables = ("-", "I", "II", "III", "IV", "V")
+CritTables = ("-", "I", "II", "III", "IV", "V", "M", "DR", "DN", "G", "U") # IE_DCC_CRITTABLE: I-V, then the monster tables
 Alignments = ("Lawful", "Chaotic", "Neutral")
 SkillNames = (
 	("BACKSTAB", "Backstab"), ("SNEAK", "Sneak silently"), ("HIDE", "Hide in shadows"),

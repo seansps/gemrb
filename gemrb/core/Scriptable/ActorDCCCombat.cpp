@@ -222,6 +222,17 @@ static const CREItem* ShieldItem(const Actor* actor)
 	return slot < 0 ? nullptr : actor->inventory.GetSlotItem(slot);
 }
 
+// a weapon or shield broken by a crit or fumble: gone, and the best other weapon comes out.
+// Not Inventory::BreakItemSlot, which also drops the item from the resource cache while
+// other creatures may still wield the same item
+static void DestroySlotItem(Actor* holder, int slot)
+{
+	delete holder->inventory.RemoveItem(slot, 0);
+	if (!holder->inventory.EquipBestWeapon(EQUIP_MELEE)) {
+		holder->inventory.CacheAllWeaponInfo();
+	}
+}
+
 static const CREItem* ArmorItem(const Actor* actor)
 {
 	return actor->inventory.GetSlotItem(Inventory::GetArmorSlot());
@@ -322,6 +333,11 @@ void Actor::DCCAttack(Actor* target, bool viaProjectile)
 		swing.damageBonus = strMod + swing.deed + damageAugur + header->DamageBonus + swing.wi->launcherDmgBonus + Signed(GetStat(IE_DAMAGEBONUS));
 	}
 
+	// one-shot modifiers are in the totals now: the attacker's "next attack" ones and the
+	// target's "next attack against" ones end (a fumble below may add new ones)
+	fxqueue.RemoveAllEffectsWithParam(fx_dcc_combat_ref, static_cast<ieDword>(CombatEffect::NextAttack));
+	target->fxqueue.RemoveAllEffectsWithParam(fx_dcc_combat_ref, static_cast<ieDword>(CombatEffect::NextDefense));
+
 	// roll both dice together, so the halfling double-1 rule can see them
 	for (auto& swing : swings) {
 		swing.record.natural = DCCDie(AttackDie(swing.in.actionDie, swing.in.dieSteps));
@@ -357,9 +373,6 @@ void Actor::DCCAttack(Actor* target, bool viaProjectile)
 		core->ApplyEffect(std::move(fx), target, this);
 	}
 
-	// one-shot modifiers: the attacker's "next attack" ones and the target's "next attack against" ones
-	fxqueue.RemoveAllEffectsWithParam(fx_dcc_combat_ref, static_cast<ieDword>(CombatEffect::NextAttack));
-	target->fxqueue.RemoveAllEffectsWithParam(fx_dcc_combat_ref, static_cast<ieDword>(CombatEffect::NextDefense));
 }
 
 // ---------------------------------------------------------------------------
@@ -455,7 +468,7 @@ static String ApplyFor(EffectRef& ref, ieDword p1, ieDword p2, const Duration& d
 		fx = EffectQueue::CreateEffect(ref, p1, p2, FX_DURATION_INSTANT_LIMITED);
 		fx->Duration = DurationSeconds(duration.kind, amount, core->Time.round_sec);
 		static const char16_t* units[] = { u"round", u"turn", u"hour", u"day", u"week" };
-		what = fmt::format(u"{} {}{}", amount, units[static_cast<int>(duration.kind)], amount == 1 ? u"" : u"s");
+		what = fmt::format(u"for {} {}{}", amount, units[static_cast<int>(duration.kind)], amount == 1 ? u"" : u"s");
 	}
 	if (!fx) return what;
 	fx->Parameter3 = p3;
@@ -550,23 +563,23 @@ static void ApplyTerm(const TableTerm& term, RowContext& ctx, const WeaponInfo& 
 		ctx.extraDamage += extra;
 		note = fmt::format(u"+{} = {} damage", Widen(arg(0)), extra);
 	} else if (key == "PRONE") {
-		note = u"prone for " + ApplyCombat(CombatEffect::Prone, 1, TermDuration(term, 0), who, attacker);
+		note = u"prone " + ApplyCombat(CombatEffect::Prone, 1, TermDuration(term, 0), who, attacker);
 	} else if (key == "NOATTACK") {
-		note = u"can't attack for " + ApplyCombat(CombatEffect::NoAttack, 1, TermDuration(term, 0), who, attacker);
+		note = u"can't attack " + ApplyCombat(CombatEffect::NoAttack, 1, TermDuration(term, 0), who, attacker);
 	} else if (key == "INITBOTTOM") {
-		note = u"acts last for " + ApplyCombat(CombatEffect::InitBottom, 1, TermDuration(term, 0), who, attacker);
+		note = u"acts last " + ApplyCombat(CombatEffect::InitBottom, 1, TermDuration(term, 0), who, attacker);
 	} else if (key == "STUN") {
-		note = u"stunned for " + ApplyFor(fx_dcc_stun_ref, 0, 0, TermDuration(term, 0), who, attacker);
+		note = u"stunned " + ApplyFor(fx_dcc_stun_ref, 0, 0, TermDuration(term, 0), who, attacker);
 	} else if (key == "BLIND") {
-		note = u"blinded for " + ApplyFor(fx_dcc_blind_ref, 0, 0, TermDuration(term, 0), who, attacker);
+		note = u"blinded " + ApplyFor(fx_dcc_blind_ref, 0, 0, TermDuration(term, 0), who, attacker);
 	} else if (key == "DEAF") {
-		note = u"deafened for " + ApplyFor(fx_dcc_deaf_ref, 0, 0, TermDuration(term, 0), who, attacker);
+		note = u"deafened " + ApplyFor(fx_dcc_deaf_ref, 0, 0, TermDuration(term, 0), who, attacker);
 	} else if (key == "MUTE") {
-		note = u"can't speak or cast for " + ApplyFor(fx_dcc_silence_ref, 0, 0, TermDuration(term, 0), who, attacker);
+		note = u"can't speak or cast " + ApplyFor(fx_dcc_silence_ref, 0, 0, TermDuration(term, 0), who, attacker);
 	} else if (key == "UNCON") {
-		note = u"unconscious for " + ApplyFor(fx_dcc_sleep_ref, 0, 1, TermDuration(term, 0), who, attacker);
+		note = u"unconscious " + ApplyFor(fx_dcc_sleep_ref, 0, 1, TermDuration(term, 0), who, attacker);
 	} else if (key == "PARALYZE" || key == "HELD") {
-		note = (key == "HELD" ? u"can't move or attack for " : u"paralyzed for ") + ApplyFor(fx_dcc_hold_ref, 0, 0, TermDuration(term, 0), who, attacker);
+		note = (key == "HELD" ? u"can't move or attack " : u"paralyzed ") + ApplyFor(fx_dcc_hold_ref, 0, 0, TermDuration(term, 0), who, attacker);
 	} else if (key == "SPEED") {
 		std::string what = arg(0);
 		int percent = 100;
@@ -577,13 +590,13 @@ static void ApplyTerm(const TableTerm& term, RowContext& ctx, const WeaponInfo& 
 		} else {
 			percent = std::max(0, (30 + argInt(0, 0)) * 100 / 30); // feet off a 30' move
 		}
-		note = fmt::format(u"speed {}% for ", percent) + ApplyFor(fx_dcc_movement_ref, percent, 2, TermDuration(term, 1), who, attacker);
+		note = fmt::format(u"speed {}% ", percent) + ApplyFor(fx_dcc_movement_ref, percent, 2, TermDuration(term, 1), who, attacker);
 	} else if (key == "ATK") {
 		int value = argInt(0, 0);
-		note = fmt::format(u"{:+} to attack for ", value) + ApplyCombat(CombatEffect::AttackMod, value, TermDuration(term, 1), who, attacker);
+		note = fmt::format(u"{:+} to attack ", value) + ApplyCombat(CombatEffect::AttackMod, value, TermDuration(term, 1), who, attacker);
 	} else if (key == "AC") {
 		int value = argInt(0, 0);
-		note = fmt::format(u"{:+} AC for ", value) + ApplyCombat(CombatEffect::ACMod, value, TermDuration(term, 1), who, attacker);
+		note = fmt::format(u"{:+} AC ", value) + ApplyCombat(CombatEffect::ACMod, value, TermDuration(term, 1), who, attacker);
 	} else if (key == "NEXTATK") {
 		int value = argInt(0, 0);
 		Duration turn;
@@ -599,7 +612,7 @@ static void ApplyTerm(const TableTerm& term, RowContext& ctx, const WeaponInfo& 
 		ApplyCombat(CombatEffect::NextDefense, -value, turn, who, attacker);
 		note = fmt::format(u"the next attack against {} gets {:+}", Name(who), value);
 	} else if (key == "DIEIN") {
-		note = u"dies in " + ApplyCombat(CombatEffect::Doomed, 1, TermDuration(term, 0), who, attacker) + u" unless healed";
+		note = u"dies unless healed, " + ApplyCombat(CombatEffect::Doomed, 1, TermDuration(term, 0), who, attacker);
 	} else if (key == "DIE") {
 		auto fx = EffectQueue::CreateEffect(fx_dcc_death_ref, 0, 4, FX_DURATION_INSTANT_PERMANENT);
 		fx->Target = FX_TARGET_PRESET;
@@ -644,12 +657,12 @@ static void ApplyTerm(const TableTerm& term, RowContext& ctx, const WeaponInfo& 
 				note = fmt::format(u"{}'s magic weapon is knocked away", Name(holder));
 			}
 		} else {
-			holder->inventory.BreakItemSlot(slot);
+			DestroySlotItem(holder, slot);
 			note = fmt::format(u"{}'s weapon breaks", Name(holder));
 		}
 	} else if (key == "SHIELD") {
 		if (!ShieldItem(ctx.target)) return;
-		ctx.target->inventory.BreakItemSlot(ctx.target->inventory.GetShieldSlot());
+		DestroySlotItem(ctx.target, ctx.target->inventory.GetShieldSlot());
 		note = fmt::format(u"{}'s shield is destroyed", Name(ctx.target));
 	} else if (key == "WEAPONDMG") {
 		const ITMExtHeader* header = ctx.target->weaponInfo[0].extHeader;
@@ -871,6 +884,7 @@ void Actor::DCCResolveSwing(DCCSwing& swing, Actor* target, int depth)
 				 FT_COMBAT);
 		}
 	}
+	record.damage = record.hit ? swing.damage : 0;
 	dccLastAttack.push_back(record);
 
 	// free attacks a crit grants: same die and hand, at once, never more than one deep
@@ -909,6 +923,8 @@ bool Actor::DCCStartBleeding()
 	int rounds = BleedOutRounds(Signed(BaseStats[IE_LEVEL]));
 	if (rounds <= 0) return false;
 
+	// the blow that drops them doesn't chunk them; they are still alive
+	LastDamageType &= ~DAMAGE_CHUNKING;
 	auto fx = EffectQueue::CreateEffect(fx_dcc_combat_ref, 0, static_cast<ieDword>(CombatEffect::Bleed), FX_DURATION_INSTANT_LIMITED);
 	fx->Duration = rounds * core->Time.round_sec;
 	fx->Target = FX_TARGET_PRESET;
