@@ -233,6 +233,8 @@ ENDIF(VITA)
 # Tests
 IF (BUILD_TESTING)
   ADD_EXECUTABLE(Test_gemrb_core
+    tests/core/DCC/Test_AbilityMod.cpp
+    tests/core/DCC/Test_DiceChain.cpp
     tests/core/Test_BucketPriorityQueue.cpp
     tests/core/Test_Map.cpp
     tests/core/Test_Movement.cpp

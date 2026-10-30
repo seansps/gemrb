@@ -1,0 +1,11 @@
+GUI scripts for Dungeons of Ethren (GameType ethren, DCC rules).
+
+ethren starts from the demo's GUI. GUIScript.cpp puts this directory first on
+the Python path and GUIScripts/demo right after it, so every module not found
+here comes from the demo (and then from the shared GUIScripts/). To change one
+of the demo's screens, copy that module here and edit the copy. New ethren-only
+screens (funnel, DCC record sheet, level-up) also go here.
+
+GameCheck.IsGemRBDemo () is true for ethren as well, since the shared scripts
+use it to pick the demo's window layouts; use GameCheck.IsEthren () for
+anything that should differ from the demo.

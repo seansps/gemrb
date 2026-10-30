@@ -127,6 +127,7 @@ enum class GFFlags : uint32_t {
 	GREY_DISABLED_CONTROLS, // bg1
 	NAME_EVERYONE_ON_TAB, // ees
 	ORDERED_KNOWN_SPELLS, // bg2, ees
+	RULES_DCC, // ethren: Dungeon Crawl Classics rules beside the stock ones
 
 	count // must be last
 };

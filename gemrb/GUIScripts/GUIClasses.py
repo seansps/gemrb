@@ -20,7 +20,8 @@ DefaultScrollbars = {
 	"how": "GUISBR",
 	"iwd2": "GBTNSCRL",
 	"pst": "CGSCRL1",
-	"demo": "scrlbar1"
+	"demo": "scrlbar1",
+	"ethren": "scrlbar1"
 }
 
 def CreateScrollbarARGs(bam = None):
