@@ -32,6 +32,7 @@
 #include "GameScript/GSUtils.h"
 #include "GameScript/GameScript.h"
 #include "GameScript/Matching.h"
+#include "Net/NetSession.h"
 #include "Scriptable/Container.h"
 #include "Scriptable/Door.h"
 #include "Scriptable/InfoPoint.h"
@@ -5427,6 +5428,12 @@ void GameScript::ExploreMapChunk(Scriptable* Sender, Holder<Action> parameters)
 
 void GameScript::StartStore(Scriptable* Sender, Holder<Action> parameters)
 {
+	// co-op: a remote player's conversation opens the store on that player's screen
+	NetSession* net = core->GetNetSession();
+	if (net && net->OnStartStore(parameters->resref0Parameter, *Sender)) {
+		Sender->ReleaseCurrentAction();
+		return;
+	}
 	if (core->GetCurrentStore()) {
 		return;
 	}
@@ -5811,6 +5818,11 @@ void GameScript::UseContainer(Scriptable* Sender, Holder<Action> parameters)
 	}
 
 	Container* container = core->GetCurrentContainer();
+	// co-op: a remote player's order names its container (int0Parameter), see NetSession
+	NetSession* net = core->GetNetSession();
+	if (net && parameters->int0Parameter) {
+		container = Scriptable::As<Container>(actor->GetCurrentArea()->GetScriptableByGlobalID(ieDword(parameters->int0Parameter)));
+	}
 	if (!container) {
 		Log(WARNING, "GameScript", "No container selected!");
 		Sender->ReleaseCurrentAction();
@@ -5854,7 +5866,11 @@ void GameScript::UseContainer(Scriptable* Sender, Holder<Action> parameters)
 			container->AddTrigger(TriggerEntry(trigger_harmlessopened, actor->GetGlobalID()));
 		}
 		container->TriggerTrap(0, actor->GetGlobalID());
-		core->SetCurrentContainer(actor, container, true);
+		if (net && parameters->int0Parameter) {
+			net->OnContainerUsed(*actor, *container);
+		} else {
+			core->SetCurrentContainer(actor, container, true);
+		}
 		Sender->ReleaseCurrentAction();
 		return;
 	}

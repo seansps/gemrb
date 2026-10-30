@@ -17,18 +17,24 @@
 #define NET_SESSION_H
 
 #include "exports.h"
+#include "ie_types.h"
 
+#include "Net/Protocol.h"
 #include "Strings/String.h"
 #include "Strings/StringView.h"
 
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace GemRB {
 
 class Action;
 class Actor;
+class Container;
+class InfoPoint;
 class Map;
 class Projectile;
 class Scriptable;
@@ -80,8 +86,28 @@ public:
 	void OnSound(StringView resource, const AudioPlaybackConfig& config, bool speech);
 	void OnProjectile(const Map& map, const Projectile& pro, uint32_t targetID, bool fake);
 	void OnAreaVfx(const Map& map, VEFObject& vvc);
-	/** both sides: the game was paused or unpaused here */
-	void OnPause(bool paused);
+	/** both sides: the game was paused or unpaused here; quiet pauses come from GUI windows */
+	void OnPause(bool paused, bool quiet = false);
+
+	// dialog: the host runs DialogHandler and shows it to everyone; the owner answers
+	/** host: a line of the conversation was said (party: a party member's reply) */
+	void OnDialogLine(const Scriptable* speaker, const String& text, bool party);
+	/** host: the conversation reached a node with these replies (DialogHandler's options) */
+	void OnDialogState(const std::vector<std::pair<int, String>>& options);
+	void OnDialogEnd();
+	/** both sides, the GUI picked a reply: true if it was handled here, ie. refused (not
+	 * the owner) or forwarded to the host (clients); false lets DialogHandler go ahead */
+	bool DialogChoiceHandled(int choice);
+
+	/** host: StartStore ran; true if it opens on a remote player's screen instead of ours */
+	bool OnStartStore(const ResRef& store, const Scriptable& merchant);
+	/** host: a remote player's party member reached and opened a container */
+	void OnContainerUsed(const Actor& actor, Container& container);
+	/** client: the player clicked a container or an info point */
+	bool ForwardUseContainer(const Actor& actor, const Container& container);
+	bool ForwardRegionClick(const Actor& actor, const InfoPoint& region);
+	/** client: a state changing GemRB.* GUI call ran here; the host runs it too, and its result replicates back */
+	void ForwardGuiCall(NetGuiOp op, std::vector<int32_t> args);
 
 private:
 	struct Impl;

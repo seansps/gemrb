@@ -8,24 +8,29 @@
 #include "ie_stats.h"
 
 #include "ActorMgr.h"
+#include "DialogHandler.h"
 #include "DisplayMessage.h"
 #include "Game.h"
 #include "GameData.h"
 #include "Interface.h"
 #include "InterfaceConfig.h"
+#include "Item.h"
 #include "Map.h"
 #include "PluginMgr.h"
 #include "Projectile.h"
 #include "ProjectileServer.h"
 #include "SaveGame.h"
 #include "SaveGameIterator.h"
+#include "ScriptEngine.h"
 #include "ScriptedAnimation.h"
+#include "Store.h"
 #include "TileMap.h"
 #include "VEFObject.h"
 
 #include "Audio/Playback.h"
 #include "Audio/PlaybackConfig.h"
 #include "GUI/GameControl.h"
+#include "GUI/TextArea.h"
 #include "GameScript/GSUtils.h"
 #include "GameScript/GameScript.h"
 #include "Logging/Logging.h"
@@ -85,6 +90,10 @@ static constexpr int SNAP_DISTANCE = 128;
 // client: consecutive checksum mismatches before asking for a resync, and the pause between such requests
 static constexpr int DESYNC_MISMATCHES = 2;
 static constexpr tick_t DESYNC_COOLDOWN = 20000;
+// stats that snapshots carry already
+static const std::vector<uint16_t> SNAPSHOT_STATS = { IE_HITPOINTS, IE_MAXHITPOINTS, IE_STATE_ID };
+// dialog replies shown to players who don't own the conversation
+static constexpr const char* READONLY_REPLY = "[p][color=A0A0A0FF]   {}. {}[/color][/p]";
 
 // one written save, ready to stream to every peer that asked for it in this tick
 struct NetSnapshot {
@@ -107,6 +116,35 @@ struct NetPeerInfo {
 	// the save it is loading; state changing events since its snapshot wait in pending
 	uint32_t awaitedTransfer = 0;
 	std::vector<std::vector<uint8_t>> pending;
+	// its GUI state on our side, swapped in while running its GUI calls
+	std::unique_ptr<ItemDragOp> dragged;
+	ieDword guiActor = 0; // the last party member its GUI calls were about
+	ieDword container = 0; // opened container (host global IDs)
+	ieDword containerActor = 0;
+	ResRef store; // opened store
+	ieDword storeActor = 0;
+	ieDword storeOwner = 0;
+};
+
+// the host's view of the conversation in progress
+struct HostDialog {
+	bool active = false;
+	uint8_t owner = NET_HOST_SLOT;
+	uint32_t seq = 0;
+	ieDword speakerID = 0;
+	ieDword targetID = 0;
+};
+
+// and the client's
+struct ClientDialog {
+	bool active = false;
+	bool ui = false; // we own it, so the full dialog GUI is up
+	bool freeze = false;
+	uint8_t owner = NET_HOST_SLOT;
+	uint32_t seq = 0;
+	std::vector<NetDialogOption> options;
+	uint16_t continueIndex = 0;
+	uint8_t buttons = 0; // NetDialog::CONTINUE or END_BUTTON
 };
 
 // a visual effect the host has told the clients about
@@ -290,6 +328,22 @@ struct NetSession::Impl {
 	uint8_t pauseRequester = NET_HOST_SLOT;
 	std::string lastSound;
 	unsigned int lastSoundTick = 0;
+	NetPermissions permissions;
+	HostDialog dialog;
+	// the last conversation, for the actions it runs once it is over (StartStore)
+	HostDialog lastDialog;
+	bool applyingChoice = false;
+	// GUI calls of remote players, run in the simulation window of the tick they arrived in
+	std::vector<std::pair<uint8_t, NetGuiCall>> guiCalls;
+	const NetPeerInfo* guiCaller = nullptr;
+	// what the clients know about inventories (actors and containers by global ID), stats and spellbooks
+	std::map<ieDword, uint64_t> inventories;
+	std::map<ieDword, Point> piles; // ground piles the clients know of, by global ID
+	std::map<ieDword, std::vector<NetStatEntry>> stats;
+	std::map<ieDword, uint64_t> spellbooks;
+	NetPartyState party;
+	bool partyDirty = false;
+	std::map<std::string, uint64_t> storeHashes; // stores remote players have open
 
 	// client side
 	ENetPeer* server = nullptr;
@@ -313,6 +367,10 @@ struct NetSession::Impl {
 	int mismatches = 0;
 	tick_t lastDesyncResync = 0;
 	unsigned int checksumsOk = 0;
+	ClientDialog clientDialog;
+	// the host's word on party members' stats, by local ID: stat -> base, modified
+	std::map<ieDword, std::map<uint16_t, std::pair<ieDword, ieDword>>> hostStats;
+	bool refreshGUI = false;
 	// smoothing statistics for the log
 	unsigned int smoothedFrames = 0;
 	unsigned int smoothedMoves = 0;
@@ -728,6 +786,7 @@ struct NetSession::Impl {
 					Log(MESSAGE, "Net", "Dropped the save transfer to slot {} after {} of {} bytes.", it->slot, it->transfer->Sent(), it->transfer->Begin().size);
 				}
 				Log(MESSAGE, "Net", "Player '{}' (slot {}) disconnected.", it->name, it->slot);
+				DropDragged(*it);
 				peers.erase(it);
 				break;
 			}
@@ -824,8 +883,53 @@ struct NetSession::Impl {
 					HandlePause(*info, pause);
 					return true;
 				}
+			case NetMsgType::DialogChoice:
+				{
+					NetDialogChoice choice;
+					if (!info->live || !NetDecode(data, size, choice)) return false;
+					HandleDialogChoice(*info, choice);
+					return true;
+				}
+			case NetMsgType::GuiCall:
+				{
+					NetGuiCall call;
+					if (!info->live || !NetDecode(data, size, call)) return false;
+					guiCalls.emplace_back(info->slot, std::move(call));
+					return true;
+				}
 			default:
 				return false;
+		}
+	}
+
+	// the one place that decides what a player may do; Control is about one party member
+	bool Allowed(uint8_t slot, NetPermission perm, const Actor* actor = nullptr) const
+	{
+		if (perm == NetPermission::Control && !actor) return slot == NET_HOST_SLOT;
+		return permissions.Allowed(slot, perm, actor ? OwnerOf(actor) : NET_HOST_SLOT);
+	}
+
+	NetPeerInfo* FindSlotPeer(uint8_t slot)
+	{
+		for (auto& info : peers) {
+			if (info.welcomed && info.slot == slot) return &info;
+		}
+		return nullptr;
+	}
+
+	// a player left while dragging an item: it lands at its party member's feet
+	static void DropDragged(NetPeerInfo& info)
+	{
+		if (!info.dragged) return;
+		CREItem* item = info.dragged->item;
+		info.dragged.reset();
+		const Game* game = core->GetGame();
+		Actor* actor = game ? game->GetActorByGlobalID(info.guiActor) : nullptr;
+		if (actor && actor->GetCurrentArea()) {
+			actor->GetCurrentArea()->AddItemToLocation(actor->Pos, item);
+			Log(MESSAGE, "Net", "Slot {} left while dragging {}; dropped it at {}'s feet.", info.slot, item->ItemResRef, fmt::WideToChar { actor->GetShortName() });
+		} else {
+			delete item;
 		}
 	}
 
@@ -848,6 +952,16 @@ struct NetSession::Impl {
 		pause.on = IsPaused();
 		Send(info.peer, pause);
 		Send(info.peer, owners);
+		// what a save loads the client's own way (effects), as the host has it
+		const Game* g = core->GetGame();
+		for (int pcSlot = 1; g && pcSlot <= g->GetPartySize(false); ++pcSlot) {
+			const Actor* pc = g->FindPC(pcSlot);
+			if (!pc) continue;
+			NetActorStats full;
+			full.netID = pc->GetGlobalID();
+			full.stats = NetStatsDiff({}, ActorStats(pc), SNAPSHOT_STATS);
+			Send(info.peer, full);
+		}
 		const Game* game = core->GetGame();
 		for (uint32_t netID : ready.unmatched) {
 			const Actor* actor = game ? game->GetActorByGlobalID(netID) : nullptr;
@@ -868,6 +982,13 @@ struct NetSession::Impl {
 	void HandlePause(const NetPeerInfo& info, const NetPause& pause)
 	{
 		Log(MESSAGE, "Net", "Slot {} ({}) wants the game {}.", info.slot, info.name, pause.on ? "paused" : "running");
+		if (!Allowed(info.slot, NetPermission::Pause)) {
+			Notify(info, "The host doesn't let you pause.");
+			NetPause reply;
+			reply.on = IsPaused();
+			Send(info.peer, reply);
+			return;
+		}
 		pauseRequester = info.slot;
 		bool changed = core->SetPause(pause.on ? PauseState::On : PauseState::Off);
 		pauseRequester = NET_HOST_SLOT;
@@ -907,6 +1028,7 @@ struct NetSession::Impl {
 	{
 		static const std::set<std::string> movement = { "movetopoint", "runtopoint", "addwaypoint", "nidspecial2" };
 		static const std::set<std::string> targeted = {
+			"nidspecial1", // talk to
 			"nidspecial3", // attack
 			"nidspecial4", // defend
 			"nidspecial5", // use an item on
@@ -984,13 +1106,29 @@ struct NetSession::Impl {
 			return;
 		}
 		uint8_t owner = OwnerOf(actor);
-		if (owner != info.slot) {
+		if (!Allowed(info.slot, NetPermission::Control, actor)) {
 			Log(WARNING, "Net", "Slot {} ({}): rejected '{}' for {} (id {}), who belongs to slot {}.", info.slot, info.name, cmd.action, fmt::WideToChar { actor->GetShortName() }, cmd.actorID, owner);
 			Notify(info, fmt::format("{} is controlled by player {}.", fmt::WideToChar { actor->GetShortName() }, owner));
 			return;
 		}
 
 		std::string name = LowerCase(cmd.action);
+		if (name == "usecontainer") {
+			HandleUseContainer(info, actor, cmd);
+			return;
+		}
+		if (name == "clickregion") {
+			HandleRegionClick(info, actor, cmd);
+			return;
+		}
+		if (name == "nidspecial1" && !Allowed(info.slot, NetPermission::Dialog)) {
+			Notify(info, "The host doesn't let you start conversations.");
+			return;
+		}
+		if (name == "useexit" && !Allowed(info.slot, NetPermission::AreaTransition)) {
+			Notify(info, "The host doesn't let you change areas.");
+			return;
+		}
 		if (name == "useexit") {
 			const Map* area = actor->GetCurrentArea();
 			const InfoPoint* exit = area ? area->GetInfoPointByGlobalID(ieDword(cmd.int0)) : nullptr;
@@ -1037,6 +1175,604 @@ struct NetSession::Impl {
 		}
 		std::string spell = cmd.string0.empty() ? "" : fmt::format(" ({})", cmd.string0);
 		Log(MESSAGE, "Net", "Slot {} ({}): injected '{}'{}{} for {} (id {}) at {}.", info.slot, info.name, cmd.action, spell, target, fmt::WideToChar { actor->GetShortName() }, cmd.actorID, actor->Pos);
+	}
+
+	// a click on a container: the actor walks there and opens it (UseContainer); the
+	// container is named in the action, the global current container is our own GUI's
+	void HandleUseContainer(const NetPeerInfo& info, Actor* actor, const NetCommand& cmd)
+	{
+		Map* area = actor->GetCurrentArea();
+		Container* container = nullptr;
+		if (area && cmd.int0) {
+			container = Scriptable::As<Container>(area->GetScriptableByGlobalID(ieDword(cmd.int0)));
+		} else if (area) {
+			container = area->TMap->GetContainer(Point(cmd.x, cmd.y), IE_CONTAINER_PILE);
+		}
+		if (!container || (container->Flags & CONT_DISABLED)) {
+			Log(WARNING, "Net", "Slot {}: rejected UseContainer for {}: no usable container {} at ({}, {}).", info.slot, cmd.actorID, cmd.int0, cmd.x, cmd.y);
+			return;
+		}
+		Holder<Action> action = GenerateAction("UseContainer()");
+		action->int0Parameter = int(container->GetGlobalID());
+		container->AddTrigger(TriggerEntry(trigger_clicked, actor->GetGlobalID()));
+		actor->CommandActor(std::move(action));
+		Log(MESSAGE, "Net", "Slot {} ({}): {} (id {}) goes to open container '{}' (id {}).", info.slot, info.name, fmt::WideToChar { actor->GetShortName() }, cmd.actorID, container->GetScriptName(), container->GetGlobalID());
+	}
+
+	// what GameControl::HandleActiveRegion does for an info point with a script
+	void HandleRegionClick(const NetPeerInfo& info, Actor* actor, const NetCommand& cmd)
+	{
+		Map* area = actor->GetCurrentArea();
+		InfoPoint* region = area ? Scriptable::As<InfoPoint>(area->GetScriptableByGlobalID(ieDword(cmd.int0))) : nullptr;
+		if (!region || region->Type != ST_TRIGGER || !region->Scripts[0]) {
+			Log(WARNING, "Net", "Slot {}: rejected a click on region {}: no info point with a script.", info.slot, cmd.int0);
+			return;
+		}
+		if ((region->Flags & TRAP_DEACTIVATED) || IsPaused()) {
+			Log(MESSAGE, "Net", "Slot {}: info point '{}' is deactivated or the game is frozen, ignoring the click.", info.slot, region->GetScriptName());
+			return;
+		}
+		// it runs right away, so it counts as simulation: what it shows goes to everyone
+		bool wasCapturing = capturing;
+		capturing = true;
+		region->AddTrigger(TriggerEntry(trigger_clicked, actor->GetGlobalID()));
+		actor->objects.LastMarked = region->GetGlobalID();
+		region->ExecuteScript(1);
+		region->ProcessActions();
+		capturing = wasCapturing;
+		Log(MESSAGE, "Net", "Slot {} ({}): {} clicked info point '{}', ran its script here.", info.slot, info.name, fmt::WideToChar { actor->GetShortName() }, region->GetScriptName());
+	}
+
+	// UseContainer got there for a remote player's party member: its owner's screen opens it
+	void OnContainerUsed(const Actor& actor, Container& container)
+	{
+		NetPeerInfo* info = FindSlotPeer(OwnerOf(&actor));
+		if (mode != Mode::Host || !info) {
+			core->SetCurrentContainer(&actor, &container, true);
+			return;
+		}
+		info->container = container.GetGlobalID();
+		info->containerActor = actor.GetGlobalID();
+		NetContainerOpen msg;
+		msg.actorID = actor.GetGlobalID();
+		if (IsPile(&container)) {
+			msg.x = container.Pos.x;
+			msg.y = container.Pos.y;
+		} else {
+			msg.containerID = container.GetGlobalID();
+		}
+		// the contents first, so the window opens on the right items
+		inventories.erase(container.GetGlobalID());
+		TrackItems(true);
+		Send(info->peer, msg);
+		Log(MESSAGE, "Net", "Container '{}' (id {}) opened for slot {} by {}, {} items.", container.GetScriptName(), container.GetGlobalID(), info->slot, fmt::WideToChar { actor.GetShortName() }, container.inventory.GetSlotCount());
+	}
+
+	// dialog (host) ----------------------------------------------------------
+
+	int PartyOwner(const Scriptable* scr) const
+	{
+		const Actor* actor = Scriptable::As<Actor>(scr);
+		if (!actor || !actor->InParty) return -1;
+		return OwnerOf(actor);
+	}
+
+	// the first line or node of a conversation decides who answers it
+	void StartDialog()
+	{
+		if (dialog.active) return;
+		const GameControl* gc = core->GetGameControl();
+		const Scriptable* speaker = gc->dialoghandler->GetSpeaker();
+		const Scriptable* target = gc->dialoghandler->GetTarget();
+		dialog.active = true;
+		dialog.speakerID = speaker ? speaker->GetGlobalID() : 0;
+		dialog.targetID = target ? target->GetGlobalID() : 0;
+		dialog.owner = NetDialogOwner(PartyOwner(speaker), PartyOwner(target), NET_HOST_SLOT);
+		Log(MESSAGE, "Net", "Dialog between {} and {} starts, player slot {} answers.", dialog.speakerID, dialog.targetID, dialog.owner);
+	}
+
+	NetDialog DialogMessage(uint8_t kind) const
+	{
+		NetDialog msg;
+		msg.kind = kind;
+		msg.seq = dialog.seq;
+		msg.owner = dialog.owner;
+		msg.speakerID = dialog.speakerID;
+		msg.targetID = dialog.targetID;
+		const GameControl* gc = core->GetGameControl();
+		if (gc && (gc->GetDialogueFlags() & DF_FREEZE_SCRIPTS)) msg.flags |= NetDialog::FREEZE;
+		return msg;
+	}
+
+	void OnDialogLine(const Scriptable* speaker, const String& text, bool partyLine)
+	{
+		if (mode != Mode::Host) return;
+		StartDialog();
+		NetDialog msg = DialogMessage(NetDialog::LINE);
+		if (partyLine) msg.flags |= NetDialog::PARTY;
+		msg.speakerID = speaker ? speaker->GetGlobalID() : 0;
+		msg.text = Utf8(text);
+		SendEvent(msg, false);
+		Log(MESSAGE, "Net", "Event: dialog line of net id {}: '{}'", msg.speakerID, msg.text);
+	}
+
+	void OnDialogState(const std::vector<SelectOption>& options)
+	{
+		if (mode != Mode::Host) return;
+		StartDialog();
+		dialog.seq++;
+		NetDialog msg = DialogMessage(NetDialog::STATE);
+		unsigned int flags = core->GetGameControl()->GetDialogueFlags();
+		if (flags & DF_OPENCONTINUEWINDOW) msg.flags |= NetDialog::CONTINUE;
+		if (flags & DF_OPENENDWINDOW) msg.flags |= NetDialog::END_BUTTON;
+		msg.continueIndex = uint16_t(core->GetDictionary().Get("DialogOption", 0));
+		std::string list;
+		for (const auto& option : options) {
+			msg.options.push_back(NetDialogOption { uint16_t(option.first), Utf8(option.second) });
+			list += fmt::format(" [{}] '{}'", option.first, msg.options.back().text);
+		}
+		SendEvent(msg, false);
+		Log(MESSAGE, "Net", "Event: dialog node #{} for slot {}{}:{}{}", msg.seq, dialog.owner, msg.flags & NetDialog::FREEZE ? " (world frozen)" : "", list.empty() ? " no replies" : list, msg.flags & (NetDialog::CONTINUE | NetDialog::END_BUTTON) ? fmt::format(", {} button (#{})", msg.flags & NetDialog::CONTINUE ? "continue" : "end", msg.continueIndex) : "");
+	}
+
+	void OnDialogEnd()
+	{
+		if (mode != Mode::Host || !dialog.active) return;
+		NetDialog msg = DialogMessage(NetDialog::END);
+		msg.flags &= ~NetDialog::FREEZE;
+		SendEvent(msg, false);
+		Log(MESSAGE, "Net", "Event: dialog #{} owned by slot {} ended.", dialog.seq, dialog.owner);
+		lastDialog = dialog;
+		dialog = HostDialog();
+	}
+
+	// the owner's reply, the same call a click on it makes on the host
+	void HandleDialogChoice(const NetPeerInfo& info, const NetDialogChoice& choice)
+	{
+		if (!dialog.active || choice.seq != dialog.seq) {
+			Log(MESSAGE, "Net", "Slot {} answered dialog node #{}, but we are at #{}; ignored.", info.slot, choice.seq, dialog.active ? dialog.seq : 0);
+			return;
+		}
+		if (dialog.owner != info.slot || !Allowed(info.slot, NetPermission::Dialog)) {
+			Log(WARNING, "Net", "Slot {} tried to answer slot {}'s dialog.", info.slot, dialog.owner);
+			Notify(info, fmt::format("Player {} is doing the talking.", dialog.owner));
+			return;
+		}
+		Log(MESSAGE, "Net", "Slot {} ({}) picked reply {} of dialog node #{}.", info.slot, info.name, choice.index, choice.seq);
+		GameControl* gc = core->GetGameControl();
+		applyingChoice = true;
+		gc->dialoghandler->DialogChoose(choice.index);
+		// what HandleGUIBehaviour does after a choice of our own
+		if (gc->InDialog() && !(gc->GetDialogueFlags() & (DF_OPENCONTINUEWINDOW | DF_OPENENDWINDOW))) {
+			core->GetGUIScriptEngine()->RunFunction("GUIWORLD", "NextDialogState");
+		}
+		applyingChoice = false;
+	}
+
+	bool HostChoiceHandled(int choice) const
+	{
+		if (applyingChoice || !dialog.active || dialog.owner == NET_HOST_SLOT) return false;
+		Log(MESSAGE, "Net", "Ignoring our reply {}: player slot {} owns this dialog.", choice, dialog.owner);
+		displaymsg->DisplayMarkupString(StringFromUtf8(fmt::format("[p][color=FF8080FF]Player {} is doing the talking.[/color][/p]", dialog.owner).c_str()));
+		return true;
+	}
+
+	// stores (host) ------------------------------------------------------------
+
+	static NetStoreState StoreMessage(const Store* store)
+	{
+		NetStoreState msg;
+		msg.store = std::string(store->Name.c_str());
+		for (const STOItem* item : store->items) {
+			NetStoreItem entry;
+			entry.resref = std::string(item->ItemResRef.c_str());
+			std::copy(item->Usages.begin(), item->Usages.end(), entry.usages.begin());
+			entry.flags = item->Flags;
+			entry.amount = item->AmountInStock;
+			entry.infinite = item->InfiniteSupply;
+			entry.purchased = item->PurchasedAmount;
+			msg.items.push_back(entry);
+		}
+		return msg;
+	}
+
+	// StartStore from a conversation a remote player owns: the store opens on its screen
+	bool OnStartStore(const ResRef& storeRef, const Scriptable& merchant)
+	{
+		if (mode != Mode::Host) return false;
+		const HostDialog& talk = dialog.active ? dialog : lastDialog;
+		ieDword merchantID = merchant.GetGlobalID();
+		if (talk.owner == NET_HOST_SLOT || (merchantID != talk.speakerID && merchantID != talk.targetID)) return false;
+		NetPeerInfo* info = FindSlotPeer(talk.owner);
+		if (!info || !info->live) return false;
+		if (!Allowed(info->slot, NetPermission::Purchase)) {
+			Notify(*info, "The host doesn't let you trade.");
+			return true;
+		}
+		Store* store = gamedata->GetStore(storeRef);
+		if (!store) return false;
+		ieDword pcID = talk.speakerID == merchantID ? talk.targetID : talk.speakerID;
+		info->store = storeRef;
+		info->storeActor = pcID;
+		info->storeOwner = merchantID;
+		NetStoreState msg = StoreMessage(store);
+		storeHashes[std::string(storeRef.c_str())] = NetMessageHash(msg);
+		msg.flags = NetStoreState::OPEN;
+		msg.ownerID = merchantID;
+		msg.actorID = pcID;
+		Send(info->peer, msg);
+		Log(MESSAGE, "Net", "Store {} opens for slot {} (net id {} shopping, {} wares).", storeRef, info->slot, pcID, msg.items.size());
+		return true;
+	}
+
+	// stores remote players have open change when anyone trades there; everyone gets the
+	// new stock (shoppers see it at once, the others have it in their cache for later)
+	void TrackStores()
+	{
+		std::set<std::string> open;
+		for (const auto& info : peers) {
+			if (info.live && !info.store.IsEmpty()) open.insert(std::string(info.store.c_str()));
+		}
+		for (const std::string& name : open) {
+			const Store* store = gamedata->GetStore(ResRef(name.c_str()));
+			if (!store) continue;
+			NetStoreState msg = StoreMessage(store);
+			uint64_t hash = NetMessageHash(msg);
+			uint64_t& known = storeHashes[name];
+			if (hash == known) continue;
+			known = hash;
+			SendEvent(msg, true);
+			Log(MESSAGE, "Net", "Event: store {} changed, {} wares.", name, msg.items.size());
+		}
+	}
+
+	// GUI calls (host) -----------------------------------------------------------
+
+	Actor* GuiActor(const NetPeerInfo& info, NetGuiOp op, int32_t arg) const
+	{
+		const Game* game = core->GetGame();
+		if (arg == 0 && op == NetGuiOp::ChangeContainerItem) return game->GetActorByGlobalID(info.containerActor);
+		if (arg > 1000) return game->GetActorByGlobalID(ieDword(arg));
+		return game->FindPC(arg);
+	}
+
+	static std::string PythonCall(const NetGuiOpInfo& opInfo, const NetGuiCall& call)
+	{
+		std::string args;
+		for (size_t i = 0; i < call.args.size(); ++i) {
+			args += fmt::format("{}{}", i ? ", " : "", call.args[i]);
+			// the dragged item's picture isn't used by the core
+			if (call.op == NetGuiOp::DragItem && i == 1) args += ", ''";
+		}
+		if (call.op == NetGuiOp::AddPartyGold) args += ", 1";
+		return fmt::format("import GemRB\nGemRB.{}({})", opInfo.name, args);
+	}
+
+	void RunGuiCalls()
+	{
+		auto calls = std::move(guiCalls);
+		guiCalls.clear();
+		for (const auto& entry : calls) {
+			NetPeerInfo* info = FindSlotPeer(entry.first);
+			if (info && info->live && core->GetGame()) {
+				RunGuiCall(*info, entry.second);
+			}
+		}
+	}
+
+	// the same GemRB function the client's GUI called, run on the client's GUI state
+	// (dragged item, open container and store, selection), so the rules are the GUI's own
+	void RunGuiCall(NetPeerInfo& info, const NetGuiCall& call)
+	{
+		NetGuiOpInfo opInfo = NetGuiInfo(call.op);
+		Game* game = core->GetGame();
+		Actor* actor = nullptr;
+		std::string why;
+		if (call.args.size() < opInfo.minArgs) {
+			why = "missing arguments";
+		} else if (opInfo.actorArg >= 0) {
+			actor = GuiActor(info, call.op, call.args[size_t(opInfo.actorArg)]);
+			if (!actor || !actor->InParty) {
+				why = "not a party member";
+			} else if (!Allowed(info.slot, NetPermission::Control, actor)) {
+				why = fmt::format("{} belongs to player {}", fmt::WideToChar { actor->GetShortName() }, OwnerOf(actor));
+			}
+		}
+		if (why.empty() && opInfo.permission != NetPermission::Control && !Allowed(info.slot, opInfo.permission)) {
+			why = fmt::format("no {} permission", NetPermissionName(opInfo.permission));
+		}
+		bool storeOp = call.op == NetGuiOp::ChangeStoreItem || call.op == NetGuiOp::SetPurchasedAmount;
+		if (why.empty() && storeOp && info.store.IsEmpty()) why = "no store open";
+		Map* area = actor ? actor->GetCurrentArea() : nullptr;
+		Container* container = nullptr;
+		if (info.container) {
+			const Actor* opener = game->GetActorByGlobalID(info.containerActor);
+			Map* map = opener ? opener->GetCurrentArea() : nullptr;
+			container = map ? Scriptable::As<Container>(map->GetScriptableByGlobalID(info.container)) : nullptr;
+		}
+		if (why.empty() && call.op == NetGuiOp::ChangeContainerItem && call.args[0] == 0 && !container) why = "no container open";
+		if (!why.empty()) {
+			Log(WARNING, "Net", "Slot {} ({}): refused GUI call {}: {}.", info.slot, info.name, opInfo.name, why);
+			Notify(info, fmt::format("The host refused that: {}.", why));
+			// the client changed its copy already; resend the truth
+			if (actor) ForgetActor(actor->GetGlobalID());
+			ForgetContainer(info.container);
+			return;
+		}
+		if (actor) info.guiActor = actor->GetGlobalID();
+
+		switch (call.op) {
+			case NetGuiOp::LeaveContainer:
+				info.container = info.containerActor = 0;
+				Log(MESSAGE, "Net", "Slot {} ({}) closed its container.", info.slot, info.name);
+				return;
+			case NetGuiOp::LeaveStore:
+				// the store stays cached; our own GUI may have it open too
+				Log(MESSAGE, "Net", "Slot {} ({}) left store {}.", info.slot, info.name, info.store);
+				info.store.Reset();
+				info.storeActor = info.storeOwner = 0;
+				return;
+			case NetGuiOp::UseItem:
+				// only items used without a target come this way (the rest are orders)
+				if (!actor->inventory.GetSlotItem(ieDword(call.args[1]))) {
+					Log(WARNING, "Net", "Slot {}: refused UseItem, nothing in slot {}.", info.slot, call.args[1]);
+					return;
+				}
+				actor->UseItem(ieDword(call.args[1]), call.args[2], nullptr, call.args.size() > 3 ? call.args[3] : 0);
+				Log(MESSAGE, "Net", "Slot {} ({}): {} uses the item in slot {}.", info.slot, info.name, fmt::WideToChar { actor->GetShortName() }, call.args[1]);
+				ForgetActor(actor->GetGlobalID());
+				return;
+			default:
+				break;
+		}
+
+		// swap in the client's GUI state and selection
+		GUIState state;
+		state.draggedItem = std::move(info.dragged);
+		state.container = container;
+		state.useContainer = container != nullptr;
+		state.store = storeOp ? gamedata->GetStore(info.store) : core->GetCurrentStore();
+		core->SwapGUIState(state);
+		Actor* selected = call.op == NetGuiOp::ChangeContainerItem && call.args[0] == 0 ? game->GetActorByGlobalID(info.containerActor) : game->FindPC(call.selected);
+		std::vector<std::pair<Actor*, ieWord>> selection;
+		for (int pcSlot = 1; pcSlot <= game->GetPartySize(false); ++pcSlot) {
+			Actor* pc = game->FindPC(pcSlot);
+			if (!pc) continue;
+			selection.emplace_back(pc, pc->Selected);
+			pc->Selected = pc == selected ? 1 : 0;
+		}
+		int single = game->SelectedSingle;
+		if (selected) game->SelectedSingle = selected->InParty;
+
+		std::string code = PythonCall(opInfo, call);
+		guiCaller = &info;
+		bool ok = core->GetGUIScriptEngine()->ExecString(code);
+		guiCaller = nullptr;
+
+		game->SelectedSingle = single;
+		for (const auto& pc : selection) {
+			pc.first->Selected = pc.second;
+		}
+		core->SwapGUIState(state);
+		info.dragged = std::move(state.draggedItem);
+		Log(MESSAGE, "Net", "Slot {} ({}): ran GUI call {}{} for {}{}.", info.slot, info.name, code.substr(code.find('\n') + 7), ok ? "" : " (it failed)", actor ? fmt::format("{}", fmt::WideToChar { actor->GetShortName() }) : "the party", info.dragged ? fmt::format(", now dragging {}", info.dragged->item->ItemResRef) : "");
+
+		// the client went ahead on its own copy: send the result even if nothing changed
+		if (actor) ForgetActor(actor->GetGlobalID());
+		if (selected) ForgetActor(selected->GetGlobalID());
+		ForgetContainer(info.container);
+		if (area) {
+			const Container* pile = area->TMap->GetContainer(actor->Pos, IE_CONTAINER_PILE);
+			if (pile) ForgetContainer(pile->GetGlobalID());
+		}
+		partyDirty = true;
+		storeHashes.erase(std::string(info.store.c_str()));
+	}
+
+	void ForgetActor(ieDword id)
+	{
+		inventories.erase(id);
+		stats.erase(id);
+		spellbooks.erase(id);
+	}
+
+	void ForgetContainer(ieDword id)
+	{
+		if (id) inventories.erase(id);
+	}
+
+	// inventories, stats, spellbooks, gold (host) ----------------------------------
+
+	static NetItem ItemEntry(const CREItem* item, size_t slot)
+	{
+		NetItem entry;
+		entry.slot = uint16_t(slot);
+		entry.resref = std::string(item->ItemResRef.c_str());
+		std::copy(item->Usages.begin(), item->Usages.end(), entry.usages.begin());
+		entry.flags = item->Flags;
+		entry.expired = item->Expired;
+		return entry;
+	}
+
+	static void ListItems(const Inventory& inv, NetInventory& msg)
+	{
+		for (int slot = 0; slot < inv.GetSlotCount(); ++slot) {
+			const CREItem* item = inv.GetSlotItem(ieDword(slot));
+			if (item) msg.items.push_back(ItemEntry(item, size_t(slot)));
+		}
+	}
+
+	static NetInventory InventoryMessage(const Actor* actor)
+	{
+		NetInventory msg;
+		msg.netID = actor->GetGlobalID();
+		msg.equipped = int16_t(actor->inventory.GetEquipped());
+		msg.equippedHeader = uint16_t(actor->inventory.GetEquippedHeader());
+		ListItems(actor->inventory, msg);
+		return msg;
+	}
+
+	static NetInventory InventoryMessage(const Container* container)
+	{
+		NetInventory msg;
+		msg.kind = NetObjectKind::Container;
+		if (IsPile(container)) {
+			msg.area = std::string(container->GetCurrentArea()->GetScriptRef());
+			msg.x = container->Pos.x;
+			msg.y = container->Pos.y;
+		} else {
+			msg.netID = container->GetGlobalID();
+		}
+		ListItems(container->inventory, msg);
+		return msg;
+	}
+
+	static std::vector<NetStatEntry> ActorStats(const Actor* actor)
+	{
+		std::vector<NetStatEntry> list(MAX_STATS);
+		for (unsigned int stat = 0; stat < MAX_STATS; ++stat) {
+			list[stat] = NetStatEntry { uint16_t(stat), actor->GetBase(stat), actor->GetStat(stat) };
+		}
+		return list;
+	}
+
+	static NetSpellbook SpellbookMessage(const Actor* actor)
+	{
+		NetSpellbook msg;
+		msg.netID = actor->GetGlobalID();
+		Spellbook& book = const_cast<Actor*>(actor)->spellbook;
+		for (int type = 0; type < book.GetTypes(); ++type) {
+			for (unsigned int level = 0; level < book.GetSpellLevelCount(type); ++level) {
+				const CRESpellMemorization* sm = book.GetSpellMemorization(unsigned(type), level);
+				if (!sm || (sm->knownSpells.empty() && sm->memorizedSpells.empty() && !sm->SlotCount)) continue;
+				NetSpellPage page;
+				page.type = uint8_t(type);
+				page.level = uint8_t(level);
+				page.slots = sm->SlotCount;
+				page.slotsWithBonus = sm->SlotCountWithBonus;
+				for (const auto& known : sm->knownSpells) {
+					page.known.emplace_back(known->SpellResRef.c_str());
+				}
+				for (const auto& memorized : sm->memorizedSpells) {
+					page.memorized.push_back(NetMemorizedSpell { std::string(memorized->SpellResRef.c_str()), memorized->Flags });
+				}
+				msg.pages.push_back(std::move(page));
+			}
+		}
+		return msg;
+	}
+
+	static size_t CountReady(const NetSpellbook& book)
+	{
+		size_t ready = 0;
+		for (const auto& page : book.pages) {
+			for (const auto& memorized : page.memorized) {
+				ready += memorized.flags ? 1 : 0;
+			}
+		}
+		return ready;
+	}
+
+	// send whatever changed since the clients last heard: inventories of everyone in the
+	// replicated area and of the party, containers and piles there, party members' stats
+	// and spellbooks and the party's gold; with send unset, only note the current state
+	void TrackItems(bool send)
+	{
+		const Game* game = core->GetGame();
+		if (!replMap) return;
+		std::vector<const Actor*> actors(replMap->GetAllActors().begin(), replMap->GetAllActors().end());
+		for (int pcSlot = 1; pcSlot <= game->GetPartySize(false); ++pcSlot) {
+			const Actor* pc = game->FindPC(pcSlot);
+			if (pc && pc->GetCurrentArea() != replMap) actors.push_back(pc);
+		}
+		for (const Actor* actor : actors) {
+			NetInventory inv = InventoryMessage(actor);
+			uint64_t hash = NetMessageHash(inv);
+			auto it = inventories.find(inv.netID);
+			if (it != inventories.end() && it->second == hash) continue;
+			inventories[inv.netID] = hash;
+			if (!send) continue;
+			SendEvent(inv, true);
+			Log(MESSAGE, "Net", "Event: inventory of net id {} ({}): {} items, equipped {}.", inv.netID, fmt::WideToChar { actor->GetShortName() }, inv.items.size(), inv.equipped);
+		}
+
+		std::set<ieDword> seenPiles;
+		for (const auto& holder : replMap->GetTileMap()->GetContainers()) {
+			const Container* container = holder.get();
+			ieDword id = container->GetGlobalID();
+			bool pile = IsPile(container);
+			if (pile) {
+				seenPiles.insert(id);
+				piles[id] = container->Pos;
+			}
+			NetInventory inv = InventoryMessage(container);
+			uint64_t hash = NetMessageHash(inv);
+			auto it = inventories.find(id);
+			if (it != inventories.end() && it->second == hash) continue;
+			inventories[id] = hash;
+			if (!send) continue;
+			SendEvent(inv, true);
+			Log(MESSAGE, "Net", "Event: inventory of {} '{}' (id {}{}): {} items.", pile ? "pile" : "container", container->GetScriptName(), id, pile ? fmt::format(" at {}", container->Pos) : "", inv.items.size());
+		}
+		// a pile that went away (emptied and cleaned up) is just empty for the clients
+		for (auto it = piles.begin(); it != piles.end();) {
+			if (seenPiles.count(it->first)) {
+				++it;
+				continue;
+			}
+			if (send) {
+				NetInventory gone;
+				gone.kind = NetObjectKind::Container;
+				gone.area = replArea;
+				gone.x = it->second.x;
+				gone.y = it->second.y;
+				SendEvent(gone, true);
+				Log(MESSAGE, "Net", "Event: pile (id {}) at {} is gone.", it->first, it->second);
+			}
+			inventories.erase(it->first);
+			it = piles.erase(it);
+		}
+
+		for (int pcSlot = 1; pcSlot <= game->GetPartySize(false); ++pcSlot) {
+			const Actor* pc = game->FindPC(pcSlot);
+			if (!pc) continue;
+			ieDword id = pc->GetGlobalID();
+			std::vector<NetStatEntry> now = ActorStats(pc);
+			auto known = stats.find(id);
+			NetActorStats msg;
+			msg.netID = id;
+			msg.stats = NetStatsDiff(known == stats.end() ? std::vector<NetStatEntry>() : known->second, now, SNAPSHOT_STATS);
+			stats[id] = std::move(now);
+			if (send && !msg.stats.empty()) {
+				SendEvent(msg, true);
+				std::string list;
+				for (size_t i = 0; i < msg.stats.size() && i < 6; ++i) {
+					list += fmt::format(" {}={}/{}", msg.stats[i].stat, msg.stats[i].base, msg.stats[i].modified);
+				}
+				Log(MESSAGE, "Net", "Event: {} stat(s) of net id {} ({}) changed:{}{}", msg.stats.size(), id, fmt::WideToChar { pc->GetShortName() }, list, msg.stats.size() > 6 ? " ..." : "");
+			}
+
+			NetSpellbook book = SpellbookMessage(pc);
+			uint64_t hash = NetMessageHash(book);
+			auto bookIt = spellbooks.find(id);
+			if (bookIt != spellbooks.end() && bookIt->second == hash) continue;
+			spellbooks[id] = hash;
+			if (!send) continue;
+			SendEvent(book, true);
+			Log(MESSAGE, "Net", "Event: spellbook of net id {} ({}): {} pages, {} spells ready.", id, fmt::WideToChar { pc->GetShortName() }, book.pages.size(), CountReady(book));
+		}
+
+		NetPartyState now;
+		now.gold = game->PartyGold;
+		now.reputation = game->Reputation;
+		if (now.gold != party.gold || now.reputation != party.reputation || partyDirty) {
+			party = now;
+			partyDirty = false;
+			if (send) {
+				SendEvent(now, true);
+				Log(MESSAGE, "Net", "Event: party gold {}, reputation {}.", now.gold, now.reputation);
+			}
+		}
 	}
 
 	static bool ReadFiles(const path_t& dir, std::vector<NetFile>& files)
@@ -1207,6 +1943,13 @@ struct NetSession::Impl {
 				hostVfx[vvc.get()] = HostVfx { nextVfxKey++, vvc->ResName, actor->GetGlobalID() };
 			}
 		}
+		// the next save carries all of it
+		inventories.clear();
+		piles.clear();
+		stats.clear();
+		spellbooks.clear();
+		partyDirty = false;
+		TrackItems(false);
 	}
 
 	// party members changing areas need a fresh save (all loaded areas, new IDs on the client)
@@ -1288,6 +2031,8 @@ struct NetSession::Impl {
 		}
 
 		TrackVfx(map);
+		TrackItems(true);
+		TrackStores();
 	}
 
 	// effects on actors come and go with the effects that own them, so they are diffed per tick
@@ -1427,6 +2172,14 @@ struct NetSession::Impl {
 	void OnFeedback(const String& markup)
 	{
 		if (!Capturing()) return;
+		if (guiCaller) {
+			// what a remote player's GUI call says is for that player
+			NetText msg;
+			msg.text = Utf8(markup);
+			Send(guiCaller->peer, msg);
+			Log(MESSAGE, "Net", "Feedback for slot {}: '{}'", guiCaller->slot, PlainText(msg.text));
+			return;
+		}
 		NetText msg;
 		msg.kind = NetText::FEEDBACK;
 		msg.text = Utf8(markup);
@@ -1449,7 +2202,8 @@ struct NetSession::Impl {
 	void OnSound(StringView resource, const AudioPlaybackConfig& config, bool speech)
 	{
 		// looping sounds belong to something that stops them later (projectiles, casting); the clients' copies do that
-		if (!Capturing() || resource.empty() || config.loop) return;
+		// GUI sounds of remote players' GUI calls played on their side already
+		if (!Capturing() || resource.empty() || config.loop || guiCaller) return;
 		NetSound msg;
 		msg.resource = std::string(resource.c_str(), resource.length());
 		msg.flags = (config.spatial ? NetSound::SPATIAL : 0) | (speech ? NetSound::SPEECH : 0);
@@ -1506,7 +2260,7 @@ struct NetSession::Impl {
 		Log(MESSAGE, "Net", "Event: vfx #{} '{}' on the area at ({}, {}).", msg.key, msg.resource, msg.x, msg.y);
 	}
 
-	void OnPause(bool paused)
+	void OnPause(bool paused, bool quiet)
 	{
 		if (mode == Mode::Host) {
 			NetPause msg;
@@ -1517,6 +2271,11 @@ struct NetSession::Impl {
 			return;
 		}
 		if (applyingPause || !server || state != ClientState::InSync) return;
+		if (quiet) {
+			// a store or inventory window: it shouldn't stop everyone else
+			Log(MESSAGE, "Net", "Game {} here only (a window).", paused ? "paused" : "unpaused");
+			return;
+		}
 		NetPause msg;
 		msg.on = paused;
 		Send(server, msg);
@@ -1632,6 +2391,20 @@ struct NetSession::Impl {
 				});
 			case NetMsgType::Ownership:
 				return ClientEvent<NetOwnership>(data, size, true, [this](const NetOwnership& msg) { ApplyOwnership(msg); });
+			case NetMsgType::Dialog:
+				return ClientEvent<NetDialog>(data, size, live, [this](const NetDialog& msg) { ApplyDialog(msg); });
+			case NetMsgType::Inventory:
+				return ClientEvent<NetInventory>(data, size, live, [this](const NetInventory& msg) { ApplyInventory(msg); });
+			case NetMsgType::ActorStats:
+				return ClientEvent<NetActorStats>(data, size, live, [this](const NetActorStats& msg) { ApplyStats(msg); });
+			case NetMsgType::PartyState:
+				return ClientEvent<NetPartyState>(data, size, live, [this](const NetPartyState& msg) { ApplyParty(msg); });
+			case NetMsgType::Spellbook:
+				return ClientEvent<NetSpellbook>(data, size, live, [this](const NetSpellbook& msg) { ApplySpellbook(msg); });
+			case NetMsgType::StoreState:
+				return ClientEvent<NetStoreState>(data, size, live, [this](const NetStoreState& msg) { ApplyStore(msg); });
+			case NetMsgType::ContainerOpen:
+				return ClientEvent<NetContainerOpen>(data, size, live, [this](const NetContainerOpen& msg) { ApplyContainerOpen(msg); });
 			default:
 				return false;
 		}
@@ -1659,6 +2432,8 @@ struct NetSession::Impl {
 
 	void ForgetMappings()
 	{
+		hostStats.clear();
+		clientDialog = ClientDialog();
 		ids.Clear();
 		lerps.clear();
 		clientVfx.clear();
@@ -1810,6 +2585,8 @@ struct NetSession::Impl {
 		if (state != ClientState::InSync) return;
 		syncedTicks++;
 		testTicks++;
+		EnforceAllStats();
+		RefreshGUI();
 		if (syncedTicks == TEST_HOOK_DELAY) {
 			RunTestMove();
 		}
@@ -2199,6 +2976,447 @@ struct NetSession::Impl {
 		Log(MESSAGE, "Net", "We control party slot(s):{}.", mine.empty() ? " none" : mine);
 	}
 
+	// dialog (client) ----------------------------------------------------------
+
+	// the conversation shows up: its owner gets the dialog GUI, everyone else a transcript
+	void EnterDialog(const NetDialog& msg)
+	{
+		if (clientDialog.active) return;
+		GameControl* gc = core->GetGameControl();
+		clientDialog = ClientDialog();
+		clientDialog.active = true;
+		clientDialog.owner = msg.owner;
+		clientDialog.freeze = msg.flags & NetDialog::FREEZE;
+		clientDialog.ui = msg.owner == slot;
+		if (clientDialog.ui) {
+			gc->SetDialogueFlags(DF_IN_DIALOG | (clientDialog.freeze ? DF_FREEZE_SCRIPTS : 0), BitOp::OR);
+			core->ToggleViewsEnabled(false, "NOT_DLG");
+			core->GetGUIScriptEngine()->RunFunction("GUIWORLD", "DialogStarted");
+		} else if (clientDialog.freeze) {
+			gc->SetDialogueFlags(DF_FREEZE_SCRIPTS, BitOp::OR);
+		}
+		Log(MESSAGE, "Net", "Dialog with net id {}: {}{}.", msg.targetID, clientDialog.ui ? "we answer" : fmt::format("player {} answers, we watch", msg.owner), clientDialog.freeze ? ", the world is frozen" : "");
+	}
+
+	void ApplyDialog(const NetDialog& msg)
+	{
+		GameControl* gc = core->GetGameControl();
+		TextArea* ta = core->GetMessageTextArea();
+		if (!gc || !ta) return;
+		if (msg.kind == NetDialog::END) {
+			if (!clientDialog.active) return;
+			if (clientDialog.ui) {
+				// the GUI half of DialogHandler::EndDialog
+				ta->SetSpeakerPicture(nullptr);
+				ta->ClearSelectOptions();
+				ta->ClearDialogStart();
+				core->ToggleViewsEnabled(true, "NOT_DLG");
+				core->GetGUIScriptEngine()->RunFunction("GUIWORLD", "DialogEnded");
+				core->GetGame()->SetControlStatus(CS_DIALOG, BitOp::NAND);
+				gc->SetDialogueFlags(0, BitOp::SET);
+			} else if (clientDialog.freeze) {
+				gc->SetDialogueFlags(DF_FREEZE_SCRIPTS, BitOp::NAND);
+			}
+			core->SetEventFlag(EF_PORTRAIT);
+			Log(MESSAGE, "Net", "Dialog ended (owned by slot {}).", clientDialog.owner);
+			clientDialog = ClientDialog();
+			return;
+		}
+
+		EnterDialog(msg);
+		const Actor* speaker = LocalActor(msg.speakerID);
+		if (msg.kind == NetDialog::LINE) {
+			if (!(msg.flags & NetDialog::PARTY) && clientDialog.ui) {
+				ta->MarkDialogStart();
+				ta->SetSpeakerPicture(speaker ? speaker->CopyPortrait(1) : nullptr);
+			}
+			ta->AppendText(u"\n");
+			String text = StringFromUtf8(msg.text.c_str());
+			if (speaker) {
+				displaymsg->DisplayStringName(std::move(text), msg.flags & NetDialog::PARTY ? GUIColors::DIALOGPARTY : GUIColors::DIALOG, speaker);
+			} else {
+				displaymsg->DisplayMarkupString(std::move(text));
+			}
+			Log(MESSAGE, "Net", "Dialog line of net id {}: '{}'", msg.speakerID, msg.text);
+			return;
+		}
+
+		clientDialog.seq = msg.seq;
+		clientDialog.options = msg.options;
+		clientDialog.continueIndex = msg.continueIndex;
+		clientDialog.buttons = msg.flags & (NetDialog::CONTINUE | NetDialog::END_BUTTON);
+		std::vector<SelectOption> options;
+		for (const auto& option : msg.options) {
+			options.emplace_back(option.index, StringFromUtf8(option.text.c_str()));
+		}
+		if (clientDialog.ui) {
+			ta->SetSelectOptions(options, true);
+			ControlEventHandler handler = [this](const Control* c) {
+				DialogChoiceHandled(int(c->GetValue()));
+			};
+			ta->SetAction(std::move(handler), TextArea::Action::Select);
+			auto gs = core->GetGUIScriptEngine();
+			if (clientDialog.buttons) {
+				// what GetDialogOptions leaves for the continue/end button
+				core->GetDictionary().Set("DialogOption", msg.continueIndex);
+				gs->RunFunction("GUIWORLD", clientDialog.buttons & NetDialog::CONTINUE ? "OpenContinueMessageWindow" : "OpenEndMessageWindow");
+			} else {
+				gs->RunFunction("GUIWORLD", "NextDialogState");
+			}
+		} else {
+			// read only: the replies as plain text
+			int n = 1;
+			for (const auto& option : msg.options) {
+				displaymsg->DisplayMarkupString(StringFromUtf8(fmt::format(READONLY_REPLY, n++, option.text).c_str()));
+			}
+			displaymsg->DisplayMarkupString(StringFromUtf8(fmt::format("[p][color=A0A0A0FF]   (player {} is choosing)[/color][/p]", msg.owner).c_str()));
+		}
+		Log(MESSAGE, "Net", "Dialog node #{}: {} replies{}, {}.", msg.seq, msg.options.size(), clientDialog.buttons ? fmt::format(" and a {} button", clientDialog.buttons & NetDialog::CONTINUE ? "continue" : "end") : "", clientDialog.ui ? "ours to pick" : "read only");
+	}
+
+	// both sides: a reply picked in the GUI (the text area or the continue/end button)
+	bool DialogChoiceHandled(int choice)
+	{
+		if (mode == Mode::Host) return HostChoiceHandled(choice);
+		if (!clientDialog.active || !clientDialog.ui || !server) {
+			Log(MESSAGE, "Net", "Ignoring reply {}: not our conversation.", choice);
+			return true;
+		}
+		NetDialogChoice msg;
+		msg.seq = clientDialog.seq;
+		msg.index = uint16_t(choice);
+		Send(server, msg);
+		Log(MESSAGE, "Net", "Picked reply {} of dialog node #{}, sent to the host.", choice, msg.seq);
+		return true;
+	}
+
+	// inventories, stats, spellbooks, gold, stores, containers (client) -------------
+
+	static CREItem* MakeItem(const NetItem& entry)
+	{
+		CREItem* item = new CREItem();
+		item->ItemResRef = ResRef(entry.resref.c_str());
+		std::copy(entry.usages.begin(), entry.usages.end(), item->Usages.begin());
+		item->Flags = entry.flags;
+		item->Expired = entry.expired;
+		const Item* itm = gamedata->GetItem(item->ItemResRef, true);
+		if (itm) {
+			item->MaxStackAmount = itm->MaxStackAmount;
+			gamedata->FreeItem(itm, item->ItemResRef, false);
+		}
+		return item;
+	}
+
+	static bool SameItem(const CREItem* item, const NetItem& entry)
+	{
+		return item && ItemEntry(item, entry.slot) == entry;
+	}
+
+	void ApplyInventory(const NetInventory& msg)
+	{
+		if (msg.kind == NetObjectKind::Actor) {
+			Actor* actor = LocalActor(msg.netID);
+			if (!actor) return;
+			ApplyActorInventory(actor, msg);
+			Log(MESSAGE, "Net", "Inventory of net id {} ({}): {} items, equipped {}.", msg.netID, fmt::WideToChar { actor->GetShortName() }, msg.items.size(), msg.equipped);
+			return;
+		}
+		Container* container = nullptr;
+		if (msg.netID) {
+			container = Scriptable::As<Container>(FindScriptable(ids.Local(msg.netID)));
+		} else if (Map* map = FindLoadedMap(msg.area)) {
+			// piles are named and found by their search map square, the same on both sides
+			container = map->TMap->GetContainer(Point(msg.x, msg.y), IE_CONTAINER_PILE);
+			if (!container && !msg.items.empty()) container = map->GetPile(Point(msg.x, msg.y));
+		}
+		if (!container) {
+			if (!msg.items.empty()) Log(WARNING, "Net", "Inventory of container {} at ({}, {}): not here.", msg.netID, msg.x, msg.y);
+			return;
+		}
+		while (container->inventory.GetSlotCount()) {
+			delete container->RemoveItem(0, 0);
+		}
+		for (const auto& entry : msg.items) {
+			container->AddItem(MakeItem(entry));
+		}
+		refreshGUI = true;
+		Log(MESSAGE, "Net", "Inventory of {} '{}': {} items.", msg.netID ? "container" : "pile", container->GetScriptName(), msg.items.size());
+	}
+
+	void ApplyActorInventory(Actor* actor, const NetInventory& msg)
+	{
+		Inventory& inv = actor->inventory;
+		std::map<uint16_t, const NetItem*> wanted;
+		for (const auto& entry : msg.items) {
+			wanted[entry.slot] = &entry;
+		}
+		std::vector<int> added;
+		for (int slot = 0; slot < inv.GetSlotCount(); ++slot) {
+			auto it = wanted.find(uint16_t(slot));
+			const CREItem* have = inv.GetSlotItem(ieDword(slot));
+			if (it == wanted.end() ? !have : SameItem(have, *it->second)) continue;
+			// the engine's own removal, so equipped items come off properly
+			if (have) delete inv.RemoveItem(unsigned(slot));
+			if (it == wanted.end()) continue;
+			inv.SetSlotItem(MakeItem(*it->second), unsigned(slot));
+			added.push_back(slot);
+		}
+		// worn things show on the avatar; weapons follow the equipped slot below
+		for (int slot : added) {
+			int effect = core->QuerySlotEffects(unsigned(slot));
+			if (effect && effect != SLOT_EFFECT_MELEE && effect != SLOT_EFFECT_MISSILE && effect != SLOT_EFFECT_MAGIC) {
+				inv.EquipItem(ieDword(slot));
+			}
+		}
+		if (inv.GetEquipped() != msg.equipped || inv.GetEquippedHeader() != msg.equippedHeader || !added.empty()) {
+			inv.SetEquippedSlot(msg.equipped, msg.equippedHeader, true);
+		}
+		actor->ReinitQuickSlots();
+		if (actor->InParty) {
+			core->SetEventFlag(EF_ACTION);
+			core->SetEventFlag(EF_PORTRAIT);
+		}
+		refreshGUI = true;
+	}
+
+	void ApplyStats(const NetActorStats& msg)
+	{
+		Actor* actor = LocalActor(msg.netID);
+		if (!actor) return;
+		auto& known = hostStats[actor->GetGlobalID()];
+		for (const auto& entry : msg.stats) {
+			known[entry.stat] = { entry.base, entry.modified };
+		}
+		EnforceStats(actor, known);
+		if (actor->InParty) core->SetEventFlag(EF_PORTRAIT);
+		refreshGUI = true;
+		std::string list;
+		for (size_t i = 0; i < msg.stats.size() && i < 6; ++i) {
+			list += fmt::format(" {}={}/{}", msg.stats[i].stat, msg.stats[i].base, msg.stats[i].modified);
+		}
+		Log(MESSAGE, "Net", "{} stat(s) of net id {} ({}):{}{}", msg.stats.size(), msg.netID, fmt::WideToChar { actor->GetShortName() }, list, msg.stats.size() > 6 ? " ..." : "");
+	}
+
+	// the host's numbers win over whatever our copy worked out (eg. after a local RefreshEffects)
+	static bool EnforceStats(Actor* actor, const std::map<uint16_t, std::pair<ieDword, ieDword>>& known)
+	{
+		bool changed = false;
+		for (const auto& stat : known) {
+			if (actor->GetBase(stat.first) != stat.second.first) {
+				actor->SetBaseNoPCF(stat.first, stat.second.first);
+				changed = true;
+			}
+			if (actor->GetStat(stat.first) != stat.second.second) {
+				actor->SetStat(stat.first, stat.second.second, 0);
+				changed = true;
+			}
+		}
+		return changed;
+	}
+
+	void EnforceAllStats()
+	{
+		const Game* game = core->GetGame();
+		if (!game) return;
+		for (auto it = hostStats.begin(); it != hostStats.end();) {
+			Actor* actor = game->GetActorByGlobalID(it->first);
+			if (!actor) {
+				it = hostStats.erase(it);
+				continue;
+			}
+			EnforceStats(actor, it->second);
+			++it;
+		}
+	}
+
+	void ApplyParty(const NetPartyState& msg)
+	{
+		Game* game = core->GetGame();
+		Log(MESSAGE, "Net", "Party gold {} -> {}, reputation {}.", game->PartyGold, msg.gold, msg.reputation);
+		game->PartyGold = msg.gold;
+		game->Reputation = msg.reputation;
+		core->SetEventFlag(EF_PORTRAIT);
+		refreshGUI = true;
+	}
+
+	void ApplySpellbook(const NetSpellbook& msg)
+	{
+		Actor* actor = LocalActor(msg.netID);
+		if (!actor) return;
+		Spellbook& book = actor->spellbook;
+		for (const auto& page : msg.pages) {
+			CRESpellMemorization* sm = book.GetSpellMemorization(page.type, page.level);
+			if (!sm) continue;
+			sm->SlotCount = page.slots;
+			sm->SlotCountWithBonus = page.slotsWithBonus;
+			sm->knownSpells.clear();
+			for (const auto& known : page.known) {
+				auto spell = MakeHolder<CREKnownSpell>();
+				spell->SpellResRef = ResRef(known.c_str());
+				spell->Level = page.level;
+				spell->Type = page.type;
+				sm->knownSpells.push_back(std::move(spell));
+			}
+			sm->memorizedSpells.clear();
+			for (const auto& memorized : page.memorized) {
+				auto spell = MakeHolder<CREMemorizedSpell>();
+				spell->SpellResRef = ResRef(memorized.resref.c_str());
+				spell->Flags = memorized.flags;
+				sm->memorizedSpells.push_back(std::move(spell));
+			}
+		}
+		book.ClearSpellInfo();
+		if (actor->InParty) core->SetEventFlag(EF_ACTION);
+		refreshGUI = true;
+		Log(MESSAGE, "Net", "Spellbook of net id {} ({}): {} pages, {} spells ready.", msg.netID, fmt::WideToChar { actor->GetShortName() }, msg.pages.size(), CountReady(msg));
+	}
+
+	static void ApplyStoreItems(Store* store, const std::vector<NetStoreItem>& items)
+	{
+		std::vector<STOItem*> stock;
+		for (const auto& entry : items) {
+			STOItem* item = new STOItem();
+			item->ItemResRef = ResRef(entry.resref.c_str());
+			std::copy(entry.usages.begin(), entry.usages.end(), item->Usages.begin());
+			item->Flags = entry.flags;
+			item->AmountInStock = entry.amount;
+			item->InfiniteSupply = entry.infinite;
+			item->PurchasedAmount = entry.purchased;
+			const Item* itm = gamedata->GetItem(item->ItemResRef, true);
+			if (itm) {
+				item->Weight = itm->Weight;
+				item->MaxStackAmount = itm->MaxStackAmount;
+				gamedata->FreeItem(itm, item->ItemResRef, false);
+			}
+			stock.push_back(item);
+		}
+		for (const STOItem* item : store->items) {
+			delete item;
+		}
+		store->items = std::move(stock);
+	}
+
+	void ApplyStore(const NetStoreState& msg)
+	{
+		Store* store = core->GetCurrentStore();
+		ResRef name(msg.store.c_str());
+		if (msg.flags & NetStoreState::OPEN) {
+			Actor* pc = LocalActor(msg.actorID);
+			if (pc && pc->InParty) core->GetGame()->SelectedSingle = pc->InParty;
+			store = core->SetCurrentStore(name, ids.Local(msg.ownerID));
+		}
+		if (!store || store->Name != name) {
+			// not open here: update our cached copy, for later
+			store = gamedata->GetStore(name);
+			if (!store) return;
+		}
+		ApplyStoreItems(store, msg.items);
+		if (msg.flags & NetStoreState::OPEN) {
+			core->SetEventFlag(EF_OPENSTORE);
+		} else {
+			refreshGUI = true;
+		}
+		Log(MESSAGE, "Net", "Store {}{}: {} wares.", msg.store, msg.flags & NetStoreState::OPEN ? " opens for us" : " changed", msg.items.size());
+	}
+
+	void ApplyContainerOpen(const NetContainerOpen& msg)
+	{
+		Actor* actor = LocalActor(msg.actorID);
+		Map* map = actor ? actor->GetCurrentArea() : nullptr;
+		Container* container = nullptr;
+		if (msg.containerID) {
+			container = Scriptable::As<Container>(FindScriptable(ids.Local(msg.containerID)));
+		} else if (map) {
+			container = map->GetPile(Point(msg.x, msg.y));
+		}
+		if (!actor || !container) {
+			Log(WARNING, "Net", "The host opened container {} for net id {}, which isn't here.", msg.containerID, msg.actorID);
+			return;
+		}
+		// the container window works on the first selected PC
+		if (core->GetFirstSelectedPC(false) != actor) SelectOnly(actor);
+		core->SetCurrentContainer(actor, container, true);
+		Log(MESSAGE, "Net", "The host opened container '{}' ({} items) for net id {} ({}).", container->GetScriptName(), container->inventory.GetSlotCount(), msg.actorID, fmt::WideToChar { actor->GetShortName() });
+	}
+
+	// open windows show what the host sent
+	void RefreshGUI()
+	{
+		if (!refreshGUI || !core->GetGame()) return;
+		refreshGUI = false;
+		static const std::string code = R"(import sys
+import GemRB
+_m = sys.modules
+try:
+	if "Container" in _m and _m["Container"].ContainerWindow:
+		_m["Container"].UpdateContainerWindow ()
+	if "GUIINV" in _m and getattr (_m["GUIINV"], "InventoryWindow", None):
+		_m["GUIINV"].RefreshInventoryWindow ()
+	if "GUISTORE" in _m and GemRB.GetView ("WINSHOP"):
+		_m["GUISTORE"].UpdateStoreShoppingWindow (GemRB.GetView ("WINSHOP"))
+except Exception as e:
+	print ("[Net] GUI refresh failed:", e)
+)";
+		core->GetGUIScriptEngine()->ExecString(code);
+	}
+
+	bool ForwardUseContainer(const Actor& actor, const Container& container)
+	{
+		if (state != ClientState::InSync || !server) return false;
+		NetCommand cmd;
+		cmd.actorID = ids.Net(actor.GetGlobalID());
+		cmd.action = "usecontainer";
+		if (IsPile(&container)) {
+			cmd.x = container.Pos.x;
+			cmd.y = container.Pos.y;
+		} else {
+			cmd.int0 = int32_t(ids.Net(container.GetGlobalID()));
+			if (!cmd.int0) return false;
+		}
+		if (!cmd.actorID) return false;
+		Send(server, cmd);
+		Log(MESSAGE, "Net", "Forwarded UseContainer('{}') for net id {}.", container.GetScriptName(), cmd.actorID);
+		return true;
+	}
+
+	bool ForwardRegionClick(const Actor& actor, const InfoPoint& region)
+	{
+		if (state != ClientState::InSync || !server) return false;
+		NetCommand cmd;
+		cmd.actorID = ids.Net(actor.GetGlobalID());
+		cmd.action = "clickregion";
+		cmd.int0 = int32_t(ids.Net(region.GetGlobalID()));
+		if (!cmd.actorID || !cmd.int0) return false;
+		Send(server, cmd);
+		Log(MESSAGE, "Net", "Forwarded a click on info point '{}' for net id {}.", region.GetScriptName(), cmd.actorID);
+		return true;
+	}
+
+	void ForwardGuiCall(NetGuiOp op, std::vector<int32_t> args)
+	{
+		if (mode != Mode::Client || state != ClientState::InSync || !server) return;
+		NetGuiOpInfo opInfo = NetGuiInfo(op);
+		NetGuiCall call;
+		call.op = op;
+		call.selected = uint8_t(core->GetGame()->GetSelectedPCSingle());
+		call.args = std::move(args);
+		if (opInfo.actorArg >= 0 && size_t(opInfo.actorArg) < call.args.size() && call.args[size_t(opInfo.actorArg)] > 1000) {
+			int32_t& actor = call.args[size_t(opInfo.actorArg)];
+			uint32_t netID = ids.Net(ieDword(actor));
+			if (!netID) {
+				Log(WARNING, "Net", "Not forwarding GUI call {}: actor {} has no network ID.", opInfo.name, actor);
+				return;
+			}
+			actor = int32_t(netID);
+		}
+		Send(server, call);
+		std::string list;
+		for (int32_t arg : call.args) {
+			list += fmt::format("{}{}", list.empty() ? "" : ", ", arg);
+		}
+		Log(MESSAGE, "Net", "Forwarded GUI call {}({}), selected PC {}.", opInfo.name, list, call.selected);
+	}
+
 	// orders ----------------------------------------------------------------
 
 	bool TranslateObject(NetActionObject& object) const
@@ -2429,9 +3647,85 @@ struct NetSession::Impl {
 			if (actor) actor->overHead.SetText(StringFromUtf8(arg2.c_str()), true, true, ColorWhite);
 		} else if (verb == "owner") {
 			ownerOverride[uint8_t(atoi(arg1.c_str()))] = uint8_t(atoi(arg2.c_str()));
+		} else if (verb == "perm") {
+			// perm SLOT PERMISSION 0|1, PERMISSION as NetPermissionName with _ for spaces
+			std::string permName = arg2.substr(0, arg2.find(' '));
+			std::replace(permName.begin(), permName.end(), '_', ' ');
+			for (uint8_t raw = 0; raw < uint8_t(NetPermission::count); ++raw) {
+				if (permName != NetPermissionName(NetPermission(raw))) continue;
+				permissions.Set(uint8_t(atoi(arg1.c_str())), NetPermission(raw), arg2.back() == '1');
+				Log(MESSAGE, "Net", "Test hook: slot {} {} {}.", arg1, arg2.back() == '1' ? "may now" : "may no longer", permName);
+			}
+		} else if (verb == "talk") {
+			const Actor* target = FindActorNamed(arg);
+			if (selected && target) gc->TryToTalk(selected, target);
+		} else if (verb == "npctalk") {
+			// npctalk NAME N: what a creature script's Dialogue(PlayerN) does
+			Actor* actor = FindActorNamed(arg1);
+			if (actor) actor->AddAction(GenerateAction(fmt::format("Dialogue(Player{})", arg2)));
+		} else if (verb == "reply") {
+			// the Nth reply in the message window, as a click (or number key) picks it
+			TextArea* ta = core->GetMessageTextArea();
+			if (ta) ta->SelectAvailableOption(size_t(atoi(arg.c_str()) - 1));
+		} else if (verb == "forcereply") {
+			// transition N, bypassing the GUI: what a player without the dialog GUI could still send
+			DialogChoiceHandled(atoi(arg.c_str()));
+		} else if (verb == "continue") {
+			// the continue / end button
+			core->GetGUIScriptEngine()->ExecString("import GUIWORLD\nGUIWORLD.CloseContinueWindow ()");
+		} else if (verb == "container") {
+			Container* container = game->GetCurrentArea()->GetTileMap()->GetContainer(ieVariable(arg.c_str()));
+			if (selected && container) gc->HandleContainer(container, selected);
+		} else if (verb == "region") {
+			InfoPoint* region = game->GetCurrentArea()->GetTileMap()->GetInfoPoint(ieVariable(arg.c_str()));
+			if (selected && region) gc->HandleActiveRegion(region, selected, region->Pos);
+		} else if (verb == "gui") {
+			// GUI script code, | for line breaks: the GemRB.* calls the windows make
+			std::string code = arg;
+			std::replace(code.begin(), code.end(), '|', '\n');
+			core->GetGUIScriptEngine()->ExecString("import GemRB\n" + code);
+		} else if (verb == "report") {
+			Report();
 		} else {
 			Log(WARNING, "Net", "Unknown test order '{}'.", order);
 		}
+	}
+
+	// NetTestOrders "report": what both sides should agree on, for comparing logs
+	void Report() const
+	{
+		const Game* game = core->GetGame();
+		const char* side = mode == Mode::Host ? "host" : "client";
+		Log(MESSAGE, "Net", "Report ({}): party gold {}, reputation {}.", side, game->PartyGold, game->Reputation);
+		for (int pcSlot = 1; pcSlot <= game->GetPartySize(false); ++pcSlot) {
+			const Actor* pc = game->FindPC(pcSlot);
+			if (!pc) continue;
+			NetInventory inv = InventoryMessage(pc);
+			std::string items;
+			for (const auto& item : inv.items) {
+				items += fmt::format(" {}:{}x{}", item.slot, item.resref, item.usages[0]);
+			}
+			NetSpellbook book = SpellbookMessage(pc);
+			Log(MESSAGE, "Net", "Report ({}): PC {} {} XP {} hp {} equipped {}, {} spells ready, items:{}", side, pcSlot, fmt::WideToChar { pc->GetShortName() }, pc->GetStat(IE_XP), pc->GetStat(IE_HITPOINTS), inv.equipped, CountReady(book), items);
+		}
+		for (const auto& holder : game->GetCurrentArea()->GetTileMap()->GetContainers()) {
+			const Container* container = holder.get();
+			std::string items;
+			for (int i = 0; i < container->inventory.GetSlotCount(); ++i) {
+				const CREItem* item = container->inventory.GetSlotItem(ieDword(i));
+				items += fmt::format(" {}x{}", item->ItemResRef, item->Usages[0]);
+			}
+			Log(MESSAGE, "Net", "Report ({}): {} '{}' at {}:{}", side, IsPile(container) ? "pile" : "container", container->GetScriptName(), container->Pos, items.empty() ? " empty" : items);
+		}
+		const Store* store = gamedata->GetStore(ResRef("MPTSTORE"));
+		if (store) {
+			std::string wares;
+			for (const STOItem* item : store->items) {
+				wares += fmt::format(" {}x{}", item->ItemResRef, item->AmountInStock);
+			}
+			Log(MESSAGE, "Net", "Report ({}): store MPTSTORE:{}", side, wares);
+		}
+		ReportTestVar(side);
 	}
 
 	static void TestCast(GameControl* gc, Actor* caster, const ResRef& spell, const Actor* target)
@@ -2525,6 +3819,7 @@ void NetSession::PreTick()
 		impl->capturing = true;
 		if (impl->GameReady()) {
 			// they stand in for player input, so they count as part of the simulation
+			impl->RunGuiCalls();
 			impl->RunTestOrders();
 		}
 	}
@@ -2589,9 +3884,54 @@ void NetSession::OnAreaVfx(const Map& map, VEFObject& vvc)
 	impl->OnAreaVfx(map, vvc);
 }
 
-void NetSession::OnPause(bool paused)
+void NetSession::OnPause(bool paused, bool quiet)
 {
-	impl->OnPause(paused);
+	impl->OnPause(paused, quiet);
+}
+
+void NetSession::OnDialogLine(const Scriptable* speaker, const String& text, bool party)
+{
+	impl->OnDialogLine(speaker, text, party);
+}
+
+void NetSession::OnDialogState(const std::vector<std::pair<int, String>>& options)
+{
+	impl->OnDialogState(options);
+}
+
+void NetSession::OnDialogEnd()
+{
+	impl->OnDialogEnd();
+}
+
+bool NetSession::DialogChoiceHandled(int choice)
+{
+	return impl->DialogChoiceHandled(choice);
+}
+
+bool NetSession::OnStartStore(const ResRef& store, const Scriptable& merchant)
+{
+	return impl->OnStartStore(store, merchant);
+}
+
+void NetSession::OnContainerUsed(const Actor& actor, Container& container)
+{
+	impl->OnContainerUsed(actor, container);
+}
+
+bool NetSession::ForwardUseContainer(const Actor& actor, const Container& container)
+{
+	return impl->ForwardUseContainer(actor, container);
+}
+
+bool NetSession::ForwardRegionClick(const Actor& actor, const InfoPoint& region)
+{
+	return impl->ForwardRegionClick(actor, region);
+}
+
+void NetSession::ForwardGuiCall(NetGuiOp op, std::vector<int32_t> args)
+{
+	impl->ForwardGuiCall(op, std::move(args));
 }
 
 #else // HAVE_ENET
@@ -2641,7 +3981,34 @@ void NetSession::OnOverheadText(const Scriptable&, const String&, const Color&) 
 void NetSession::OnSound(StringView, const AudioPlaybackConfig&, bool) {}
 void NetSession::OnProjectile(const Map&, const Projectile&, uint32_t, bool) {}
 void NetSession::OnAreaVfx(const Map&, VEFObject&) {}
-void NetSession::OnPause(bool) {}
+void NetSession::OnPause(bool, bool) {}
+void NetSession::OnDialogLine(const Scriptable*, const String&, bool) {}
+void NetSession::OnDialogState(const std::vector<std::pair<int, String>>&) {}
+void NetSession::OnDialogEnd() {}
+
+bool NetSession::DialogChoiceHandled(int)
+{
+	return false;
+}
+
+bool NetSession::OnStartStore(const ResRef&, const Scriptable&)
+{
+	return false;
+}
+
+void NetSession::OnContainerUsed(const Actor&, Container&) {}
+
+bool NetSession::ForwardUseContainer(const Actor&, const Container&)
+{
+	return false;
+}
+
+bool NetSession::ForwardRegionClick(const Actor&, const InfoPoint&)
+{
+	return false;
+}
+
+void NetSession::ForwardGuiCall(NetGuiOp, std::vector<int32_t>) {}
 
 #endif // HAVE_ENET
 

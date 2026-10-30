@@ -137,6 +137,16 @@ static EffectRef fx_learn_spell_ref = { "Spell:Learn", -1 };
 		return nullptr; \
 	}
 
+// co-op clients: the host runs the same call on its side and has the final word (its
+// state replicates back); we go ahead on our copy, so the GUI stays responsive
+static void NetForward(NetGuiOp op, std::vector<int32_t> args)
+{
+	NetSession* net = core->GetNetSession();
+	if (net && net->IsReplica()) {
+		net->ForwardGuiCall(op, std::move(args));
+	}
+}
+
 #define ABORT_IF_NULL(thing) \
 	if (thing == nullptr) return RuntimeError(#thing " cannot be null.")
 
@@ -4971,6 +4981,7 @@ static PyObject* GemRB_GameSetPartyGold(PyObject* /*self*/, PyObject* args)
 	PARSE_ARGS(args, "i|i", &Gold, &flag);
 	GET_GAME();
 
+	NetForward(NetGuiOp::AddPartyGold, { flag ? Gold : int(Gold - game->PartyGold) });
 	if (flag) {
 		game->AddGold(Gold);
 	} else {
@@ -6720,6 +6731,7 @@ error.\n\
 
 static PyObject* GemRB_LeaveStore(PyObject* /*self*/, PyObject* /*args*/)
 {
+	NetForward(NetGuiOp::LeaveStore, {});
 	core->CloseCurrentStore();
 	core->ResetEventFlag(EF_OPENSTORE);
 	core->SetEventFlag(EF_PORTRAIT);
@@ -6793,6 +6805,7 @@ open. This function will also remove empty ground piles.\n\
 
 static PyObject* GemRB_LeaveContainer(PyObject* /*self*/, PyObject* /*args*/)
 {
+	NetForward(NetGuiOp::LeaveContainer, {});
 	core->CloseCurrentContainer();
 	Py_RETURN_NONE;
 }
@@ -6977,6 +6990,7 @@ static PyObject* GemRB_ChangeContainerItem(PyObject* /*self*/, PyObject* args)
 	int action;
 	PARSE_ARGS(args, "iii", &globalID, &Slot, &action);
 	GET_GAME();
+	NetForward(NetGuiOp::ChangeContainerItem, { globalID, Slot, action });
 
 	Container* container;
 	Actor* actor = nullptr;
@@ -7423,6 +7437,7 @@ static PyObject* GemRB_SetPurchasedAmount(PyObject* /*self*/, PyObject* args)
 		return AttributeError(GemRB_SetPurchasedAmount__doc);
 	}
 	amount = (ieDword) tmp;
+	NetForward(NetGuiOp::SetPurchasedAmount, { Slot, tmp, type });
 	const Store* store;
 	if (type) {
 		store = rhstore;
@@ -7678,6 +7693,7 @@ static PyObject* GemRB_ChangeStoreItem(PyObject* /*self*/, PyObject* args)
 	PARSE_ARGS(args, "iii", &globalID, &slot, &actint);
 	GET_GAME();
 	GET_ACTOR_GLOBAL();
+	NetForward(NetGuiOp::ChangeStoreItem, { globalID, slot, actint });
 
 	Store* store = core->GetCurrentStore();
 	if (!store) {
@@ -8769,6 +8785,7 @@ static PyObject* GemRB_MemorizeSpell(PyObject* /*self*/, PyObject* args)
 	PARSE_ARGS(args, "iiii|i", &globalID, &SpellType, &Level, &Index, &enabled);
 	GET_GAME();
 	GET_ACTOR_GLOBAL();
+	NetForward(NetGuiOp::MemorizeSpell, { globalID, SpellType, Level, Index, enabled });
 
 	auto ks = actor->spellbook.GetKnownSpell(SpellType, Level, Index);
 	if (!ks) {
@@ -8813,6 +8830,7 @@ static PyObject* GemRB_UnmemorizeSpell(PyObject* /*self*/, PyObject* args)
 	PARSE_ARGS(args, "iiii|b", &globalID, &SpellType, &Level, &Index, &onlyDepleted);
 	GET_GAME();
 	GET_ACTOR_GLOBAL();
+	NetForward(NetGuiOp::UnmemorizeSpell, { globalID, SpellType, Level, Index, onlyDepleted });
 
 	const CREMemorizedSpell* ms = actor->spellbook.GetMemorizedSpell(SpellType, Level, Index);
 	if (!ms) {
@@ -8974,6 +8992,7 @@ static PyObject* GemRB_ChangeItemFlag(PyObject* /*self*/, PyObject* args)
 	PARSE_ARGS(args, "iiii", &globalID, &Slot, &Flags, &Mode);
 	GET_GAME();
 	GET_ACTOR_GLOBAL();
+	NetForward(NetGuiOp::ChangeItemFlag, { globalID, Slot, Flags, int(Mode) });
 
 	if (actor->inventory.ChangeItemFlag(core->QuerySlot(Slot), Flags, Mode)) {
 		return PyLong_FromLong(1);
@@ -9429,6 +9448,7 @@ static PyObject* GemRB_DragItem(PyObject* /*self*/, PyObject* args)
 	if (core->GetDraggedItem()) {
 		Py_RETURN_NONE;
 	}
+	NetForward(NetGuiOp::DragItem, { globalID, Slot, Count, Type });
 
 	GET_GAME();
 	Actor* actor;
@@ -9518,6 +9538,7 @@ static PyObject* GemRB_DropDraggedItem(PyObject* /*self*/, PyObject* args)
 	if (!core->GetDraggedItem()) {
 		Py_RETURN_NONE;
 	}
+	NetForward(NetGuiOp::DropDraggedItem, { globalID, Slot });
 
 	Label* l = core->GetMessageLabel();
 	if (l) {
@@ -11014,6 +11035,7 @@ static PyObject* GemRB_SetEquippedQuickSlot(PyObject* /*self*/, PyObject* args)
 
 	GET_GAME();
 	GET_ACTOR_GLOBAL();
+	NetForward(NetGuiOp::SetEquippedQuickSlot, { globalID, slot, ability });
 
 	const CREItem* item = actor->inventory.GetUsedWeapon(false, dummy);
 	if (item && (item->Flags & IE_INV_ITEM_CURSED)) {
@@ -11475,6 +11497,11 @@ static PyObject* GemRB_UseItem(PyObject* /*self*/, PyObject* args)
 			break;
 		case TARGET_NONE:
 			gc->ResetTargetMode();
+			if (core->GetNetSession() && core->GetNetSession()->IsReplica()) {
+				// using it is simulation, so only the host does
+				NetForward(NetGuiOp::UseItem, { globalID, int(itemdata.slot), int(itemdata.headerindex), flags });
+				break;
+			}
 			actor->UseItem(itemdata.slot, static_cast<int>(itemdata.headerindex), nullptr, flags);
 			break;
 		case TARGET_AREA:

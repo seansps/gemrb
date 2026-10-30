@@ -266,6 +266,14 @@ private:
 	static Control dragDummy;
 };
 
+// what the inventory, container and store windows work on
+struct GUIState {
+	std::unique_ptr<ItemDragOp> draggedItem;
+	Container* container = nullptr;
+	bool useContainer = false;
+	Store* store = nullptr;
+};
+
 struct LoadGameData {
 	Holder<SaveGame> save;
 	GAMVersion versionOverride = GAMVersion::GemRB;
@@ -553,6 +561,8 @@ public:
 	Store* GetCurrentStore();
 	void CloseCurrentStore();
 	Store* SetCurrentStore(const ResRef& resName, ieDword owner);
+	/** co-op host: swaps in a remote player's GUI state, to run its GUI calls on the same code */
+	void SwapGUIState(GUIState& state);
 	void SetMouseScrollSpeed(int speed);
 	int GetMouseScrollSpeed() const;
 
