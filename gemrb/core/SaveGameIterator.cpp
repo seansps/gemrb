@@ -383,8 +383,7 @@ void SaveGameIterator::PruneQuickSave(StringView folder) const
 	}
 }
 
-/** Save game to given directory */
-static bool DoSaveGame(const path_t& Path, bool overrideRunning, Holder<Sprite2D> preview)
+bool SaveGameIterator::WriteGameFiles(const path_t& Path, bool overrideRunning)
 {
 	const Game* game = core->GetGame();
 	//saving areas to cache currently in memory
@@ -418,6 +417,17 @@ static bool DoSaveGame(const path_t& Path, bool overrideRunning, Holder<Sprite2D
 	if (core->WriteGame(Path)) {
 		return false;
 	}
+	return true;
+}
+
+/** Save game to given directory */
+static bool DoSaveGame(const path_t& Path, bool overrideRunning, Holder<Sprite2D> preview)
+{
+	if (!SaveGameIterator::WriteGameFiles(Path, overrideRunning)) {
+		return false;
+	}
+
+	const Game* game = core->GetGame();
 
 	PluginHolder<ImageWriter> im = MakePluginHolder<ImageWriter>(PLUGIN_IMAGE_WRITER_BMP);
 	if (!im) {

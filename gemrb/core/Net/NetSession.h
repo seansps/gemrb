@@ -4,12 +4,13 @@
 
 /**
  * @file NetSession.h
- * Host-authoritative co-op session (spike).
+ * Host-authoritative co-op session.
  *
  * The host runs the normal simulation; clients forward player orders to it
  * and mirror the actor state it broadcasts instead of running scripts and
- * AI themselves. A session only exists when NetMode is set in the config,
- * so single player never touches any of this.
+ * AI themselves. Clients join (and resync) by loading a save the host
+ * writes and streams to them. A session only exists when NetMode is set in
+ * the config, so single player never touches any of this.
  */
 
 #ifndef NET_SESSION_H
@@ -41,8 +42,10 @@ public:
 
 	Mode GetMode() const { return mode; }
 	bool IsHost() const { return mode == Mode::Host; }
-	/** a client that mirrors the host: don't run local scripts/AI, forward orders instead */
+	/** clients mirror the host: they never run local scripts/AI and forward orders instead */
 	bool IsReplica() const;
+	/** client: true once the host's save is loaded and its actors are mapped */
+	bool IsInSync() const;
 
 	/** once per game loop tick, before the simulation: poll and handle incoming messages */
 	void PreTick();
@@ -52,6 +55,8 @@ public:
 	void SendChat(const std::string& text);
 	/** client: send an order for a local actor to the host; false if it wasn't forwarded */
 	bool ForwardCommand(const Actor& actor, const std::string& action, bool append);
+	/** client: ask the host for a fresh save to reload; false if not connected */
+	bool RequestResync();
 
 private:
 	struct Impl;

@@ -29,6 +29,8 @@ public:
 	int CreateSaveGame(Holder<SaveGame>, StringView slotname, Holder<Sprite2D> preview, bool force = false) const;
 	int CreateSaveGame(int index, bool mqs, Holder<Sprite2D> preview) const;
 	Holder<SaveGame> GetSaveGame(const String& slotname);
+	/** writes the game files of a save (GAM, WMP, SAV) into an existing dir, without the checks, portraits or preview */
+	static bool WriteGameFiles(const path_t& path, bool overrideRunning = false);
 
 private:
 	bool RescanSaveGames();
