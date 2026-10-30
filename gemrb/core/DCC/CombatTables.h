@@ -210,7 +210,8 @@ struct TwoWeaponDice {
 	CritRule offCrit = CritRule::None;
 	bool keepThreat = false; // the expanded threat range is lost with two weapons
 };
-// halflings count as Agi 16 at least, and a natural 16 is an automatic hit and crit (classes.md)
+// halflings count as Agi 16 at least, and then a natural 16 is an automatic hit and crit on either
+// hand; with more Agility they use the table (classes.md). Their double-1 fumble rule is the caller's
 constexpr int HALFLING_TWO_WEAPON_AGILITY = 16;
 
 class GEM_EXPORT TwoWeaponTable {

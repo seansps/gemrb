@@ -406,6 +406,8 @@ TwoWeaponDice TwoWeaponTable::Lookup(int agility, bool halfling) const
 {
 	TwoWeaponDice dice;
 	if (rows.empty()) return dice;
+	// halflings count as Agi 16 at least; above 16 they use the table like anyone (classes.md)
+	bool halflingRule = halfling && agility <= HALFLING_TWO_WEAPON_AGILITY;
 	if (halfling) agility = std::max(agility, HALFLING_TWO_WEAPON_AGILITY);
 	const TwoWeaponRow* found = &rows.back();
 	for (const auto& row : rows) {
@@ -418,9 +420,8 @@ TwoWeaponDice TwoWeaponTable::Lookup(int agility, bool halfling) const
 	dice.offSteps = found->offSteps;
 	dice.primaryCrit = found->primaryCrit;
 	dice.offCrit = CritRule::None;
-	// halflings: a natural 16 on either die is an automatic hit and a crit, as long as
-	// the table doesn't give them better (Agi 18+); Ethren decision, see classes.md
-	if (halfling && dice.primaryCrit != CritRule::Normal) {
+	// and with the halfling rule a natural 16 on either die is an automatic hit and a crit
+	if (halflingRule) {
 		dice.primaryCrit = CritRule::MaxAutoHit;
 		dice.offCrit = CritRule::MaxAutoHit;
 	}

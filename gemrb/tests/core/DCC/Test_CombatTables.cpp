@@ -210,6 +210,11 @@ TEST(DCC_CombatTables, TwoWeaponHalfling)
 	EXPECT_EQ(AttackDie(20, dice.offSteps), 16);
 	EXPECT_EQ(dice.primaryCrit, CritRule::MaxAutoHit);
 	EXPECT_EQ(dice.offCrit, CritRule::MaxAutoHit);
+	// above 16 the normal rows: Agi 17 crits only on a max that hits, primary hand only
+	dice = table.Lookup(17, true);
+	EXPECT_EQ(AttackDie(20, dice.primarySteps), 16);
+	EXPECT_EQ(dice.primaryCrit, CritRule::MaxOnHit);
+	EXPECT_EQ(dice.offCrit, CritRule::None);
 	// Agi 18 uses the normal row (d20 primary crits as normal)
 	dice = table.Lookup(18, true);
 	EXPECT_EQ(AttackDie(20, dice.primarySteps), 20);
