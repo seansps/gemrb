@@ -97,6 +97,52 @@ GEM_EXPORT bool NetInterpolate(const NetLerp& lerp, uint64_t now, int32_t& x, in
 // host keeps everyone and two players alternate; players lists the slots in play (host first)
 GEM_EXPORT uint8_t NetDefaultOwner(uint8_t partySlot, const std::vector<uint8_t>& players);
 
+// a player the host knows of in this session; one who left keeps its slot for a rejoin
+struct NetPlayer {
+	uint8_t slot = 0;
+	std::string name;
+	uint64_t token = 0; // what the client shows to get its slot back
+	bool connected = false;
+	bool ready = false;
+};
+
+/**
+ * The host's players: itself in slot 0 and clients in 1..maxSlot. A client is known by
+ * the token it got in its welcome, so when it comes back (after a drop or a timeout) it
+ * gets the same slot and with it its characters. Players who left stay remembered until
+ * their slot is needed for someone new.
+ */
+class GEM_EXPORT NetRoster {
+	std::vector<NetPlayer> players; // by slot
+	uint8_t maxSlot;
+
+public:
+	explicit NetRoster(uint8_t maxSlot = NET_MAX_PEERS);
+
+	void SetHost(const std::string& name);
+	// a hello: a known token gets its old slot back (rejoined), anyone else a free slot (and
+	// newToken), or the slot of the player who left first; 0 when everyone is connected
+	uint8_t Join(const std::string& name, uint64_t token, uint64_t newToken, bool& rejoined);
+	// the player left (or timed out); not ready any more
+	void Leave(uint8_t slot);
+	void SetReady(uint8_t slot, bool ready);
+	void ClearReady();
+
+	const NetPlayer* Find(uint8_t slot) const;
+	bool Connected(uint8_t slot) const;
+	// everyone remembered, connected or not, host first
+	std::vector<uint8_t> Slots() const;
+	// every connected player (the host included) is ready
+	bool AllReady() const;
+	const std::vector<NetPlayer>& All() const { return players; }
+};
+
+// who a party slot belongs to: the player the host assigned it to, else the round robin
+// default over the remembered players; and who controls it now: the owner, or the host
+// while the owner is away (BG: a leaving player's characters go to the host)
+GEM_EXPORT uint8_t NetSlotOwner(uint8_t partySlot, const std::map<uint8_t, uint8_t>& assigned, const NetRoster& roster);
+GEM_EXPORT uint8_t NetSlotController(uint8_t partySlot, const std::map<uint8_t, uint8_t>& assigned, const NetRoster& roster);
+
 // what the host lets a player do, modelled on the BG/IWD multiplayer permissions screen;
 // Control is the per-actor ownership rule, the rest are per player
 enum class NetPermission : uint8_t {
@@ -120,7 +166,13 @@ public:
 	void Set(uint8_t slot, NetPermission perm, bool allowed);
 	// for Control, actorOwner is the slot that owns the actor in question
 	bool Allowed(uint8_t slot, NetPermission perm, uint8_t actorOwner = 0) const;
+	// the per player permissions as bits, as the lobby sends them (Control isn't one)
+	uint32_t Mask(uint8_t slot) const;
+	void SetMask(uint8_t slot, uint32_t allowed);
 };
+
+// the permission named as NetPermissionName says it (or with _ for spaces); count if unknown
+GEM_EXPORT NetPermission NetPermissionByName(const std::string& name);
 
 // who answers a conversation: the owner of the party member in it (the speaker,
 // else the target), so the one who started it, or the PC an NPC talks to; -1 = no PC
@@ -136,9 +188,14 @@ struct NetGuiOpInfo {
 	size_t minArgs = 0;
 	NetPermission permission = NetPermission::Control;
 	const char* name = "?"; // the GemRB function
+	bool hostOnly = false; // simulation: the client doesn't run it locally, the result comes back
+	bool text = false; // takes the call's text as its last argument
 };
 
 GEM_EXPORT NetGuiOpInfo NetGuiInfo(NetGuiOp op);
+
+// the variables that are new or changed since before
+GEM_EXPORT std::vector<NetVariable> NetVariablesDiff(const std::map<std::string, int32_t>& before, const std::map<std::string, int32_t>& now);
 
 // change detection for state sent as a whole (inventories, spellbooks, stores)
 GEM_EXPORT uint64_t NetMessageHash(const NetInventory& msg);

@@ -249,6 +249,119 @@ TEST(NetReplicationTest, Permissions)
 	EXPECT_TRUE(perms.Allowed(NET_HOST_SLOT, NetPermission::Pause));
 	EXPECT_TRUE(perms.Allowed(NET_HOST_SLOT, NetPermission::Control, 2));
 	EXPECT_STREQ(NetPermissionName(NetPermission::CharacterRecords), "character records");
+
+	// the lobby sends them as bits; Control is no per player permission
+	NetPermissions other;
+	EXPECT_EQ(other.Mask(1), 0x7eU);
+	perms.Set(1, NetPermission::Leader, false);
+	perms.Set(1, NetPermission::Dialog, false);
+	uint32_t mask = perms.Mask(1);
+	EXPECT_FALSE(mask & (1u << uint8_t(NetPermission::Leader)));
+	EXPECT_FALSE(mask & (1u << uint8_t(NetPermission::Control)));
+	other.SetMask(1, mask);
+	EXPECT_FALSE(other.Allowed(1, NetPermission::Leader));
+	EXPECT_FALSE(other.Allowed(1, NetPermission::Dialog));
+	EXPECT_TRUE(other.Allowed(1, NetPermission::Pause));
+	EXPECT_EQ(other.Mask(NET_HOST_SLOT), 0x7eU);
+
+	EXPECT_EQ(NetPermissionByName("area_transition"), NetPermission::AreaTransition);
+	EXPECT_EQ(NetPermissionByName("character records"), NetPermission::CharacterRecords);
+	EXPECT_EQ(NetPermissionByName("leader"), NetPermission::Leader);
+	EXPECT_EQ(NetPermissionByName("nonsense"), NetPermission::count);
+}
+
+TEST(NetReplicationTest, RosterRejoin)
+{
+	NetRoster roster;
+	roster.SetHost("host");
+	bool rejoined = true;
+	EXPECT_EQ(roster.Join("one", 0, 101, rejoined), 1);
+	EXPECT_FALSE(rejoined);
+	EXPECT_EQ(roster.Join("two", 0, 102, rejoined), 2);
+	EXPECT_EQ(roster.Find(2)->token, 102U);
+	EXPECT_EQ(roster.Slots(), (std::vector<uint8_t> { 0, 1, 2 }));
+
+	// one drops: it keeps its slot, but isn't connected or ready
+	roster.SetReady(1, true);
+	roster.Leave(1);
+	EXPECT_FALSE(roster.Connected(1));
+	EXPECT_FALSE(roster.Find(1)->ready);
+	EXPECT_EQ(roster.Slots(), (std::vector<uint8_t> { 0, 1, 2 }));
+	// someone new gets a free slot, not the one held for the player who left
+	EXPECT_EQ(roster.Join("three", 0, 103, rejoined), 3);
+	// the token brings one back to its old slot, under its new name
+	EXPECT_EQ(roster.Join("one again", 101, 104, rejoined), 1);
+	EXPECT_TRUE(rejoined);
+	EXPECT_EQ(roster.Find(1)->name, "one again");
+	EXPECT_EQ(roster.Find(1)->token, 101U);
+	// a token is no master key: unknown ones, and ones of connected players, are just new players
+	EXPECT_EQ(roster.Join("thief", 102, 105, rejoined), 0);
+	EXPECT_FALSE(rejoined);
+
+	// full: a newcomer takes the slot of whoever left, which forgets that player
+	roster.Leave(2);
+	EXPECT_EQ(roster.Join("four", 0, 106, rejoined), 2);
+	EXPECT_FALSE(rejoined);
+	EXPECT_EQ(roster.Find(2)->token, 106U);
+	EXPECT_EQ(roster.Join("two", 102, 107, rejoined), 0);
+
+	// ready checks count connected players only; the host is one of them
+	EXPECT_FALSE(roster.AllReady());
+	for (uint8_t slot = 0; slot <= 3; ++slot) {
+		roster.SetReady(slot, true);
+	}
+	EXPECT_TRUE(roster.AllReady());
+	roster.Leave(3);
+	roster.SetReady(3, true); // gone, can't be ready
+	EXPECT_FALSE(roster.Find(3)->ready);
+	EXPECT_TRUE(roster.AllReady());
+	roster.ClearReady();
+	EXPECT_FALSE(roster.AllReady());
+	// the host never leaves
+	roster.Leave(NET_HOST_SLOT);
+	EXPECT_TRUE(roster.Connected(NET_HOST_SLOT));
+}
+
+TEST(NetReplicationTest, SlotOwnerAndController)
+{
+	NetRoster roster;
+	bool rejoined;
+	roster.Join("one", 0, 1, rejoined);
+	std::map<uint8_t, uint8_t> assigned;
+	// round robin over the remembered players: PCs 1 and 3 the host's, 2 and 4 slot 1's
+	EXPECT_EQ(NetSlotOwner(1, assigned, roster), 0);
+	EXPECT_EQ(NetSlotOwner(2, assigned, roster), 1);
+	EXPECT_EQ(NetSlotOwner(4, assigned, roster), 1);
+	EXPECT_EQ(NetSlotController(2, assigned, roster), 1);
+	// the host assigns PC 3 to slot 1
+	assigned[3] = 1;
+	EXPECT_EQ(NetSlotOwner(3, assigned, roster), 1);
+	// slot 1 drops: it still owns them, but the host controls them meanwhile
+	roster.Leave(1);
+	EXPECT_EQ(NetSlotOwner(2, assigned, roster), 1);
+	EXPECT_EQ(NetSlotController(2, assigned, roster), 0);
+	EXPECT_EQ(NetSlotController(3, assigned, roster), 0);
+	// and gets them back when it returns
+	roster.Join("one", 1, 2, rejoined);
+	EXPECT_TRUE(rejoined);
+	EXPECT_EQ(NetSlotController(3, assigned, roster), 1);
+	// an assignment to a player nobody remembers falls back to the default
+	assigned[5] = 3;
+	EXPECT_EQ(NetSlotOwner(5, assigned, roster), 0);
+}
+
+TEST(NetReplicationTest, VariablesDiff)
+{
+	std::map<std::string, int32_t> before = { { "A", 1 }, { "B", 2 } };
+	std::map<std::string, int32_t> now = before;
+	EXPECT_TRUE(NetVariablesDiff(before, now).empty());
+	now["B"] = 3;
+	now["C"] = 0;
+	auto diff = NetVariablesDiff(before, now);
+	ASSERT_EQ(diff.size(), 2U);
+	EXPECT_EQ(diff[0], (NetVariable { "B", 3 }));
+	EXPECT_EQ(diff[1], (NetVariable { "C", 0 }));
+	EXPECT_EQ(NetVariablesDiff({}, now).size(), 3U);
 }
 
 TEST(NetReplicationTest, DialogOwner)
@@ -293,6 +406,15 @@ TEST(NetReplicationTest, GuiOps)
 	EXPECT_EQ(NetGuiInfo(NetGuiOp::AddPartyGold).permission, NetPermission::Purchase);
 	EXPECT_EQ(NetGuiInfo(NetGuiOp::DropDraggedItem).actorArg, 0);
 	EXPECT_EQ(NetGuiInfo(NetGuiOp::LeaveContainer).actorArg, -1);
+	// M1.6: party-wide calls need Leader and run on the host only, record changes need CharacterRecords
+	EXPECT_EQ(NetGuiInfo(NetGuiOp::RestParty).permission, NetPermission::Leader);
+	EXPECT_TRUE(NetGuiInfo(NetGuiOp::RestParty).hostOnly);
+	EXPECT_EQ(NetGuiInfo(NetGuiOp::SwapPCs).permission, NetPermission::Leader);
+	EXPECT_EQ(NetGuiInfo(NetGuiOp::SetFormation).permission, NetPermission::Leader);
+	EXPECT_EQ(NetGuiInfo(NetGuiOp::MemorizeSpell).permission, NetPermission::CharacterRecords);
+	EXPECT_EQ(NetGuiInfo(NetGuiOp::SetupQuickSpell).permission, NetPermission::CharacterRecords);
+	EXPECT_TRUE(NetGuiInfo(NetGuiOp::SetMapnote).text);
+	EXPECT_FALSE(NetGuiInfo(NetGuiOp::SetMapnote).hostOnly);
 	EXPECT_STREQ(NetGuiInfo(NetGuiOp::count).name, "?");
 }
 

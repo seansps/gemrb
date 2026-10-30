@@ -188,6 +188,157 @@ bool NetPermissions::Allowed(uint8_t slot, NetPermission perm, uint8_t actorOwne
 	return it == denied.end() || !(it->second & (1u << uint8_t(perm)));
 }
 
+uint32_t NetPermissions::Mask(uint8_t slot) const
+{
+	uint32_t mask = 0;
+	for (uint8_t raw = uint8_t(NetPermission::Purchase); raw < uint8_t(NetPermission::count); ++raw) {
+		if (Allowed(slot, NetPermission(raw))) mask |= 1u << raw;
+	}
+	return mask;
+}
+
+void NetPermissions::SetMask(uint8_t slot, uint32_t allowed)
+{
+	for (uint8_t raw = uint8_t(NetPermission::Purchase); raw < uint8_t(NetPermission::count); ++raw) {
+		Set(slot, NetPermission(raw), allowed & (1u << raw));
+	}
+}
+
+NetPermission NetPermissionByName(const std::string& name)
+{
+	std::string spaced = name;
+	std::replace(spaced.begin(), spaced.end(), '_', ' ');
+	for (uint8_t raw = 0; raw < uint8_t(NetPermission::count); ++raw) {
+		if (spaced == NetPermissionName(NetPermission(raw))) return NetPermission(raw);
+	}
+	return NetPermission::count;
+}
+
+NetRoster::NetRoster(uint8_t maxSlot)
+	: maxSlot(maxSlot)
+{
+	NetPlayer host;
+	host.slot = NET_HOST_SLOT;
+	host.connected = true;
+	players.push_back(host);
+}
+
+void NetRoster::SetHost(const std::string& name)
+{
+	players[0].name = name;
+}
+
+uint8_t NetRoster::Join(const std::string& name, uint64_t token, uint64_t newToken, bool& rejoined)
+{
+	rejoined = false;
+	for (auto& player : players) {
+		if (!token || player.slot == NET_HOST_SLOT || player.token != token || player.connected) continue;
+		player.connected = true;
+		player.ready = false;
+		player.name = name;
+		rejoined = true;
+		return player.slot;
+	}
+	// a free slot, else the one of whoever left first (the lowest)
+	uint8_t slot = 0;
+	for (uint8_t candidate = 1; candidate <= maxSlot && !slot; ++candidate) {
+		if (!Find(candidate)) slot = candidate;
+	}
+	for (auto it = players.begin(); !slot && it != players.end(); ++it) {
+		if (it->slot == NET_HOST_SLOT || it->connected) continue;
+		slot = it->slot;
+		players.erase(it);
+		break;
+	}
+	if (!slot) return 0;
+	NetPlayer player;
+	player.slot = slot;
+	player.name = name;
+	player.token = newToken;
+	player.connected = true;
+	auto pos = std::find_if(players.begin(), players.end(), [slot](const NetPlayer& other) { return other.slot > slot; });
+	players.insert(pos, player);
+	return slot;
+}
+
+void NetRoster::Leave(uint8_t slot)
+{
+	for (auto& player : players) {
+		if (player.slot != slot || slot == NET_HOST_SLOT) continue;
+		player.connected = false;
+		player.ready = false;
+	}
+}
+
+void NetRoster::SetReady(uint8_t slot, bool ready)
+{
+	for (auto& player : players) {
+		if (player.slot == slot && player.connected) player.ready = ready;
+	}
+}
+
+void NetRoster::ClearReady()
+{
+	for (auto& player : players) {
+		player.ready = false;
+	}
+}
+
+const NetPlayer* NetRoster::Find(uint8_t slot) const
+{
+	for (const auto& player : players) {
+		if (player.slot == slot) return &player;
+	}
+	return nullptr;
+}
+
+bool NetRoster::Connected(uint8_t slot) const
+{
+	const NetPlayer* player = Find(slot);
+	return player && player->connected;
+}
+
+std::vector<uint8_t> NetRoster::Slots() const
+{
+	std::vector<uint8_t> slots;
+	for (const auto& player : players) {
+		slots.push_back(player.slot);
+	}
+	return slots;
+}
+
+bool NetRoster::AllReady() const
+{
+	for (const auto& player : players) {
+		if (player.connected && !player.ready) return false;
+	}
+	return true;
+}
+
+uint8_t NetSlotOwner(uint8_t partySlot, const std::map<uint8_t, uint8_t>& assigned, const NetRoster& roster)
+{
+	auto it = assigned.find(partySlot);
+	if (it != assigned.end() && roster.Find(it->second)) return it->second;
+	return NetDefaultOwner(partySlot, roster.Slots());
+}
+
+uint8_t NetSlotController(uint8_t partySlot, const std::map<uint8_t, uint8_t>& assigned, const NetRoster& roster)
+{
+	uint8_t owner = NetSlotOwner(partySlot, assigned, roster);
+	return roster.Connected(owner) ? owner : NET_HOST_SLOT;
+}
+
+std::vector<NetVariable> NetVariablesDiff(const std::map<std::string, int32_t>& before, const std::map<std::string, int32_t>& now)
+{
+	std::vector<NetVariable> changed;
+	for (const auto& var : now) {
+		auto it = before.find(var.first);
+		if (it != before.end() && it->second == var.second) continue;
+		changed.push_back(NetVariable { var.first, var.second });
+	}
+	return changed;
+}
+
 uint8_t NetDialogOwner(int speakerOwner, int targetOwner, uint8_t fallback)
 {
 	if (speakerOwner >= 0) return uint8_t(speakerOwner);
@@ -231,11 +382,32 @@ NetGuiOpInfo NetGuiInfo(NetGuiOp op)
 		case NetGuiOp::UseItem:
 			return { 0, 3, NetPermission::Control, "UseItem" };
 		case NetGuiOp::MemorizeSpell:
-			return { 0, 4, NetPermission::Control, "MemorizeSpell" };
+			return { 0, 4, NetPermission::CharacterRecords, "MemorizeSpell" };
 		case NetGuiOp::UnmemorizeSpell:
-			return { 0, 4, NetPermission::Control, "UnmemorizeSpell" };
+			return { 0, 4, NetPermission::CharacterRecords, "UnmemorizeSpell" };
 		case NetGuiOp::ChangeItemFlag:
 			return { 0, 4, NetPermission::Control, "ChangeItemFlag" };
+		// M1.6: party-wide decisions are the leader's, record changes need CharacterRecords
+		case NetGuiOp::RestParty:
+			return { -1, 3, NetPermission::Leader, "RestParty", true };
+		case NetGuiOp::LeaveParty:
+			return { 0, 1, NetPermission::Leader, "LeaveParty", true };
+		case NetGuiOp::SwapPCs:
+			return { -1, 2, NetPermission::Leader, "GameSwapPCs", true };
+		case NetGuiOp::SetFormation:
+			return { -1, 2, NetPermission::Leader, "GameSetFormation" };
+		case NetGuiOp::SetModalState:
+			return { 0, 2, NetPermission::Control, "SetModalState", false, true };
+		case NetGuiOp::SetupQuickSlot:
+			return { 0, 3, NetPermission::CharacterRecords, "SetupQuickSlot" };
+		case NetGuiOp::SetupQuickSpell:
+			return { 0, 4, NetPermission::CharacterRecords, "SetupQuickSpell" };
+		case NetGuiOp::SetupQuickItemSlot:
+			return { 0, 5, NetPermission::CharacterRecords, "SetupQuickItemSlot" };
+		case NetGuiOp::SetJournalEntry:
+			return { -1, 4, NetPermission::Control, "SetJournalEntry", false, true };
+		case NetGuiOp::SetMapnote:
+			return { -1, 3, NetPermission::Control, "SetMapnote", false, true };
 		default:
 			return {};
 	}
