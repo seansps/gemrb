@@ -137,14 +137,24 @@ static EffectRef fx_learn_spell_ref = { "Spell:Learn", -1 };
 		return nullptr; \
 	}
 
-// co-op clients: the host runs the same call on its side and has the final word (its
-// state replicates back); we go ahead on our copy, so the GUI stays responsive
-static void NetForward(NetGuiOp op, std::vector<int32_t> args)
+// co-op: false if the call is refused here (another player's party member, no permission);
+// clients send it to the host, which runs it too and has the final word (its state replicates
+// back), and mostly go ahead on their copy, so the GUI stays responsive
+static bool NetForward(NetGuiOp op, std::vector<int32_t> args, const std::string& text = std::string())
 {
 	NetSession* net = core->GetNetSession();
-	if (net && net->IsReplica()) {
-		net->ForwardGuiCall(op, std::move(args));
-	}
+	return !net || net->GuiCall(op, std::move(args), text);
+}
+
+static std::string NetUtf8(PyObject* obj)
+{
+	const char* text = obj && PyUnicode_Check(obj) ? PyUnicode_AsUTF8(obj) : nullptr;
+	return text ? text : "";
+}
+
+static PyObject* NetPyString(const std::string& text)
+{
+	return PyUnicode_FromString(text.c_str());
 }
 
 #define ABORT_IF_NULL(thing) \
@@ -2096,6 +2106,21 @@ static PyObject* GemRB_CreateView(PyObject* /*self*/, PyObject* args)
 		case IE_GUI_BUTTON:
 			view = new Button(rgn);
 			break;
+		case IE_GUI_EDIT:
+			{
+				PyObject* font;
+				int maxLength = 64;
+				PyObject* cursor = nullptr;
+				PARSE_ARGS(constructArgs, "O|iO", &font, &maxLength, &cursor);
+				TextEdit* edit = new TextEdit(rgn, static_cast<unsigned short>(maxLength), Point(3, 3));
+				edit->SetFont(core->GetFont(ResRefFromPy(font)));
+				if (cursor && cursor != Py_None) {
+					auto bam = gamedata->GetFactoryResourceAs<const AnimationFactory>(ResRefFromPy(cursor), IE_BAM_CLASS_ID);
+					if (bam) edit->SetCursor(bam->GetFrame(0, 0));
+				}
+				view = edit;
+			}
+			break;
 		case IE_GUI_CONSOLE:
 			{
 				PyObject* pyta = nullptr;
@@ -3877,6 +3902,259 @@ static PyObject* GemRB_NetResync(PyObject* /*self*/, PyObject* /*args*/)
 	Py_RETURN_TRUE;
 }
 
+PyDoc_STRVAR(GemRB_NetGetConfig__doc,
+	     "===== NetGetConfig =====\n\
+\n\
+**Prototype:** GemRB.NetGetConfig ()\n\
+\n\
+**Description:** What the multiplayer menu needs before a session exists: \n\
+whether this build can network at all, and the NetName, NetHost and NetPort \n\
+config keys as defaults for its fields.\n\
+\n\
+**Return value:** dict with Available, Name, Host, Port and Test (NetTestLobby)\n\
+");
+
+static PyObject* GemRB_NetGetConfig(PyObject* /*self*/, PyObject* /*args*/)
+{
+	PyObject* dict = PyDict_New();
+	PyDict_SetItemString(dict, "Available", DecRef(PyBool_FromLong, NetSession::Available()));
+	PyDict_SetItemString(dict, "Name", DecRef(NetPyString, core->config.NetName));
+	PyDict_SetItemString(dict, "Host", DecRef(NetPyString, core->config.NetHost));
+	PyDict_SetItemString(dict, "Port", DecRef(PyLong_FromLong, core->config.NetPort));
+	PyDict_SetItemString(dict, "Test", DecRef(NetPyString, core->config.NetTestLobby));
+	return dict;
+}
+
+PyDoc_STRVAR(GemRB_NetHost__doc,
+	     "===== NetHost =====\n\
+\n\
+**Prototype:** GemRB.NetHost (Port, Name)\n\
+\n\
+**Description:** Starts hosting a co-op game in its lobby: players join and \n\
+get ready, the host assigns them party slots and starts the game.\n\
+\n\
+**Return value:** bool, false if a session runs already or the port is taken\n\
+");
+
+static PyObject* GemRB_NetHost(PyObject* /*self*/, PyObject* args)
+{
+	int port;
+	char* name = nullptr;
+	PARSE_ARGS(args, "is", &port, &name);
+	RETURN_BOOL(core->StartNetSession("host", "", port, name));
+}
+
+PyDoc_STRVAR(GemRB_NetJoin__doc,
+	     "===== NetJoin =====\n\
+\n\
+**Prototype:** GemRB.NetJoin (Host, Port, Name)\n\
+\n\
+**Description:** Connects to a co-op host and waits in its lobby (or loads its \n\
+game, if it runs already). Keeps trying until it gets there.\n\
+\n\
+**Return value:** bool, false if a session runs already\n\
+");
+
+static PyObject* GemRB_NetJoin(PyObject* /*self*/, PyObject* args)
+{
+	char* host = nullptr;
+	int port;
+	char* name = nullptr;
+	PARSE_ARGS(args, "sis", &host, &port, &name);
+	RETURN_BOOL(core->StartNetSession("client", host, port, name));
+}
+
+PyDoc_STRVAR(GemRB_NetLeave__doc,
+	     "===== NetLeave =====\n\
+\n\
+**Prototype:** GemRB.NetLeave ()\n\
+\n\
+**Description:** Ends the co-op session (at the next tick), back to single player.\n\
+\n\
+**Return value:** N/A\n\
+");
+
+static PyObject* GemRB_NetLeave(PyObject* /*self*/, PyObject* /*args*/)
+{
+	core->StopNetSession();
+	Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(GemRB_NetGetLobby__doc,
+	     "===== NetGetLobby =====\n\
+\n\
+**Prototype:** GemRB.NetGetLobby ()\n\
+\n\
+**Description:** The lobby as the host has it: our slot, the players (slot, \n\
+name, connected, ready, ping and permissions), the party slots (owner and who \n\
+controls it while the owner is away), the chat and a revision that changes \n\
+whenever any of it does.\n\
+\n\
+**Return value:** dict, or None without a session\n\
+");
+
+static PyObject* GemRB_NetGetLobby(PyObject* /*self*/, PyObject* /*args*/)
+{
+	const NetSession* net = core->GetNetSession();
+	if (!net) {
+		Py_RETURN_NONE;
+	}
+	const NetLobbyState& lobby = net->GetLobby();
+	PyObject* dict = PyDict_New();
+	PyDict_SetItemString(dict, "Mode", DecRef(NetPyString, net->IsHost() ? "host" : "client"));
+	PyDict_SetItemString(dict, "Phase", DecRef(NetPyString, net->GetPhase() == NetPhase::Lobby ? "lobby" : "game"));
+	PyDict_SetItemString(dict, "Slot", DecRef(PyLong_FromLong, net->GetSlot()));
+	PyDict_SetItemString(dict, "Status", DecRef(NetPyString, net->GetStatus()));
+	PyDict_SetItemString(dict, "Revision", DecRef(PyLong_FromLong, long(net->GetLobbyRevision())));
+	PyDict_SetItemString(dict, "CanStart", DecRef(PyBool_FromLong, net->CanStart()));
+
+	PyObject* permNames = PyList_New(0);
+	for (uint8_t raw = uint8_t(NetPermission::Purchase); raw < uint8_t(NetPermission::count); ++raw) {
+		PyList_Append(permNames, DecRef(NetPyString, NetPermissionName(NetPermission(raw))));
+	}
+	PyDict_SetItemString(dict, "PermissionNames", permNames);
+	Py_DecRef(permNames);
+
+	PyObject* players = PyList_New(0);
+	for (const auto& player : lobby.players) {
+		PyObject* entry = PyDict_New();
+		PyDict_SetItemString(entry, "Slot", DecRef(PyLong_FromLong, player.slot));
+		PyDict_SetItemString(entry, "Name", DecRef(NetPyString, player.name));
+		PyDict_SetItemString(entry, "Connected", DecRef(PyBool_FromLong, player.flags & NetLobbyPlayer::CONNECTED));
+		PyDict_SetItemString(entry, "Ready", DecRef(PyBool_FromLong, player.flags & NetLobbyPlayer::READY));
+		PyDict_SetItemString(entry, "Ping", DecRef(PyLong_FromLong, player.ping));
+		PyObject* perms = PyDict_New();
+		for (uint8_t raw = uint8_t(NetPermission::Purchase); raw < uint8_t(NetPermission::count); ++raw) {
+			PyDict_SetItemString(perms, NetPermissionName(NetPermission(raw)), DecRef(PyBool_FromLong, player.allowed & (1u << raw)));
+		}
+		PyDict_SetItemString(entry, "Permissions", perms);
+		Py_DecRef(perms);
+		PyList_Append(players, entry);
+		Py_DecRef(entry);
+	}
+	PyDict_SetItemString(dict, "Players", players);
+	Py_DecRef(players);
+
+	PyObject* party = PyList_New(0);
+	for (const auto& slot : lobby.party) {
+		PyObject* entry = PyDict_New();
+		PyDict_SetItemString(entry, "Slot", DecRef(PyLong_FromLong, slot.partySlot));
+		PyDict_SetItemString(entry, "Owner", DecRef(PyLong_FromLong, slot.owner));
+		PyDict_SetItemString(entry, "Controller", DecRef(PyLong_FromLong, slot.controller));
+		PyDict_SetItemString(entry, "Name", DecRef(NetPyString, slot.name));
+		PyList_Append(party, entry);
+		Py_DecRef(entry);
+	}
+	PyDict_SetItemString(dict, "Party", party);
+	Py_DecRef(party);
+
+	PyObject* chat = PyList_New(0);
+	for (const auto& line : net->GetChatLog()) {
+		PyList_Append(chat, DecRef(NetPyString, line));
+	}
+	PyDict_SetItemString(dict, "Chat", chat);
+	Py_DecRef(chat);
+	return dict;
+}
+
+PyDoc_STRVAR(GemRB_NetSetReady__doc,
+	     "===== NetSetReady =====\n\
+\n\
+**Prototype:** GemRB.NetSetReady (Ready)\n\
+\n\
+**Description:** The lobby's ready toggle; the host can start once everyone is ready.\n\
+\n\
+**Return value:** N/A\n\
+");
+
+static PyObject* GemRB_NetSetReady(PyObject* /*self*/, PyObject* args)
+{
+	int ready;
+	PARSE_ARGS(args, "i", &ready);
+	NetSession* net = core->GetNetSession();
+	if (net) net->SetReady(ready);
+	Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(GemRB_NetAssign__doc,
+	     "===== NetAssign =====\n\
+\n\
+**Prototype:** GemRB.NetAssign (PartySlot, PlayerSlot)\n\
+\n\
+**Description:** Host only: gives a party slot (1-6) to a player.\n\
+\n\
+**Return value:** bool\n\
+");
+
+static PyObject* GemRB_NetAssign(PyObject* /*self*/, PyObject* args)
+{
+	int partySlot;
+	int playerSlot;
+	PARSE_ARGS(args, "ii", &partySlot, &playerSlot);
+	NetSession* net = core->GetNetSession();
+	RETURN_BOOL(net && net->Assign(uint8_t(partySlot), uint8_t(playerSlot)));
+}
+
+PyDoc_STRVAR(GemRB_NetSetPermission__doc,
+	     "===== NetSetPermission =====\n\
+\n\
+**Prototype:** GemRB.NetSetPermission (PlayerSlot, Permission, Allowed)\n\
+\n\
+**Description:** Host only: the permissions screen. Permission is one of \n\
+NetGetLobby's PermissionNames (purchase, area transition, dialog, character \n\
+records, pause, leader).\n\
+\n\
+**Return value:** bool\n\
+");
+
+static PyObject* GemRB_NetSetPermission(PyObject* /*self*/, PyObject* args)
+{
+	int slot;
+	char* permName = nullptr;
+	int allowed;
+	PARSE_ARGS(args, "isi", &slot, &permName, &allowed);
+	NetSession* net = core->GetNetSession();
+	NetPermission perm = NetPermissionByName(permName);
+	RETURN_BOOL(net && perm != NetPermission::count && net->SetPermission(uint8_t(slot), perm, allowed));
+}
+
+PyDoc_STRVAR(GemRB_NetAllowed__doc,
+	     "===== NetAllowed =====\n\
+\n\
+**Prototype:** GemRB.NetAllowed (Permission)\n\
+\n\
+**Description:** Whether the host lets us do this, so the GUI can grey out \n\
+what we may not. Always true in single player and for the host.\n\
+\n\
+**Return value:** bool\n\
+");
+
+static PyObject* GemRB_NetAllowed(PyObject* /*self*/, PyObject* args)
+{
+	char* permName = nullptr;
+	PARSE_ARGS(args, "s", &permName);
+	const NetSession* net = core->GetNetSession();
+	NetPermission perm = NetPermissionByName(permName);
+	RETURN_BOOL(!net || perm == NetPermission::count || net->Allowed(perm));
+}
+
+PyDoc_STRVAR(GemRB_NetStartGame__doc,
+	     "===== NetStartGame =====\n\
+\n\
+**Prototype:** GemRB.NetStartGame ()\n\
+\n\
+**Description:** Host only, once everyone is ready: from now on the players get \n\
+the game. The GUI starts (or loads) it right after.\n\
+\n\
+**Return value:** bool, false if not everyone is ready\n\
+");
+
+static PyObject* GemRB_NetStartGame(PyObject* /*self*/, PyObject* /*args*/)
+{
+	NetSession* net = core->GetNetSession();
+	RETURN_BOOL(net && net->StartGame());
+}
+
 PyDoc_STRVAR(GemRB_LoadMusicPL__doc,
 	     "===== LoadMusicPL =====\n\
 \n\
@@ -4981,7 +5259,7 @@ static PyObject* GemRB_GameSetPartyGold(PyObject* /*self*/, PyObject* args)
 	PARSE_ARGS(args, "i|i", &Gold, &flag);
 	GET_GAME();
 
-	NetForward(NetGuiOp::AddPartyGold, { flag ? Gold : int(Gold - game->PartyGold) });
+	if (!NetForward(NetGuiOp::AddPartyGold, { flag ? Gold : int(Gold - game->PartyGold) })) Py_RETURN_NONE;
 	if (flag) {
 		game->AddGold(Gold);
 	} else {
@@ -5048,6 +5326,7 @@ static PyObject* GemRB_GameSetFormation(PyObject* /*self*/, PyObject* args)
 	int Which = -1;
 	PARSE_ARGS(args, "H|i", &Formation, &Which);
 	GET_GAME();
+	if (!NetForward(NetGuiOp::SetFormation, { Formation, Which })) Py_RETURN_NONE;
 
 	if (Which < 0) {
 		game->WhichFormation = Formation; // an index, not actual formation
@@ -5189,6 +5468,8 @@ static PyObject* GemRB_SetJournalEntry(PyObject* /*self*/, PyObject* args)
 
 	ieStrRef msg2 = ieStrRef::INVALID;
 	if (feedback) msg2 = StrRefFromPy(feedback);
+	bool isText = !PyObject_TypeCheck(pyref, &PyLong_Type);
+	if (!NetForward(NetGuiOp::SetJournalEntry, { isText ? -1 : int(strref), section, int(chapter), feedback ? int(msg2) : -1 }, isText ? NetUtf8(pyref) : std::string())) Py_RETURN_NONE;
 
 	if (section == -1) {
 		//delete one or all entries
@@ -6069,6 +6350,7 @@ static PyObject* GemRB_GameSwapPCs(PyObject* /*self*/, PyObject* args)
 	uint32_t PC1, PC2;
 	PARSE_ARGS(args, "II", &PC1, &PC2);
 	GET_GAME();
+	if (!NetForward(NetGuiOp::SwapPCs, { int(PC1), int(PC2) })) Py_RETURN_NONE;
 
 	game->SwapPCs(PC1, PC2);
 
@@ -6731,7 +7013,7 @@ error.\n\
 
 static PyObject* GemRB_LeaveStore(PyObject* /*self*/, PyObject* /*args*/)
 {
-	NetForward(NetGuiOp::LeaveStore, {});
+	if (!NetForward(NetGuiOp::LeaveStore, {})) Py_RETURN_NONE;
 	core->CloseCurrentStore();
 	core->ResetEventFlag(EF_OPENSTORE);
 	core->SetEventFlag(EF_PORTRAIT);
@@ -6805,7 +7087,7 @@ open. This function will also remove empty ground piles.\n\
 
 static PyObject* GemRB_LeaveContainer(PyObject* /*self*/, PyObject* /*args*/)
 {
-	NetForward(NetGuiOp::LeaveContainer, {});
+	if (!NetForward(NetGuiOp::LeaveContainer, {})) Py_RETURN_NONE;
 	core->CloseCurrentContainer();
 	Py_RETURN_NONE;
 }
@@ -6990,7 +7272,7 @@ static PyObject* GemRB_ChangeContainerItem(PyObject* /*self*/, PyObject* args)
 	int action;
 	PARSE_ARGS(args, "iii", &globalID, &Slot, &action);
 	GET_GAME();
-	NetForward(NetGuiOp::ChangeContainerItem, { globalID, Slot, action });
+	if (!NetForward(NetGuiOp::ChangeContainerItem, { globalID, Slot, action })) Py_RETURN_NONE;
 
 	Container* container;
 	Actor* actor = nullptr;
@@ -7437,7 +7719,7 @@ static PyObject* GemRB_SetPurchasedAmount(PyObject* /*self*/, PyObject* args)
 		return AttributeError(GemRB_SetPurchasedAmount__doc);
 	}
 	amount = (ieDword) tmp;
-	NetForward(NetGuiOp::SetPurchasedAmount, { Slot, tmp, type });
+	if (!NetForward(NetGuiOp::SetPurchasedAmount, { Slot, tmp, type })) Py_RETURN_NONE;
 	const Store* store;
 	if (type) {
 		store = rhstore;
@@ -7693,7 +7975,7 @@ static PyObject* GemRB_ChangeStoreItem(PyObject* /*self*/, PyObject* args)
 	PARSE_ARGS(args, "iii", &globalID, &slot, &actint);
 	GET_GAME();
 	GET_ACTOR_GLOBAL();
-	NetForward(NetGuiOp::ChangeStoreItem, { globalID, slot, actint });
+	if (!NetForward(NetGuiOp::ChangeStoreItem, { globalID, slot, actint })) Py_RETURN_NONE;
 
 	Store* store = core->GetCurrentStore();
 	if (!store) {
@@ -8785,7 +9067,7 @@ static PyObject* GemRB_MemorizeSpell(PyObject* /*self*/, PyObject* args)
 	PARSE_ARGS(args, "iiii|i", &globalID, &SpellType, &Level, &Index, &enabled);
 	GET_GAME();
 	GET_ACTOR_GLOBAL();
-	NetForward(NetGuiOp::MemorizeSpell, { globalID, SpellType, Level, Index, enabled });
+	if (!NetForward(NetGuiOp::MemorizeSpell, { globalID, SpellType, Level, Index, enabled })) Py_RETURN_NONE;
 
 	auto ks = actor->spellbook.GetKnownSpell(SpellType, Level, Index);
 	if (!ks) {
@@ -8830,7 +9112,7 @@ static PyObject* GemRB_UnmemorizeSpell(PyObject* /*self*/, PyObject* args)
 	PARSE_ARGS(args, "iiii|b", &globalID, &SpellType, &Level, &Index, &onlyDepleted);
 	GET_GAME();
 	GET_ACTOR_GLOBAL();
-	NetForward(NetGuiOp::UnmemorizeSpell, { globalID, SpellType, Level, Index, onlyDepleted });
+	if (!NetForward(NetGuiOp::UnmemorizeSpell, { globalID, SpellType, Level, Index, onlyDepleted })) Py_RETURN_NONE;
 
 	const CREMemorizedSpell* ms = actor->spellbook.GetMemorizedSpell(SpellType, Level, Index);
 	if (!ms) {
@@ -8992,7 +9274,7 @@ static PyObject* GemRB_ChangeItemFlag(PyObject* /*self*/, PyObject* args)
 	PARSE_ARGS(args, "iiii", &globalID, &Slot, &Flags, &Mode);
 	GET_GAME();
 	GET_ACTOR_GLOBAL();
-	NetForward(NetGuiOp::ChangeItemFlag, { globalID, Slot, Flags, int(Mode) });
+	if (!NetForward(NetGuiOp::ChangeItemFlag, { globalID, Slot, Flags, int(Mode) })) Py_RETURN_NONE;
 
 	if (actor->inventory.ChangeItemFlag(core->QuerySlot(Slot), Flags, Mode)) {
 		return PyLong_FromLong(1);
@@ -9448,7 +9730,7 @@ static PyObject* GemRB_DragItem(PyObject* /*self*/, PyObject* args)
 	if (core->GetDraggedItem()) {
 		Py_RETURN_NONE;
 	}
-	NetForward(NetGuiOp::DragItem, { globalID, Slot, Count, Type });
+	if (!NetForward(NetGuiOp::DragItem, { globalID, Slot, Count, Type })) Py_RETURN_NONE;
 
 	GET_GAME();
 	Actor* actor;
@@ -9538,7 +9820,7 @@ static PyObject* GemRB_DropDraggedItem(PyObject* /*self*/, PyObject* args)
 	if (!core->GetDraggedItem()) {
 		Py_RETURN_NONE;
 	}
-	NetForward(NetGuiOp::DropDraggedItem, { globalID, Slot });
+	if (!NetForward(NetGuiOp::DropDraggedItem, { globalID, Slot })) Py_RETURN_NONE;
 
 	Label* l = core->GetMessageLabel();
 	if (l) {
@@ -9937,6 +10219,7 @@ static PyObject* GemRB_SetMapnote(PyObject* /*self*/, PyObject* args)
 
 	GET_GAME();
 	GET_MAP();
+	if (!NetForward(NetGuiOp::SetMapnote, { point.x, point.y, color }, NetUtf8(textObject))) Py_RETURN_NONE;
 
 	String text { u"" };
 	if (textObject) {
@@ -10528,6 +10811,8 @@ static PyObject* GemRB_LeaveParty(PyObject* /*self*/, PyObject* args)
 	PARSE_ARGS(args, "i|i", &globalID, &initDialog);
 	GET_GAME();
 	GET_ACTOR_GLOBAL();
+	// on clients only the host runs it; the new party comes back as a save
+	if (!NetForward(NetGuiOp::LeaveParty, { globalID, initDialog })) Py_RETURN_NONE;
 
 	if (initDialog) {
 		if (initDialog == 2) {
@@ -10899,6 +11184,7 @@ static PyObject* GemRB_SetupQuickSpell(PyObject* /*self*/, PyObject* args)
 
 	GET_GAME();
 	GET_ACTOR_GLOBAL();
+	if (!NetForward(NetGuiOp::SetupQuickSpell, { globalID, slot, which, type })) Py_RETURN_NONE;
 
 	if (!actor->PCStats) {
 		//no quick slots for this actor, which is not a fatal error
@@ -10945,6 +11231,7 @@ static PyObject* GemRB_SetupQuickSlot(PyObject* /*self*/, PyObject* args)
 
 	GET_GAME();
 	GET_ACTOR_GLOBAL();
+	if (!NetForward(NetGuiOp::SetupQuickSlot, { globalID, qslotID, actionIdx })) Py_RETURN_NONE;
 
 	if (!actor->PCStats) {
 		RuntimeError(fmt::format("{} is not a creature with a custom action bar!", fmt::WideToChar { actor->GetName() }));
@@ -10996,6 +11283,7 @@ static PyObject* GemRB_SetupQuickItemSlot(PyObject* /*self*/, PyObject* args)
 
 	GET_GAME();
 	GET_ACTOR_GLOBAL();
+	if (!NetForward(NetGuiOp::SetupQuickItemSlot, { globalID, qslotID, slot, headerIndex, translation })) Py_RETURN_NONE;
 
 	if (translation) {
 		slot = static_cast<ieWord>(core->QuerySlot(slot));
@@ -11035,7 +11323,7 @@ static PyObject* GemRB_SetEquippedQuickSlot(PyObject* /*self*/, PyObject* args)
 
 	GET_GAME();
 	GET_ACTOR_GLOBAL();
-	NetForward(NetGuiOp::SetEquippedQuickSlot, { globalID, slot, ability });
+	if (!NetForward(NetGuiOp::SetEquippedQuickSlot, { globalID, slot, ability })) Py_RETURN_NONE;
 
 	const CREItem* item = actor->inventory.GetUsedWeapon(false, dummy);
 	if (item && (item->Flags & IE_INV_ITEM_CURSED)) {
@@ -11208,6 +11496,7 @@ static PyObject* GemRB_SetModalState(PyObject* /*self*/, PyObject* args)
 	PARSE_ARGS(args, "ii|O", &globalID, &state, &spell);
 	GET_GAME();
 	GET_ACTOR_GLOBAL();
+	if (!NetForward(NetGuiOp::SetModalState, { globalID, state }, NetUtf8(spell))) Py_RETURN_NONE;
 
 	actor->SetModal((Modal) state, false);
 	actor->SetModalSpell((Modal) state, ResRefFromPy(spell));
@@ -11497,9 +11786,8 @@ static PyObject* GemRB_UseItem(PyObject* /*self*/, PyObject* args)
 			break;
 		case TARGET_NONE:
 			gc->ResetTargetMode();
-			if (core->GetNetSession() && core->GetNetSession()->IsReplica()) {
-				// using it is simulation, so only the host does
-				NetForward(NetGuiOp::UseItem, { globalID, int(itemdata.slot), int(itemdata.headerindex), flags });
+			// co-op: using it is simulation, so on clients only the host does
+			if (!NetForward(NetGuiOp::UseItem, { globalID, int(itemdata.slot), int(itemdata.headerindex), flags }) || (core->GetNetSession() && core->GetNetSession()->IsReplica())) {
 				break;
 			}
 			actor->UseItem(itemdata.slot, static_cast<int>(itemdata.headerindex), nullptr, flags);
@@ -11714,6 +12002,10 @@ static PyObject* GemRB_RestParty(PyObject* /*self*/, PyObject* args)
 	PyDict_SetItemString(dict, "Error", DecRef(PyBool_FromLong, cannotRest));
 	if (cannotRest) {
 		PyDict_SetItemString(dict, "ErrorMsg", DecRef(PyLong_FromStrRef, err));
+		PyDict_SetItemString(dict, "Cutscene", DecRef(PyBool_FromLong, 0));
+	} else if (!NetForward(NetGuiOp::RestParty, { flags, dream, hp })) {
+		// co-op clients: the host rests the party, what changes comes back
+		PyDict_SetItemString(dict, "ErrorMsg", DecRef(PyLong_FromLong, -1));
 		PyDict_SetItemString(dict, "Cutscene", DecRef(PyBool_FromLong, 0));
 	} else {
 		PyDict_SetItemString(dict, "ErrorMsg", DecRef(PyLong_FromLong, -1));
@@ -13060,9 +13352,19 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(MemorizeSpell, METH_VARARGS),
 	METHOD(ModifyEffect, METH_VARARGS),
 	METHOD(MoveToArea, METH_VARARGS),
+	METHOD(NetAllowed, METH_VARARGS),
+	METHOD(NetAssign, METH_VARARGS),
 	METHOD(NetChat, METH_VARARGS),
+	METHOD(NetGetConfig, METH_NOARGS),
+	METHOD(NetGetLobby, METH_NOARGS),
 	METHOD(NetGetMode, METH_NOARGS),
+	METHOD(NetHost, METH_VARARGS),
+	METHOD(NetJoin, METH_VARARGS),
+	METHOD(NetLeave, METH_NOARGS),
 	METHOD(NetResync, METH_NOARGS),
+	METHOD(NetSetPermission, METH_VARARGS),
+	METHOD(NetSetReady, METH_VARARGS),
+	METHOD(NetStartGame, METH_NOARGS),
 	METHOD(PlayMovie, METH_VARARGS),
 	METHOD(PlaySound, METH_VARARGS),
 	METHOD(PrepareSpontaneousCast, METH_VARARGS),
