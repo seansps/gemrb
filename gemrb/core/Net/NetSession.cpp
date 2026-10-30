@@ -19,6 +19,7 @@
 #include "MapMgr.h"
 #include "PluginMgr.h"
 #include "Projectile.h"
+#include "Prompts.h"
 #include "ProjectileServer.h"
 #include "SaveGame.h"
 #include "SaveGameIterator.h"
@@ -110,6 +111,8 @@ static constexpr size_t HOST_CHAT_LINES = 4 * NET_CHAT_HISTORY;
 static constexpr tick_t LOBBY_REFRESH = 5000;
 // "X is controlled by player N" at most this often per party member (ms)
 static constexpr tick_t REFUSAL_THROTTLE = 2000;
+// client: a host that doesn't answer our hello this long (ms) may speak another protocol version
+static constexpr tick_t HELLO_TIMEOUT = 5000;
 
 // one written save, ready to stream to every peer that asked for it in this tick
 struct NetSnapshot {
@@ -412,6 +415,7 @@ struct NetSession::Impl {
 	tick_t areaChangeAt = 0; // when the host said the party moved, for the log
 	bool lightLoad = false; // the area being loaded came as area data, not a save
 	tick_t nextConnectAttempt = 0;
+	tick_t helloSentAt = 0; // waiting for the welcome since then (0: not waiting)
 	bool stopped = false; // gave up (rejected or broken transfer), no more reconnects
 	ClientState state = ClientState::Connecting;
 	uint8_t slot = NET_HOST_SLOT;
@@ -959,6 +963,7 @@ struct NetSession::Impl {
 			hello.gameType = core->config.GameType;
 			hello.token = token;
 			Send(peer, hello);
+			helloSentAt = GetMilliseconds();
 			SetStatus("Connected, waiting for the host");
 			return;
 		}
@@ -1044,6 +1049,11 @@ struct NetSession::Impl {
 				enet_peer_reset(peer);
 				it = peers.begin();
 			}
+		} else if (server && helloSentAt && now - helloSentAt > HELLO_TIMEOUT) {
+			// an older host drops a newer hello without a word (before v7 nobody could answer it)
+			Log(WARNING, "Net", "The host hasn't answered our hello in {} ms; it may speak another protocol version (we speak v{}).", now - helloSentAt, NET_PROTOCOL_VERSION);
+			SetStatus(fmt::format("No answer from the host; it may run another version (we run protocol v{})", NET_PROTOCOL_VERSION));
+			helloSentAt = 0;
 		} else if (server && now - lastHeard > timeout) {
 			Log(WARNING, "Net", "The host timed out: nothing for {} ms.", now - lastHeard);
 			enet_peer_reset(server);
@@ -1087,8 +1097,10 @@ struct NetSession::Impl {
 	{
 		NetMsgType type;
 		if (!NetPeekType(data, size, type)) {
-			if (size >= NET_HEADER_SIZE && data[0] == NET_MAGIC && data[1] != NET_PROTOCOL_VERSION) {
-				Log(WARNING, "Net", "Dropping a packet from {}: it speaks protocol v{}, we speak v{}.", PeerAddress(peer), data[1], NET_PROTOCOL_VERSION);
+			uint8_t version = 0;
+			uint8_t foreignType = 0;
+			if (NetPeekForeign(data, size, version, foreignType)) {
+				OnForeignPacket(peer, data, size, version, foreignType);
 				return;
 			}
 			Log(WARNING, "Net", "Dropping malformed or incompatible packet ({} bytes) from {}.", size, PeerAddress(peer));
@@ -1104,6 +1116,41 @@ struct NetSession::Impl {
 		if (!ok) {
 			Log(WARNING, "Net", "Dropping unexpected or malformed message {} from {}.", int(type), PeerAddress(peer));
 		}
+	}
+
+	// another protocol version (v7 on): the host turns a client away in words it can read (the
+	// Reject layout never changes), a client reads a Reject from a host of any version
+	void OnForeignPacket(ENetPeer* peer, const uint8_t* data, size_t size, uint8_t version, uint8_t type)
+	{
+		if (mode == Mode::Client) {
+			NetReject reject;
+			uint8_t hostVersion = 0;
+			if (NetDecodeAnyReject(data, size, reject, hostVersion)) {
+				Log(ERROR, "Net", "The host speaks protocol v{}, we speak v{}; it says: {}", hostVersion, NET_PROTOCOL_VERSION, reject.reason);
+				HandleReject(reject);
+				return;
+			}
+			Log(WARNING, "Net", "Dropping a packet from the host: it speaks protocol v{}, we speak v{}.", version, NET_PROTOCOL_VERSION);
+			return;
+		}
+		NetPeerInfo* info = FindPeer(peer);
+		if (type != uint8_t(NetMsgType::Hello) || !info || info->welcomed) {
+			Log(WARNING, "Net", "Dropping a packet from {}: it speaks protocol v{}, we speak v{}.", PeerAddress(peer), version, NET_PROTOCOL_VERSION);
+			return;
+		}
+		NetReject reject;
+		reject.reason = fmt::format("Host runs protocol v{}, you run v{}. Use the same version of the game as the host.", NET_PROTOCOL_VERSION, version);
+		SendRaw(peer, NetEncodeReject(reject, version), NetChannel::Reliable);
+		enet_peer_disconnect_later(peer, 0);
+		Log(WARNING, "Net", "Rejected a client at {}: it speaks protocol v{}, we speak v{}; told it so in its own version.", PeerAddress(peer), version, NET_PROTOCOL_VERSION);
+	}
+
+	void HandleReject(const NetReject& reject)
+	{
+		stopped = true;
+		helloSentAt = 0;
+		LeaveGame(fmt::format("The host rejected us: {}", reject.reason));
+		SetStatus(fmt::format("Rejected: {}", reject.reason));
 	}
 
 	// host -----------------------------------------------------------------
@@ -1253,6 +1300,13 @@ struct NetSession::Impl {
 					if (beat.echo) info->rtt = RoundTrip(beat);
 					return true;
 				}
+			case NetMsgType::PromptAnswer:
+				{
+					NetPromptAnswer answer;
+					if (!info->welcomed || !NetDecode(data, size, answer)) return false;
+					core->GetPrompts().OnRemoteAnswer(info->slot, answer);
+					return true;
+				}
 			case NetMsgType::LobbyReady:
 				{
 					NetLobbyReady ready;
@@ -1342,6 +1396,12 @@ struct NetSession::Impl {
 			}
 			Log(MESSAGE, "Net", "Slot {} joined during dialog node #{} (player {} answers); sent it the conversation.", info.slot, dialog.seq, dialog.owner);
 		}
+		// and a prompt that is open, with the time it has left
+		NetPrompt prompt;
+		if (core->GetPrompts().OpenMessage(prompt)) {
+			Send(info.peer, prompt);
+			Log(MESSAGE, "Net", "Slot {} joined during prompt #{} '{}'; sent it, {} ms left.", info.slot, prompt.id, prompt.question.tag, prompt.remaining);
+		}
 		// what a save loads the client's own way (effects), as the host has it
 		const Game* g = core->GetGame();
 		for (int pcSlot = 1; g && pcSlot <= g->GetPartySize(false); ++pcSlot) {
@@ -1375,6 +1435,13 @@ struct NetSession::Impl {
 	void HandlePause(const NetPeerInfo& info, const NetPause& pause)
 	{
 		Log(MESSAGE, "Net", "Slot {} ({}) wants the game {}.", info.slot, info.name, pause.on ? "paused" : "running");
+		if (!pause.on && core->GetPrompts().Busy()) {
+			Notify(info, "The game stays paused until the decision is made.");
+			NetPause reply;
+			reply.on = IsPaused();
+			Send(info.peer, reply);
+			return;
+		}
 		if (!Allowed(info.slot, NetPermission::Pause)) {
 			Notify(info, "The host doesn't let you pause.");
 			NetPause reply;
@@ -2996,6 +3063,7 @@ struct NetSession::Impl {
 					NetWelcome welcome;
 					if (!NetDecode(data, size, welcome)) return false;
 					state = ClientState::Joining;
+					helloSentAt = 0;
 					slot = welcome.slot;
 					token = welcome.token;
 					bool inGame = welcome.flags & NetWelcome::IN_GAME;
@@ -3011,9 +3079,7 @@ struct NetSession::Impl {
 				{
 					NetReject reject;
 					if (!NetDecode(data, size, reject)) return false;
-					stopped = true;
-					LeaveGame(fmt::format("The host rejected us: {}", reject.reason));
-					SetStatus(fmt::format("Rejected: {}", reject.reason));
+					HandleReject(reject);
 					return true;
 				}
 			case NetMsgType::Chat:
@@ -3153,6 +3219,12 @@ struct NetSession::Impl {
 				return ClientEvent<NetStoreState>(data, size, live, [this](const NetStoreState& msg) { ApplyStore(msg); });
 			case NetMsgType::ContainerOpen:
 				return ClientEvent<NetContainerOpen>(data, size, live, [this](const NetContainerOpen& msg) { ApplyContainerOpen(msg); });
+			case NetMsgType::Prompt:
+				// a game being loaded gets the open prompt again once it is Ready
+				return ClientEvent<NetPrompt>(data, size, live, [this](NetPrompt msg) {
+					msg.question.actorID = ids.Local(msg.question.actorID);
+					core->GetPrompts().OnRemotePrompt(msg);
+				});
 			default:
 				return false;
 		}
@@ -3207,6 +3279,7 @@ struct NetSession::Impl {
 		table = NetActorTable();
 		ForgetMappings();
 		lightLoad = false;
+		core->GetPrompts().Reset();
 		if (!stopped) {
 			SetStatus("Lost the host, trying to reconnect");
 			Log(MESSAGE, "Net", "Will keep trying to reach the host.");
@@ -4708,6 +4781,8 @@ except Exception as e:
 			Log(MESSAGE, "Net", "Test hook: not listening to the network for {} s.", atoi(arg.c_str()));
 		} else if (verb == "lobby") {
 			Log(MESSAGE, "Net", "Test hook: lobby is {}.", Utf8(StringFromUtf8(LobbyLine().c_str())));
+		} else if (core->GetPrompts().RunTestOrder(order)) {
+			// ask ... | prompt ...: see PromptManager::RunTestOrder
 		} else {
 			Log(WARNING, "Net", "Unknown test order '{}'.", order);
 		}
@@ -5051,6 +5126,74 @@ bool NetSession::CanStart() const
 	return impl->CanStart();
 }
 
+std::vector<uint8_t> NetSession::ConnectedSlots() const
+{
+	std::vector<uint8_t> slots;
+	if (mode == Mode::Host) {
+		for (const NetPlayer& player : impl->roster.All()) {
+			if (player.slot == NET_HOST_SLOT || player.connected) slots.push_back(player.slot);
+		}
+	} else {
+		for (const auto& player : impl->lobby.players) {
+			if (player.flags & NetLobbyPlayer::CONNECTED) slots.push_back(player.slot);
+		}
+	}
+	if (std::find(slots.begin(), slots.end(), NET_HOST_SLOT) == slots.end()) slots.insert(slots.begin(), NET_HOST_SLOT);
+	return slots;
+}
+
+uint8_t NetSession::OwnerSlot(const Actor& actor) const
+{
+	if (mode != Mode::Host || !actor.InParty) return NET_HOST_SLOT;
+	return NetSlotOwner(uint8_t(actor.InParty), impl->assigned, impl->roster);
+}
+
+std::string NetSession::PlayerName(uint8_t slot) const
+{
+	if (mode == Mode::Host) {
+		const NetPlayer* player = impl->roster.Find(slot);
+		return player ? player->name : std::string();
+	}
+	for (const auto& player : impl->lobby.players) {
+		if (player.slot == slot) return player.name;
+	}
+	return std::string();
+}
+
+void NetSession::SendPrompt(const NetPrompt& msg)
+{
+	if (mode != Mode::Host) return;
+	const auto data = NetEncode(msg);
+	for (const auto& info : impl->peers) {
+		if (info.welcomed && info.live) Impl::SendRaw(info.peer, data, NetChannel::Reliable);
+	}
+}
+
+bool NetSession::SendPromptAnswer(const NetPromptAnswer& msg)
+{
+	if (mode != Mode::Client || !impl->server || impl->state != Impl::ClientState::InSync) return false;
+	Impl::Send(impl->server, msg);
+	return true;
+}
+
+void NetSession::TellPlayer(uint8_t slot, const std::string& text)
+{
+	if (mode != Mode::Host) return;
+	if (slot == NET_HOST_SLOT) {
+		impl->ShowLocal(text);
+		return;
+	}
+	if (const NetPeerInfo* info = impl->FindSlotPeer(slot)) Impl::Notify(*info, text);
+}
+
+void NetSession::DisplayLocal(const std::string& markup)
+{
+	if (!core->GetGame() || !displaymsg) return;
+	impl->localMessage = true;
+	displaymsg->DisplayMarkupString(StringFromUtf8(markup.c_str()));
+	impl->localMessage = false;
+}
+
 #else // HAVE_ENET
 
 struct NetSession::Impl {};
@@ -5204,6 +5347,31 @@ bool NetSession::CanStart() const
 {
 	return false;
 }
+
+std::vector<uint8_t> NetSession::ConnectedSlots() const
+{
+	return { NET_HOST_SLOT };
+}
+
+uint8_t NetSession::OwnerSlot(const Actor&) const
+{
+	return NET_HOST_SLOT;
+}
+
+std::string NetSession::PlayerName(uint8_t) const
+{
+	return std::string();
+}
+
+void NetSession::SendPrompt(const NetPrompt&) {}
+
+bool NetSession::SendPromptAnswer(const NetPromptAnswer&)
+{
+	return false;
+}
+
+void NetSession::TellPlayer(uint8_t, const std::string&) {}
+void NetSession::DisplayLocal(const std::string&) {}
 
 #endif // HAVE_ENET
 

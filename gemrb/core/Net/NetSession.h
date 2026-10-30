@@ -138,6 +138,21 @@ public:
 	bool StartGame();
 	bool CanStart() const;
 
+	// prompts (M1.8): PromptManager (core/Prompts.h) decides, the session carries them
+	/** the players in the session now, host first */
+	std::vector<uint8_t> ConnectedSlots() const;
+	/** host: whose party member this is (not who controls it now); the host for anyone else */
+	uint8_t OwnerSlot(const Actor& actor) const;
+	std::string PlayerName(uint8_t slot) const;
+	/** host: the open prompt (or its outcome) to every player in the game */
+	void SendPrompt(const NetPrompt& msg);
+	/** client: our player's answer to the host */
+	bool SendPromptAnswer(const NetPromptAnswer& msg);
+	/** host: a line in one player's message window */
+	void TellPlayer(uint8_t slot, const std::string& text);
+	/** markup in our own message window only, never replicated */
+	void DisplayLocal(const std::string& markup);
+
 private:
 	struct Impl;
 

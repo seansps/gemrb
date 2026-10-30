@@ -16,6 +16,7 @@
 #include "GameData.h"
 #include "GlobalTimer.h"
 #include "Interface.h"
+#include "Prompts.h"
 #include "KeyMap.h"
 #include "Map.h"
 #include "PathFinder.h"
@@ -742,6 +743,11 @@ bool GameControl::OnKeyPress(const KeyboardEvent& Key, unsigned short mod)
 		return true;
 	}
 
+	// a prompt waits for our answer: Enter goes to its window, wherever the focus went
+	if ((keycode == GEM_RETURN || keycode == GEM_ESCAPE) && core->GetPrompts().TakesKeys()) {
+		core->GetGUIScriptEngine()->RunFunction("Prompt", keycode == GEM_RETURN ? "Accept" : "Default");
+		return true;
+	}
 	// co-op: Enter opens the chat line (BG style); text fields have the key to themselves
 	if (keycode == GEM_RETURN && core->GetNetSession()) {
 		core->GetGUIScriptEngine()->RunFunction("NetChat", "OpenInput");

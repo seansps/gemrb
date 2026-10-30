@@ -47,6 +47,7 @@
 #include "GUI/WindowManager.h"
 #include "GameScript/GameScript.h"
 #include "Net/NetSession.h"
+#include "Prompts.h"
 #include "Scriptable/Container.h"
 #include "Streams/FileStream.h"
 #include "System/FileFilters.h"
@@ -285,6 +286,7 @@ Interface::Interface(CoreSettings&& cfg)
 	Log(MESSAGE, "Core", "GemRB core version v" VERSION_GEMRB " loading ...");
 
 	core = this;
+	prompts = std::make_unique<PromptManager>();
 
 	SetDebugMode(DebugMode(config.debugMode));
 
@@ -678,6 +680,8 @@ Interface::Interface(CoreSettings&& cfg)
 
 Interface::~Interface() noexcept
 {
+	// callbacks may hold script objects, which go before we do
+	prompts->Shutdown();
 	netSession.reset();
 	PathFinderScheduler::Stop();
 	WindowManager::CursorMouseUp = nullptr;
@@ -1928,6 +1932,8 @@ void Interface::GameLoop(void)
 	if (netSession) {
 		netSession->PreTick();
 	}
+	// answers, timeouts and their callbacks; on a co-op host inside the replicated simulation
+	prompts->Update();
 
 	update_scripts = false;
 	GameControl* gc = GetGameControl();

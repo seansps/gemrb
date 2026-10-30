@@ -853,7 +853,7 @@ TEST(NetProtocolTest, ChatWhisperAndHistoryRoundTrip)
 	auto data = NetEncode(whisper);
 	// header, slot, flags, target, then three strings
 	EXPECT_EQ(data.size(), NET_HEADER_SIZE + 3 + 2 + 10 + 2 + 10 + 2 + 4);
-	EXPECT_EQ(data[1], 6);
+	EXPECT_EQ(data[1], NET_PROTOCOL_VERSION);
 	NetChat out;
 	ASSERT_TRUE(NetDecode(data.data(), data.size(), out));
 	EXPECT_EQ(out.slot, 2);
@@ -896,6 +896,139 @@ TEST(NetProtocolTest, ChatWhisperAndHistoryRoundTrip)
 	for (size_t len = 0; len < data.size(); len += 7) {
 		EXPECT_FALSE(NetDecode(data.data(), len, history2)) << "len " << len;
 	}
+}
+
+TEST(NetProtocolTest, PromptRoundTrip)
+{
+	NetPrompt prompt;
+	prompt.id = 7;
+	prompt.remaining = 12345;
+	prompt.question.kind = PromptKind::Integer;
+	prompt.question.tag = "spellburn";
+	prompt.question.title = "Spellburn";
+	prompt.question.text = "Burn ability points?";
+	prompt.question.fields = { { "Str", 0, 3, 0 }, { "Agi", 0, 3, 1 }, { "Sta", 0, 2, 0 } };
+	prompt.question.timeout = 30000;
+	prompt.question.actorID = 10009;
+	NetPromptVoter voter;
+	voter.slot = 1;
+	voter.by = 0;
+	voter.away = 1;
+	voter.name = "client-one";
+	voter.byName = "host-player";
+	prompt.voters.push_back(voter);
+	auto data = NetEncode(prompt);
+	NetPrompt out;
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), out));
+	EXPECT_EQ(out.id, 7U);
+	EXPECT_EQ(out.state, NetPrompt::OPEN);
+	EXPECT_EQ(out.remaining, 12345U);
+	EXPECT_EQ(out.question.kind, PromptKind::Integer);
+	EXPECT_EQ(out.question.tag, "spellburn");
+	ASSERT_EQ(out.question.fields.size(), 3U);
+	EXPECT_EQ(out.question.fields[1].label, "Agi");
+	EXPECT_EQ(out.question.fields[1].value, 1);
+	EXPECT_EQ(out.question.fields[2].max, 2);
+	EXPECT_EQ(out.question.actorID, 10009U);
+	ASSERT_EQ(out.voters.size(), 1U);
+	EXPECT_EQ(out.voters[0].away, 1);
+	EXPECT_EQ(out.voters[0].byName, "host-player");
+	for (size_t len = 0; len < data.size(); ++len) {
+		EXPECT_FALSE(NetDecode(data.data(), len, out)) << "len " << len;
+	}
+
+	// the outcome
+	NetPrompt closed;
+	closed.id = 8;
+	closed.state = NetPrompt::CLOSED;
+	closed.question.kind = PromptKind::Choice;
+	closed.question.choices = { "Counter", "Ignore" };
+	closed.outcome = uint8_t(PromptOutcome::TimedOut);
+	closed.values = { 1 };
+	closed.outcomeText = "Counterspell: no answer from client-one in time, Ignore (the default).";
+	data = NetEncode(closed);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), out));
+	EXPECT_EQ(out.state, NetPrompt::CLOSED);
+	EXPECT_EQ(out.question.choices[1], "Ignore");
+	EXPECT_EQ(out.outcome, uint8_t(PromptOutcome::TimedOut));
+	EXPECT_EQ(out.values, std::vector<int32_t> { 1 });
+	EXPECT_EQ(out.outcomeText, closed.outcomeText);
+
+	// a question nobody could answer doesn't decode: a choice prompt with one choice, unknown kinds
+	NetPrompt broken = closed;
+	broken.question.choices = { "alone" };
+	data = NetEncode(broken);
+	EXPECT_FALSE(NetDecode(data.data(), data.size(), out));
+	data = NetEncode(closed);
+	data[NET_HEADER_SIZE + 4 + 1 + 4] = uint8_t(PromptKind::count);
+	EXPECT_FALSE(NetDecode(data.data(), data.size(), out));
+	data = NetEncode(closed);
+	data[NET_HEADER_SIZE + 4] = 2; // state
+	EXPECT_FALSE(NetDecode(data.data(), data.size(), out));
+
+	NetPromptAnswer answer;
+	answer.id = 7;
+	answer.values = { 1, 0, 2 };
+	data = NetEncode(answer);
+	NetPromptAnswer answer2;
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), answer2));
+	EXPECT_EQ(answer2.id, 7U);
+	EXPECT_EQ(answer2.values, answer.values);
+	answer.values.assign(PROMPT_MAX_FIELDS + 1, 0);
+	data = NetEncode(answer);
+	// the writer caps the list, so it still decodes, at the cap
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), answer2));
+	EXPECT_EQ(answer2.values.size(), PROMPT_MAX_FIELDS);
+	data[NET_HEADER_SIZE + 4] = uint8_t(PROMPT_MAX_FIELDS + 1);
+	EXPECT_FALSE(NetDecode(data.data(), data.size(), answer2));
+}
+
+TEST(NetProtocolTest, VersionProofReject)
+{
+	// the layout every version keeps: magic, version, type 3, the reason as a string
+	NetReject reject;
+	reject.reason = "Host runs protocol v7, you run v6.";
+	auto v6 = NetEncodeReject(reject, 6);
+	ASSERT_EQ(v6.size(), NET_HEADER_SIZE + 2 + reject.reason.size());
+	EXPECT_EQ(v6[0], NET_MAGIC);
+	EXPECT_EQ(v6[1], 6);
+	EXPECT_EQ(v6[2], 3);
+	EXPECT_EQ(v6[3], reject.reason.size());
+	EXPECT_EQ(v6[4], 0);
+	// what a v6 build reads (its own version in the header): the same bytes as ours, bar the version
+	auto ours = NetEncode(reject);
+	ours[1] = 6;
+	EXPECT_EQ(v6, ours);
+
+	// we don't take it as one of ours, but as a foreign Reject
+	NetMsgType type;
+	EXPECT_FALSE(NetPeekType(v6.data(), v6.size(), type));
+	uint8_t version = 0;
+	uint8_t foreignType = 0;
+	ASSERT_TRUE(NetPeekForeign(v6.data(), v6.size(), version, foreignType));
+	EXPECT_EQ(version, 6);
+	EXPECT_EQ(foreignType, uint8_t(NetMsgType::Reject));
+	NetReject out;
+	ASSERT_TRUE(NetDecodeAnyReject(v6.data(), v6.size(), out, version));
+	EXPECT_EQ(out.reason, reject.reason);
+	EXPECT_EQ(version, 6);
+	// from a newer host too
+	auto v9 = NetEncodeReject(reject, 9);
+	ASSERT_TRUE(NetDecodeAnyReject(v9.data(), v9.size(), out, version));
+	EXPECT_EQ(version, 9);
+	// and ours
+	ASSERT_TRUE(NetDecodeAnyReject(ours.data(), ours.size(), out, version));
+	// but nothing else
+	NetHello hello;
+	auto other = NetEncode(hello);
+	other[1] = 6;
+	EXPECT_FALSE(NetDecodeAnyReject(other.data(), other.size(), out, version));
+	ASSERT_TRUE(NetPeekForeign(other.data(), other.size(), version, foreignType));
+	EXPECT_EQ(foreignType, uint8_t(NetMsgType::Hello));
+	EXPECT_FALSE(NetPeekForeign(NetEncode(hello).data(), NetEncode(hello).size(), version, foreignType));
+	v6.push_back(0);
+	EXPECT_FALSE(NetDecodeAnyReject(v6.data(), v6.size(), out, version));
+	EXPECT_FALSE(NetDecodeAnyReject(nullptr, 0, out, version));
 }
 
 }

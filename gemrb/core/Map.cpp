@@ -22,6 +22,7 @@
 #include "Palette.h"
 #include "Particles.h"
 #include "PluginMgr.h"
+#include "Prompts.h"
 #include "Projectile.h"
 #include "RNG.h"
 #include "SaveGameIterator.h"
@@ -384,6 +385,10 @@ void Map::UseExit(Actor* actor, InfoPoint* ip)
 	}
 
 	if (!ip->Destination.IsEmpty()) {
+		// co-op host: the traveller confirms and the other players agree first (only in a session)
+		if (core->GetPrompts().HoldTravel(actor, ip)) {
+			return;
+		}
 		// the 0 here is default orientation, can infopoints specify that or
 		// is an entrance always provided?
 		MoveToNewArea(ip->Destination, ip->EntranceName, 0, EveryOne, actor);

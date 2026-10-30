@@ -192,6 +192,31 @@ bool NetReject::Read(NetReader& r)
 	return r.Ok();
 }
 
+std::vector<uint8_t> NetEncodeReject(const NetReject& reject, uint8_t version)
+{
+	std::vector<uint8_t> data = NetEncode(reject);
+	data[1] = version;
+	return data;
+}
+
+bool NetPeekForeign(const uint8_t* data, size_t size, uint8_t& version, uint8_t& type)
+{
+	if (!data || size < NET_HEADER_SIZE || data[0] != NET_MAGIC || data[1] == NET_PROTOCOL_VERSION) return false;
+	version = data[1];
+	type = data[2];
+	return true;
+}
+
+bool NetDecodeAnyReject(const uint8_t* data, size_t size, NetReject& reject, uint8_t& version)
+{
+	if (!data || size < NET_HEADER_SIZE || data[0] != NET_MAGIC || data[2] != uint8_t(NetMsgType::Reject)) return false;
+	version = data[1];
+	// read it as if it were ours: the layout never changes
+	std::vector<uint8_t> copy(data, data + size);
+	copy[1] = NET_PROTOCOL_VERSION;
+	return NetDecode(copy.data(), copy.size(), reject);
+}
+
 void NetChat::Write(NetWriter& w) const
 {
 	w.U8(slot);
@@ -1087,6 +1112,115 @@ bool NetChatHistory::Read(NetReader& r)
 	lines.resize(ReadCount(r, NET_CHAT_HISTORY));
 	for (auto& line : lines) {
 		if (!line.Read(r)) break;
+	}
+	return r.Ok();
+}
+
+void NetPrompt::Write(NetWriter& w) const
+{
+	w.U32(id);
+	w.U8(state);
+	w.U32(remaining);
+	w.U8(uint8_t(question.kind));
+	w.U8(question.flags);
+	w.Str(question.tag);
+	w.Str(question.title);
+	w.Str(question.text);
+	size_t count = WriteCount(w, question.choices.size(), PROMPT_MAX_CHOICES);
+	for (size_t i = 0; i < count; ++i) {
+		w.Str(question.choices[i]);
+	}
+	count = WriteCount(w, question.fields.size(), PROMPT_MAX_FIELDS);
+	for (size_t i = 0; i < count; ++i) {
+		w.Str(question.fields[i].label);
+		w.I32(question.fields[i].min);
+		w.I32(question.fields[i].max);
+		w.I32(question.fields[i].value);
+	}
+	w.I32(question.defaultChoice);
+	w.U32(question.timeout);
+	w.U32(question.actorID);
+	count = WriteCount(w, voters.size(), PROMPT_MAX_VOTERS);
+	for (size_t i = 0; i < count; ++i) {
+		w.U8(voters[i].slot);
+		w.U8(voters[i].by);
+		w.U8(voters[i].state);
+		w.U8(voters[i].away);
+		w.Str(voters[i].name);
+		w.Str(voters[i].byName);
+	}
+	w.U8(outcome);
+	count = WriteCount(w, values.size(), PROMPT_MAX_FIELDS);
+	for (size_t i = 0; i < count; ++i) {
+		w.I32(values[i]);
+	}
+	w.Str(outcomeText);
+}
+
+bool NetPrompt::Read(NetReader& r)
+{
+	id = r.U32();
+	state = r.U8();
+	remaining = r.U32();
+	uint8_t kind = r.U8();
+	if (kind >= uint8_t(PromptKind::count) || state > CLOSED) r.Fail();
+	question.kind = PromptKind(kind);
+	question.flags = r.U8();
+	if (question.flags & ~(PromptQuestion::VOTE | PromptQuestion::STOP_ON_NO)) r.Fail();
+	question.tag = r.Str();
+	question.title = r.Str();
+	question.text = r.Str();
+	question.choices.resize(ReadCount(r, PROMPT_MAX_CHOICES));
+	for (auto& choice : question.choices) {
+		choice = r.Str();
+	}
+	question.fields.resize(ReadCount(r, PROMPT_MAX_FIELDS));
+	for (auto& field : question.fields) {
+		field.label = r.Str();
+		field.min = r.I32();
+		field.max = r.I32();
+		field.value = r.I32();
+	}
+	question.defaultChoice = r.I32();
+	question.timeout = r.U32();
+	question.actorID = r.U32();
+	voters.resize(ReadCount(r, PROMPT_MAX_VOTERS));
+	for (auto& voter : voters) {
+		voter.slot = r.U8();
+		voter.by = r.U8();
+		voter.state = r.U8();
+		voter.away = r.U8();
+		voter.name = r.Str();
+		voter.byName = r.Str();
+		if (voter.state >= uint8_t(PromptVoter::State::count) || voter.away > 1) r.Fail();
+	}
+	outcome = r.U8();
+	if (outcome >= uint8_t(PromptOutcome::count)) r.Fail();
+	values.resize(ReadCount(r, PROMPT_MAX_FIELDS));
+	for (auto& value : values) {
+		value = r.I32();
+	}
+	outcomeText = r.Str();
+	// a question nobody could answer isn't one
+	if (r.Ok() && !PromptWellFormed(question)) r.Fail();
+	return r.Ok();
+}
+
+void NetPromptAnswer::Write(NetWriter& w) const
+{
+	w.U32(id);
+	size_t count = WriteCount(w, values.size(), PROMPT_MAX_FIELDS);
+	for (size_t i = 0; i < count; ++i) {
+		w.I32(values[i]);
+	}
+}
+
+bool NetPromptAnswer::Read(NetReader& r)
+{
+	id = r.U32();
+	values.resize(ReadCount(r, PROMPT_MAX_FIELDS));
+	for (auto& value : values) {
+		value = r.I32();
 	}
 	return r.Ok();
 }

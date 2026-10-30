@@ -61,6 +61,7 @@ class Label;
 class Map;
 class MusicMgr;
 class NetSession;
+class PromptManager;
 class ProjectileServer;
 class SaveGame;
 class SaveGameIterator;
@@ -355,6 +356,7 @@ private:
 	std::deque<Timer> timers;
 	std::unique_ptr<KeyMap> keyMap;
 	std::unique_ptr<NetSession> netSession; // only set when networked co-op is enabled
+	std::unique_ptr<PromptManager> prompts; // "ask the owning player", single player and co-op
 	bool stopNetSession = false; // the lobby left: ends before the next game loop tick
 	Scriptable* CutSceneRunner = nullptr;
 
@@ -509,6 +511,8 @@ public:
 	GameControl* GetGameControl() const { return game ? gamectrl : nullptr; }
 	/** the co-op session, nullptr in single player */
 	NetSession* GetNetSession() const { return netSession.get(); }
+	/** questions to the player who owns a party member (core/Prompts.h); always there */
+	PromptManager& GetPrompts() const { return *prompts; }
 	/** the lobby GUI hosts or joins (mode host or client); false if a session runs already or it fails */
 	bool StartNetSession(const std::string& mode, const std::string& host, int port, const std::string& name);
 	/** the lobby GUI leaves; the session ends at the next tick, so this is safe from anywhere */

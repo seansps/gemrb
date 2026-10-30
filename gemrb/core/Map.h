@@ -362,6 +362,7 @@ private:
 	MainAmbients nightAmbients;
 
 	friend class AREImporter;
+	friend class PromptManager; // finishes a travel the co-op travel prompts held back (UseExit)
 
 public:
 	Map(TileMap* tm, TileProps tileProps, Holder<Sprite2D> sm);
