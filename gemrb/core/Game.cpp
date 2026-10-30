@@ -1925,6 +1925,15 @@ bool Game::RestPartyInternal(RestChecks checks, int hp, int& hours)
 //    1-7: dream selected from a fixed list
 // hp: how much hp the rest will heal, 0 for full health
 // returns true if a cutscene dream is about to be played
+// games without dream texts (the demo) have no drmtxt2 at all
+static bool HasDreamTexts()
+{
+	const DataStream* texts = gamedata->GetResourceStream("drmtxt2", IE_2DA_CLASS_ID, true);
+	bool any = texts && texts->Size() > 0;
+	delete texts;
+	return any;
+}
+
 bool Game::RestParty(RestChecks checks, int dream, int hp)
 {
 	if (!CanPartyRest(checks)) {
@@ -1982,7 +1991,7 @@ bool Game::RestParty(RestChecks checks, int dream, int hp)
 			cutscene = true;
 			PlayerDream();
 			// all games have these bg1 leftovers, but only bg2 replaced the content
-		} else if (gamedata->GetResourceStream("drmtxt2", IE_2DA_CLASS_ID, true)->Size() > 0) {
+		} else if (HasDreamTexts()) {
 			cutscene = true;
 			TextDream();
 		}
