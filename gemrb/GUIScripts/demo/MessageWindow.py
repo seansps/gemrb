@@ -9,6 +9,7 @@ import CommonWindow
 import GUIClasses
 import GUIINV
 import GUIMA
+import NetChat
 from GUIDefines import *
 
 def OnLoad():
@@ -46,6 +47,9 @@ def OnLoad():
 	InventoryButton = MessageWindow.GetControl (5)
 	InventoryButton.SetText ("I")
 	InventoryButton.OnPress (GUIINV.OpenInventoryWindow)
+
+	# co-op: the recent chat (the lobby's too) goes back into the new message window
+	NetChat.OnMessageWindow ()
 
 def UpdateControlStatus():
 	pass

@@ -124,6 +124,8 @@ public:
 	bool PresentModalWindow(Window* win);
 
 	CursorFeedback SetCursorFeedback(CursorFeedback feedback);
+	/** an input event as if the video driver had it (hot keys, then the windows); for test hooks */
+	void InjectEvent(Event&& event) const { eventMgr.DispatchEvent(std::move(event)); }
 
 	// all drawing will be done directly on the screen until DrawingLock is destroyed
 	HUDLock DrawHUD() const;

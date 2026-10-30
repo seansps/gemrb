@@ -195,15 +195,22 @@ bool NetReject::Read(NetReader& r)
 void NetChat::Write(NetWriter& w) const
 {
 	w.U8(slot);
+	w.U8(flags);
+	w.U8(target);
 	w.Str(name);
+	w.Str(targetName);
 	w.Str(text);
 }
 
 bool NetChat::Read(NetReader& r)
 {
 	slot = r.U8();
+	flags = r.U8();
+	target = r.U8();
 	name = r.Str();
+	targetName = r.Str();
 	text = r.Str();
+	if (slot > NET_MAX_PEERS || target > NET_MAX_PEERS || flags & ~(WHISPER | SYSTEM)) r.Fail();
 	return r.Ok();
 }
 
@@ -1062,6 +1069,24 @@ bool NetGlobals::Read(NetReader& r)
 	for (auto& var : vars) {
 		var.name = r.Str();
 		var.value = r.I32();
+	}
+	return r.Ok();
+}
+
+void NetChatHistory::Write(NetWriter& w) const
+{
+	size_t count = WriteCount(w, lines.size(), NET_CHAT_HISTORY);
+	// the newest ones, if there are more
+	for (size_t i = lines.size() - count; i < lines.size(); ++i) {
+		lines[i].Write(w);
+	}
+}
+
+bool NetChatHistory::Read(NetReader& r)
+{
+	lines.resize(ReadCount(r, NET_CHAT_HISTORY));
+	for (auto& line : lines) {
+		if (!line.Read(r)) break;
 	}
 	return r.Ok();
 }

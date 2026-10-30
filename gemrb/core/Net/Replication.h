@@ -222,6 +222,37 @@ GEM_EXPORT uint64_t NetMessageHash(const NetInventory& msg);
 GEM_EXPORT uint64_t NetMessageHash(const NetSpellbook& msg);
 GEM_EXPORT uint64_t NetMessageHash(const NetStoreState& msg);
 
+// chat (M1.7): who sees a line, how it reads and looks
+// everyone sees a line, a whisper only its sender and target
+GEM_EXPORT bool NetChatVisibleTo(const NetChat& chat, uint8_t slot);
+// a player's colour by slot, RRGGBBAA as [color=] takes it; the host is slot 0
+GEM_EXPORT const char* NetChatColor(uint8_t slot);
+// the line as the player in slot viewer reads it: message window markup, or plain text
+// (lobby, log); markup in names and text is defused, [ ] become ( )
+GEM_EXPORT std::string NetChatMarkup(const NetChat& chat, uint8_t viewer);
+GEM_EXPORT std::string NetChatPlain(const NetChat& chat, uint8_t viewer);
+// a system line, eg. "Bob joined."
+GEM_EXPORT std::string NetSystemMarkup(const std::string& text);
+
+// what a typed chat line asks for: /w (/whisper, /tell) NAME text whispers, /r text replies to
+// the last whisper, //text says "/text"; anything else that starts with / is a notice
+struct NetChatCommand {
+	enum class Kind : uint8_t {
+		Nothing, // empty
+		Say,
+		Whisper,
+		Notice // nothing to send: text says why (unknown command, no such player, help)
+	};
+	Kind kind = Kind::Nothing;
+	uint8_t target = 0;
+	std::string targetName;
+	std::string text;
+};
+
+// players by name (case insensitive; the longest name that fits, so names may have spaces)
+// or by slot number; self can't be whispered to; lastWhisperer < 0 means nobody yet
+GEM_EXPORT NetChatCommand NetParseChat(const std::string& line, const std::vector<NetLobbyPlayer>& players, uint8_t self, int lastWhisperer);
+
 }
 
 #endif
