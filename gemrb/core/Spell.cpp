@@ -126,7 +126,13 @@ void Spell::AddCastingGlow(EffectQueue* fxqueue, ieDword duration, int gender) c
 	}
 
 	static EffectRef fx_casting_glow_ref = { "CastingGlow", -1 };
+	bool firstTry = fx_casting_glow_ref.opcode == -1;
 	auto fx = EffectQueue::CreateEffect(fx_casting_glow_ref, 0, CastingGraphics, FX_DURATION_ABSOLUTE);
+	if (!fx) {
+		// effects.ids doesn't map the opcode (eg. the demo), so there is no glow to show
+		if (firstTry) Log(WARNING, "Spell", "CastingGlow is missing from effects.ids, casting glows are disabled!");
+		return;
+	}
 	fx->Duration = core->GetGame()->GameTime + duration;
 	fx->InventorySlot = 0xffff;
 	fx->Projectile = 0;
@@ -309,7 +315,8 @@ std::unique_ptr<Projectile> Spell::GetProjectile(Scriptable* self, int header, i
 		EffectQueue& fxqueue = pro->GetEffects();
 		static EffectRef dmgRef = { "Damage", -1 };
 		EffectQueue::ResolveEffect(dmgRef);
-		if (!fxqueue.HasEffect(dmgRef)) {
+		// the opcode stays negative if effects.ids lacks it
+		if (dmgRef.opcode >= 0 && !fxqueue.HasEffect(dmgRef)) {
 			auto fx = EffectQueue::CreateEffect(dmgRef, 0, 0x80000, FX_DURATION_INSTANT_PERMANENT);
 			fx->DiceThrown = 3;
 			fx->DiceSides = 6;
