@@ -360,6 +360,44 @@ IE_MORALE                       = 252
 IE_BOUNCE                       = 253
 IE_MIRRORIMAGES                 = 254
 
+# DCC rules (ethren), keep in sync with ie_stats.h. Str/Agi/Sta/Per/Int are
+# IE_STR/IE_DEX/IE_CON/IE_CHR/IE_INT (base: score, modified: after loss)
+IE_DCC_LUCK                     = 256 # base: natural maximum, modified: current
+IE_DCC_AUGUR                    = 257
+IE_DCC_AUGURMOD                 = 258
+IE_DCC_LOSS_STR                 = 259 # ability loss, Str Agi Sta Per Int Luck
+IE_DCC_LOSS_AGI                 = 260
+IE_DCC_LOSS_STA                 = 261
+IE_DCC_LOSS_PER                 = 262
+IE_DCC_LOSS_INT                 = 263
+IE_DCC_LOSS_LCK                 = 264
+IE_DCC_STATE                    = 265 # DCC_STATE_* below
+IE_DCC_AC                       = 266
+IE_DCC_ATTACK                   = 267
+IE_DCC_DEEDDIE                  = 268
+IE_DCC_DEEDADD                  = 269
+IE_DCC_CRITDICE                 = 270
+IE_DCC_CRITDIE                  = 271
+IE_DCC_CRITADD                  = 272
+IE_DCC_CRITTABLE                = 273
+IE_DCC_THREAT                   = 274
+IE_DCC_ACTDIE1                  = 275
+IE_DCC_ACTDIE2                  = 276
+IE_DCC_ACTDIE3                  = 277
+IE_DCC_FORT                     = 278
+IE_DCC_REF                      = 279
+IE_DCC_WILL                     = 280
+IE_DCC_INIT                     = 281
+IE_DCC_LUCKDIE                  = 282
+IE_DCC_SPEED                    = 283
+IE_DCC_HITDIE                   = 284
+
+# DCC states at 0 (IE_DCC_STATE bits)
+DCC_STATE_IMMOBILE = 1
+DCC_STATE_UNCONSCIOUS = 2
+DCC_STATE_WITLESS = 4
+DCC_STATE_CURSED = 8
+
 #these stats exist only in PC's (but we access only PCs anyway)
 # make sure EXTRASETTINGS matches GUIScript.cpp
 # make sure the stats match their mdfeats.2da index (which itself matches GAM)

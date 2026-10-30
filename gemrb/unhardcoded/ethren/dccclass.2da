@@ -1,0 +1,11 @@
+2DA V1.0
+0
+          ID  HIT_DIE  DEED  RACE  TABLE    NAME
+WIZARD    1   4        0     1     DCCLWIZ  Wizard
+WARRIOR   2   12       1     1     DCCLWAR  Warrior
+CLERIC    3   8        0     1     DCCLCLE  Cleric
+THIEF     4   6        0     1     DCCLTHF  Thief
+DWARF     5   10       1     4     DCCLDWF  Dwarf
+ELF       6   6        0     2     DCCLELF  Elf
+HALFLING  7   6        0     5     DCCLHLF  Halfling
+LEVEL0    8   4        0     0     DCCLLV0  Level_0

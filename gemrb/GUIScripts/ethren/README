@@ -9,3 +9,11 @@ screens (funnel, DCC record sheet, level-up) also go here.
 GameCheck.IsGemRBDemo () is true for ethren as well, since the shared scripts
 use it to pick the demo's window layouts; use GameCheck.IsEthren () for
 anything that should differ from the demo.
+
+Modules here so far:
+- MessageWindow.py: the demo's, plus an "R" button for the record screen and
+  the dcctest autotest hook.
+- GUIREC.py: the DCC record screen, plain text in a window built from code.
+- DCCSheet.py: formats GemRB.GetDCCStats for the record screen and logs.
+- DCCAutotest.py: the DCC checks of testdata/dcctest's autotest; idle unless
+  the DCC_AUTOTEST global is 1.

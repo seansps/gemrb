@@ -620,8 +620,13 @@ TEST(NetProtocolTest, StatsPartyAndSpellbookRoundTrip)
 	EXPECT_EQ(stats2.stats[0].base, 150U);
 	EXPECT_EQ(stats2.stats[1].modified, 14U);
 	ExpectStrict(stats);
+	// the DCC stats past the IE ones travel too
+	stats.stats[0].stat = uint16_t(NET_MAX_ENTRIES + 28); // IE_DCC_STATE
+	data = NetEncode(stats);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), stats2));
+	EXPECT_EQ(stats2.stats[0].stat, NET_MAX_ENTRIES + 28);
 	// stat indices past the stat array are rejected
-	stats.stats[0].stat = uint16_t(NET_MAX_ENTRIES);
+	stats.stats[0].stat = uint16_t(NET_MAX_STATS);
 	data = NetEncode(stats);
 	EXPECT_FALSE(NetDecode(data.data(), data.size(), stats2));
 

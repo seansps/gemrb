@@ -1,0 +1,4 @@
+2DA V1.0
+0
+   ATTACK  DEED_DIE  DEED_ADD  CRIT_DICE  CRIT_DIE  CRIT_ADD  CRIT_TABLE  THREAT  ACT1  ACT2  ACT3  REF  FORT  WILL  LUCK_DIE  SNEAK_HIDE  SPELLS_KNOWN  MAX_SPELL_LVL
+0  0       0         0         1          4         0         1           20      20    0     0     0    0     0     0         0           0             0

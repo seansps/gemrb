@@ -43,6 +43,8 @@
 #include "GUI/TextEdit.h"
 #include "GUI/WindowManager.h"
 #include "GUI/WorldMapControl.h"
+#include "DCC/Rules.h"
+#include "DCC/Stats.h"
 #include "GameScript/GSUtils.h" //checkvariable
 #include "Net/NetSession.h"
 #include "Scriptable/Container.h"
@@ -6778,6 +6780,238 @@ static PyObject* GemRB_GetPlayerStat(PyObject* /*self*/, PyObject* args)
 	} else {
 		return PyLong_FromLong(StatValue);
 	}
+}
+
+
+// DCC rules (ethren, DCCRules) ////////////////////////////////////////////////
+
+static void DictInt(PyObject* dict, const char* key, long value)
+{
+	PyDict_SetItemString(dict, key, DecRef(PyLong_FromLong, value));
+}
+
+static int DCCSigned(ieDword value)
+{
+	return static_cast<int>(static_cast<ieDwordSigned>(value));
+}
+
+static PyObject* DCCRollDict(const DCC::RollResult& result)
+{
+	PyObject* dict = PyDict_New();
+	DictInt(dict, "Natural", result.natural);
+	DictInt(dict, "Total", result.total);
+	DictInt(dict, "Target", result.target);
+	DictInt(dict, "Success", result.success);
+	DictInt(dict, "Critical", result.critical);
+	DictInt(dict, "Fumble", result.fumble);
+	DictInt(dict, "Cursed", result.cursed);
+	return dict;
+}
+
+PyDoc_STRVAR(GemRB_GetDCCStats__doc,
+	     "===== GetDCCStats =====\n\
+\n\
+**Prototype:** GemRB.GetDCCStats (globalID)\n\
+\n\
+**Description:** Returns the DCC character sheet of an actor (DCCRules games only): \n\
+class, level, XP, the six abilities (score, current, loss, modifier), Luck, the birth augur, \n\
+AC, saves, attack bonus or deed die, crit, action dice, initiative, speed, hit die, \n\
+the states at 0 and, for thieves and halflings, their skills. \n\
+\n\
+**Parameters:**\n\
+  * globalID - party ID or global ID of the actor to use\n\
+\n\
+**Return value:** dict, or None outside DCC games\n\
+\n\
+**See also:** [GetPlayerStat](GetPlayerStat.md), [DCCRoll](DCCRoll.md), [DCCLevelUp](DCCLevelUp.md)");
+
+static PyObject* GemRB_GetDCCStats(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	PARSE_ARGS(args, "i", &globalID);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+
+	const DCC::RulesData* rules = core->GetDCCRules();
+	if (!rules) Py_RETURN_NONE;
+
+	PyObject* dict = PyDict_New();
+	int cls = actor->GetBase(IE_CLASS);
+	int level = actor->GetBase(IE_LEVEL);
+	const DCC::ClassInfo* info = rules->classes.Class(cls);
+	bool character = info != nullptr;
+	DictInt(dict, "Character", character);
+	DictInt(dict, "Class", cls);
+	PyDict_SetItemString(dict, "ClassName", DecRef(PyString_FromString, info ? info->name.c_str() : ""));
+	DictInt(dict, "Level", level);
+	DictInt(dict, "XP", actor->GetBase(IE_XP));
+	DictInt(dict, "NextXP", rules->xp.XPForLevel(level + 1));
+	DictInt(dict, "XPLevel", actor->DCCLevelForXP());
+	DictInt(dict, "CanLevelUp", actor->DCCCanLevelUp());
+	DictInt(dict, "HP", DCCSigned(actor->GetStat(IE_HITPOINTS)));
+	DictInt(dict, "MaxHP", DCCSigned(actor->GetStat(IE_MAXHITPOINTS)));
+	DictInt(dict, "HitDie", actor->GetBase(IE_DCC_HITDIE));
+	DictInt(dict, "Alignment", static_cast<int>(DCC::AlignmentFromIE(actor->GetStat(IE_ALIGNMENT))));
+
+	// [score, current, loss, modifier] in DCC order: Str Agi Sta Per Int Luck
+	PyObject* abilities = PyList_New(DCC::ABILITY_COUNT);
+	for (int i = 0; i < DCC::ABILITY_COUNT; ++i) {
+		DCC::Ability ability = static_cast<DCC::Ability>(i);
+		int current = DCCSigned(actor->GetStat(DCC::AbilityStat(ability)));
+		PyObject* entry = Py_BuildValue("[iiii]", DCCSigned(actor->GetBase(DCC::AbilityStat(ability))), current,
+						DCCSigned(actor->GetStat(DCC::LossStat(ability))), core->GetDCCAbilityBonus(STAT_DCC_MOD, current));
+		PyList_SetItem(abilities, i, entry);
+	}
+	PyDict_SetItemString(dict, "Abilities", abilities);
+	Py_DecRef(abilities);
+
+	int augur = actor->GetStat(IE_DCC_AUGUR);
+	DictInt(dict, "Luck", DCCSigned(actor->GetStat(IE_DCC_LUCK)));
+	DictInt(dict, "LuckMax", DCCSigned(actor->GetBase(IE_DCC_LUCK)));
+	DictInt(dict, "Augur", augur);
+	PyDict_SetItemString(dict, "AugurName", DecRef(PyString_FromString, rules->augurs.Name(augur).c_str()));
+	PyDict_SetItemString(dict, "AugurTarget", DecRef(PyString_FromString, DCC::AugurTargetKey(rules->augurs.Target(augur))));
+	DictInt(dict, "AugurMod", DCCSigned(actor->GetBase(IE_DCC_AUGURMOD)));
+
+	DictInt(dict, "AC", DCCSigned(actor->GetStat(IE_DCC_AC)));
+	DictInt(dict, "Fort", DCCSigned(actor->GetStat(IE_DCC_FORT)));
+	DictInt(dict, "Ref", DCCSigned(actor->GetStat(IE_DCC_REF)));
+	DictInt(dict, "Will", DCCSigned(actor->GetStat(IE_DCC_WILL)));
+	DictInt(dict, "Init", DCCSigned(actor->GetStat(IE_DCC_INIT)));
+	DictInt(dict, "Speed", DCCSigned(actor->GetStat(IE_DCC_SPEED)));
+	int attack = DCCSigned(actor->GetStat(IE_DCC_ATTACK));
+	DictInt(dict, "Attack", attack);
+	DictInt(dict, "DeedDie", actor->GetStat(IE_DCC_DEEDDIE));
+	DictInt(dict, "DeedAdd", actor->GetStat(IE_DCC_DEEDADD));
+	// the fixed part of a melee or missile attack roll (the deed die comes on top)
+	int str = actor->GetDCCAbilityMod(DCC::Ability::Str);
+	int agi = actor->GetDCCAbilityMod(DCC::Ability::Agi);
+	DictInt(dict, "Melee", character ? attack + str + actor->GetDCCAugurBonus(DCC::AugurRoll::Attack, DCC::AF_MELEE) : attack);
+	DictInt(dict, "Missile", character ? attack + agi + actor->GetDCCAugurBonus(DCC::AugurRoll::Attack, DCC::AF_MISSILE) : attack);
+	DictInt(dict, "CritDice", actor->GetStat(IE_DCC_CRITDICE));
+	DictInt(dict, "CritDie", actor->GetStat(IE_DCC_CRITDIE));
+	DictInt(dict, "CritAdd", actor->GetStat(IE_DCC_CRITADD));
+	DictInt(dict, "CritTable", actor->GetStat(IE_DCC_CRITTABLE));
+	DictInt(dict, "Threat", actor->GetStat(IE_DCC_THREAT));
+	PyObject* dice = PyList_New(0);
+	for (unsigned int stat : { IE_DCC_ACTDIE1, IE_DCC_ACTDIE2, IE_DCC_ACTDIE3 }) {
+		if (actor->GetStat(stat)) PyList_Append(dice, DecRef(PyLong_FromLong, long(actor->GetStat(stat))));
+	}
+	PyDict_SetItemString(dict, "ActionDice", dice);
+	Py_DecRef(dice);
+	DictInt(dict, "LuckDie", actor->GetStat(IE_DCC_LUCKDIE));
+	DictInt(dict, "States", actor->GetDCCStates());
+
+	const DCC::LevelRow* row = rules->classes.Row(cls, level);
+	DictInt(dict, "SpellsKnown", row ? row->spellsKnown : 0);
+	DictInt(dict, "MaxSpellLevel", row ? row->maxSpellLevel : 0);
+
+	// skills: table bonus + ability mod + augur (born under the loom, fox's cunning)
+	auto skillTotal = [actor](int bonus, DCC::ThiefSkill skill) {
+		DCC::Ability ability;
+		if (DCC::ThiefSkillAbility(skill, ability)) bonus += actor->GetDCCAbilityMod(ability);
+		DCC::AugurRoll roll = DCC::AugurRoll::SkillCheck;
+		if (skill == DCC::ThiefSkill::FindTrap) roll = DCC::AugurRoll::FindTrap;
+		if (skill == DCC::ThiefSkill::DisableTrap) roll = DCC::AugurRoll::DisableTrap;
+		if (skill != DCC::ThiefSkill::Backstab && skill != DCC::ThiefSkill::ScrollDie) bonus += actor->GetDCCAugurBonus(roll);
+		return bonus;
+	};
+	PyObject* skills = PyDict_New();
+	if (level > 0 && cls == static_cast<int>(DCC::ClassID::Thief)) {
+		DCC::Alignment path = DCC::AlignmentFromIE(actor->GetStat(IE_ALIGNMENT));
+		for (int i = 0; i < DCC::THIEF_SKILL_COUNT; ++i) {
+			DCC::ThiefSkill skill = static_cast<DCC::ThiefSkill>(i);
+			int bonus = rules->thiefSkills.Bonus(path, level, skill);
+			// the scroll entry is a die, not a bonus
+			DictInt(skills, DCC::ThiefSkillKey(skill), skill == DCC::ThiefSkill::ScrollDie ? bonus : skillTotal(bonus, skill));
+		}
+	} else if (level > 0 && cls == static_cast<int>(DCC::ClassID::Halfling) && row) {
+		DictInt(skills, DCC::ThiefSkillKey(DCC::ThiefSkill::Sneak), skillTotal(row->sneakHide, DCC::ThiefSkill::Sneak));
+		DictInt(skills, DCC::ThiefSkillKey(DCC::ThiefSkill::Hide), skillTotal(row->sneakHide, DCC::ThiefSkill::Hide));
+	}
+	PyDict_SetItemString(dict, "Skills", skills);
+	Py_DecRef(skills);
+	return dict;
+}
+
+PyDoc_STRVAR(GemRB_DCCRoll__doc,
+	     "===== DCCRoll =====\n\
+\n\
+**Prototype:** GemRB.DCCRoll (globalID, kind, which, target[, natural])\n\
+\n\
+**Description:** Makes a DCC roll for an actor through the engine's roll hook, so the \n\
+states at 0 apply (a Luck of 0 fails everything). \n\
+\n\
+**Parameters:**\n\
+  * globalID - party ID or global ID of the actor to use\n\
+  * kind - 0: save (which: 0 Fort, 1 Ref, 2 Will), 1: ability check, d20 + modifier (which: \n\
+    0 Str, 1 Agi, 2 Sta, 3 Per, 4 Int, 5 Luck), 2: Luck check, d20 <= Luck (which unused)\n\
+  * target - the DC (unused for Luck checks)\n\
+  * natural - the die result to use instead of rolling (for tests)\n\
+\n\
+**Return value:** dict with Natural, Total, Target, Success, Critical, Fumble and Cursed\n\
+\n\
+**See also:** [GetDCCStats](GetDCCStats.md)");
+
+static PyObject* GemRB_DCCRoll(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int kind;
+	int which;
+	int target;
+	int natural = 0;
+	PARSE_ARGS(args, "iiii|i", &globalID, &kind, &which, &target, &natural);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	if (!core->GetDCCRules()) Py_RETURN_NONE;
+
+	switch (kind) {
+		case 0:
+			if (which < 0 || which >= DCC::SAVE_COUNT) return RuntimeError("Bad save!");
+			return DCCRollDict(actor->DCCRollSave(static_cast<DCC::Save>(which), 0, target, natural));
+		case 1:
+			if (which < 0 || which >= DCC::ABILITY_COUNT) return RuntimeError("Bad ability!");
+			return DCCRollDict(actor->DCCRoll(DCC::RollKind::Check, actor->GetDCCAbilityMod(static_cast<DCC::Ability>(which)), target, natural));
+		case 2:
+			return DCCRollDict(actor->DCCRollLuckCheck(natural));
+		default:
+			return RuntimeError("Bad roll kind!");
+	}
+}
+
+PyDoc_STRVAR(GemRB_DCCLevelUp__doc,
+	     "===== DCCLevelUp =====\n\
+\n\
+**Prototype:** GemRB.DCCLevelUp (globalID, classID)\n\
+\n\
+**Description:** Gives a DCC character its next level: at level 0 classID picks the class \n\
+(dwarves, elves and halflings must take their own), later it must be the current class. \n\
+Rolls the class hit die + Stamina modifier (+ the bountiful harvest augur), at least 1. \n\
+It doesn't check the XP; see CanLevelUp in GetDCCStats. Host or single player only for now.\n\
+\n\
+**Parameters:**\n\
+  * globalID - party ID or global ID of the actor to use\n\
+  * classID - IE_CLASS of the class (class.ids)\n\
+\n\
+**Return value:** the hit points gained, -1 if refused\n\
+\n\
+**See also:** [GetDCCStats](GetDCCStats.md)");
+
+static PyObject* GemRB_DCCLevelUp(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int classID;
+	PARSE_ARGS(args, "ii", &globalID, &classID);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+
+	// the level-up GUI (M2.8) will forward this from co-op clients
+	const NetSession* net = core->GetNetSession();
+	if (net && !net->IsHost()) {
+		Log(WARNING, "GUIScript", "DCCLevelUp is not available to co-op clients yet.");
+		return PyLong_FromLong(-1);
+	}
+	return PyLong_FromLong(actor->DCCLevelUp(classID));
 }
 
 PyDoc_STRVAR(GemRB_SetPlayerStat__doc,
@@ -13582,6 +13816,9 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(GetPlayerScript, METH_VARARGS),
 	METHOD(GetPlayerSound, METH_VARARGS),
 	METHOD(GetPlayerStat, METH_VARARGS),
+	METHOD(GetDCCStats, METH_VARARGS),
+	METHOD(DCCRoll, METH_VARARGS),
+	METHOD(DCCLevelUp, METH_VARARGS),
 	METHOD(GetPlayerStates, METH_VARARGS),
 	METHOD(GetPlayerString, METH_VARARGS),
 	METHOD(GetPrompt, METH_NOARGS),

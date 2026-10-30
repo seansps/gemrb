@@ -39,6 +39,7 @@
 #include "WorldMapMgr.h"
 
 #include "DCC/AbilityMod.h"
+#include "DCC/Rules.h"
 #include "GUI/EventMgr.h"
 #include "GUI/GUIFactory.h"
 #include "GUI/GUIScriptInterface.h"
@@ -175,6 +176,7 @@ private:
 };
 
 static std::unique_ptr<AbilityTables> abilityTables;
+static std::unique_ptr<DCC::RulesData> dccRules;
 
 static const char* const IWD2DeathVarFormat = "_DEAD{}";
 static const char* DeathVarFormat = "SPRITE_IS_DEAD{}";
@@ -627,6 +629,11 @@ Interface::Interface(CoreSettings&& cfg)
 	}
 
 	abilityTables = std::make_unique<AbilityTables>(MaximumAbility);
+	if (HasFeature(GFFlags::RULES_DCC)) {
+		Log(MESSAGE, "Core", "Reading DCC rules tables...");
+		dccRules = std::make_unique<DCC::RulesData>();
+		dccRules->Load();
+	}
 
 	Log(MESSAGE, "Core", "Reading game time table...");
 	ret = ReadGameTimeTable();
@@ -4132,6 +4139,11 @@ int Interface::GetDCCAbilityBonus(int column, int value) const
 		default:
 			return -9999;
 	}
+}
+
+const DCC::RulesData* Interface::GetDCCRules() const
+{
+	return dccRules.get();
 }
 
 PauseState Interface::TogglePause() const
