@@ -22,6 +22,8 @@
 #include "SymbolMgr.h"
 #include "TableMgr.h"
 
+#include "DCC/Rules.h"
+#include "DCC/Stats.h"
 #include "GameScript/GSUtils.h" // for DiffCore
 #include "GameScript/GameScript.h" // only for ID_Allegiance
 #include "Logging/Logging.h"
@@ -1027,16 +1029,32 @@ static int CheckSaves(Actor* actor, Effect* fx)
 	}
 
 	bool saved = false;
-	for (int i = 0; i < 5; i++) {
-		if (fx->SavingThrowType & (1 << i)) {
-			// FIXME: first bonus handling for iwd2 is just a guess
-			if (globals.iwd2fx) {
-				saved = actor->GetSavingThrow(i, bonus - fx->SavingThrowBonus, fx);
-			} else {
-				saved = actor->GetSavingThrow(i, bonus, fx);
+	const DCC::RulesData* dccRules = core->GetDCCRules();
+	if (dccRules) {
+		// DCC: a single roll with the best of the Fort/Ref/Will saves the IE save types map to
+		int best = -1;
+		int bestTotal = 0;
+		for (int i = 0; i < 5; i++) {
+			if (!(fx->SavingThrowType & (1 << i))) continue;
+			int total = static_cast<ieDwordSigned>(actor->GetStat(DCC::SaveStat(dccRules->saves.Get(i))));
+			if (best == -1 || total > bestTotal) {
+				best = i;
+				bestTotal = total;
 			}
-			if (saved) {
-				break;
+		}
+		if (best != -1) saved = actor->GetSavingThrow(best, bonus, fx);
+	} else {
+		for (int i = 0; i < 5; i++) {
+			if (fx->SavingThrowType & (1 << i)) {
+				// FIXME: first bonus handling for iwd2 is just a guess
+				if (globals.iwd2fx) {
+					saved = actor->GetSavingThrow(i, bonus - fx->SavingThrowBonus, fx);
+				} else {
+					saved = actor->GetSavingThrow(i, bonus, fx);
+				}
+				if (saved) {
+					break;
+				}
 			}
 		}
 	}

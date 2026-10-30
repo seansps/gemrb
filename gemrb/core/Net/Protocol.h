@@ -31,11 +31,13 @@
 namespace GemRB {
 
 constexpr uint8_t NET_MAGIC = 0xE7;
-constexpr uint8_t NET_PROTOCOL_VERSION = 7;
+constexpr uint8_t NET_PROTOCOL_VERSION = 8;
 constexpr uint16_t NET_DEFAULT_PORT = 27015;
 constexpr size_t NET_HEADER_SIZE = 3;
 constexpr size_t NET_MAX_STRING = 1024;
 constexpr size_t NET_MAX_ENTRIES = 256;
+// actor stats: the IE ones and the DCC ones past them (Actor.h MAX_STATS)
+constexpr size_t NET_MAX_STATS = 512;
 // the actor table covers every actor, door, container and region in every loaded area
 constexpr size_t NET_MAX_ACTORS = 4096;
 // save transfers: chunk payload and whole save limits

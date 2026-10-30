@@ -499,6 +499,7 @@ private:
 	void LoadCRTable();
 	ResRef* GetDream(Map* area);
 	bool RestPartyInternal(RestChecks checks, int hp, int& hours);
+	bool restInBed = false; // DCC: the current rest heals ability loss as bed rest (an inn or scripted rest)
 	bool CastOnRest() const;
 	void PlayerDream() const;
 	void TextDream();

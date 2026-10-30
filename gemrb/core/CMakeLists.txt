@@ -123,6 +123,7 @@ FILE(GLOB gemrb_core_LIB_SRCS
 	GUI/WorldMapControl.cpp
 	RNG.cpp
 	Scriptable/Actor.cpp
+	Scriptable/ActorDCC.cpp
 	Scriptable/CombatInfo.cpp
 	Scriptable/Container.cpp
 	Scriptable/Door.cpp

@@ -521,7 +521,10 @@ static int CanSave()
 		if (!actor) continue;
 		// can't save while (party) actors are in helpless or dead states
 		// STATE_NOSAVE tracks actors not to be stored in GAM, not game saveability
-		if (actor->GetStat(IE_STATE_ID) & (STATE_NOSAVE | STATE_MINDLESS) || actor->GetStat(IE_CHECKFORBERSERK)) {
+		ieDword state = actor->GetStat(IE_STATE_ID);
+		// DCC: ability loss can hold someone at 0 for days, so that doesn't stop saving
+		if (core->HasFeature(GFFlags::RULES_DCC) && actor->IsDCCHeld()) state &= ~STATE_MINDLESS;
+		if (state & (STATE_NOSAVE | STATE_MINDLESS) || actor->GetStat(IE_CHECKFORBERSERK)) {
 			//some actor is in nosave state
 			displaymsg->DisplayMsgCentered(HCStrings::CantSaveNoCtrl, FT_ANY, GUIColors::XPCHANGE);
 			return 5;

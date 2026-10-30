@@ -1193,6 +1193,8 @@ static void pcf_minhitpoint(Actor* actor, ieDword /*oldValue*/, ieDword hp)
 
 static void pcf_stat(Actor* actor, ieDword newValue, ieDword stat)
 {
+	// DCC: a score of 0 is a state (RefreshDCCStats), only drains flagged lethal kill
+	if (core->HasFeature(GFFlags::RULES_DCC)) return;
 	if ((signed) newValue <= 0) {
 		static EffectRef fx_minimum_base_stats_ref = { "MinimumBaseStats", -1 };
 		if (core->HasFeature(GFFlags::DEATH_ON_ZERO_STAT) && !actor->fxqueue.HasEffectWithParam(fx_minimum_base_stats_ref, 1)) {
@@ -2683,6 +2685,11 @@ Actor::stats_t Actor::ResetStats(bool init)
 	AC.ResetAll();
 	ToHit.ResetAll(); // effects can result in the change of any of the boni, so we need to reset all
 
+	// DCC: class table values follow class and level changes (level up, scripts)
+	if (core->HasFeature(GFFlags::RULES_DCC) && (dccDerivedClass != int(BaseStats[IE_CLASS]) || dccDerivedLevel != int(BaseStats[IE_LEVEL]))) {
+		CreateDerivedStatsDCC();
+	}
+
 	stats_t prev;
 	if (init) {
 		InternalFlags |= IF_INITIALIZED;
@@ -2800,10 +2807,17 @@ void Actor::RefreshEffects(bool first, const stats_t& previous)
 		}
 	}
 	// we need to recalc these, since the stats or equipped gear may have changed (and this is relevant in iwd2)
-	AC.SetWisdomBonus(GetWisdomAC());
-	// FIXME: but the effects may reset this too and we shouldn't touch it in that case (flatfooted!)
-	// flatfooted by invisible attacker: this is handled by GetDefense and ok
-	AC.SetDexterityBonus(GetDexterityAC());
+	if (core->HasFeature(GFFlags::RULES_DCC)) {
+		// DCC: no 2e dexmod/wisdom AC; the Agility modifier goes into the DCC AC instead
+		AC.SetWisdomBonus(0, 1);
+		AC.SetDexterityBonus(0, 1);
+		RefreshDCCStats(previous);
+	} else {
+		AC.SetWisdomBonus(GetWisdomAC());
+		// FIXME: but the effects may reset this too and we shouldn't touch it in that case (flatfooted!)
+		// flatfooted by invisible attacker: this is handled by GetDefense and ok
+		AC.SetDexterityBonus(GetDexterityAC());
+	}
 
 	if (HasPlayerClass()) {
 		RefreshPCStats();
@@ -3282,6 +3296,9 @@ bool Actor::GetSavingThrow(ieDword type, int modifier, const Effect* fx)
 	InternalFlags |= IF_USEDSAVE;
 	int ret = lastSave.savingThrow[type];
 	if (Modified[IE_STATE_ID] & STATE_DEAD) return false; // just to shut some errant feedback, should be fine
+	if (core->HasFeature(GFFlags::RULES_DCC)) {
+		return GetSavingThrowDCC(type, modifier, fx);
+	}
 	const Effect* sfx = fxqueue.HasEffect(fx_save_vs_school_bonus_ref);
 
 	if (!third) {
@@ -4126,7 +4143,7 @@ void Actor::GetHit(int damage, bool killingBlow)
 	}
 
 	if (Modified[IE_STATE_ID] & STATE_SLEEP) {
-		if (Modified[IE_EXTSTATE_ID] & (EXTSTATE_NO_WAKEUP | EXTSTATE_DOESNT_AWAKEN_ON_DAMAGE) || HasSpellState(SS_NOAWAKE)) {
+		if (Modified[IE_EXTSTATE_ID] & (EXTSTATE_NO_WAKEUP | EXTSTATE_DOESNT_AWAKEN_ON_DAMAGE) || HasSpellState(SS_NOAWAKE) || (GetDCCStates() & DCC::STATE_UNCONSCIOUS)) {
 			return;
 		}
 		auto fx = EffectQueue::CreateEffect(fx_cure_sleep_ref, 0, 0, FX_DURATION_INSTANT_PERMANENT);
@@ -5163,6 +5180,11 @@ ieDword Actor::GetXPLevel(int modified) const
 {
 	const stats_t& stats = modified ? Modified : BaseStats;
 
+	// DCC: single classed, level 0 for the funnel
+	if (core->HasFeature(GFFlags::RULES_DCC)) {
+		return stats[IE_LEVEL];
+	}
+
 	stat_t average = 0;
 	if (creVersion == CREVersion::V2_2) {
 		// iwd2
@@ -6140,7 +6162,8 @@ int Actor::GetHpAdjustment(int multiplier, bool modified) const
 
 	// only player classes get this bonus
 	// skip dead actors on load, so we don't screw their hp
-	if (!HasPlayerClass() || (BaseStats[IE_STATE_ID] & _DEAD_STATES && Timers.checkHP == 2)) {
+	// DCC: the Stamina modifier is part of each level's hp roll instead (DCCLevelUp)
+	if (core->HasFeature(GFFlags::RULES_DCC) || !HasPlayerClass() || (BaseStats[IE_STATE_ID] & _DEAD_STATES && Timers.checkHP == 2)) {
 		return 0;
 	}
 
@@ -8171,6 +8194,12 @@ void Actor::Heal(int hp)
 
 void Actor::AddExperience(int exp, int combat)
 {
+	// DCC: XP comes as awarded (funnel.md); level-up readiness is DCCCanLevelUp
+	if (core->HasFeature(GFFlags::RULES_DCC)) {
+		SetBase(IE_XP, std::max(0, int(BaseStats[IE_XP]) + exp));
+		return;
+	}
+
 	int bonus = core->GetWisdomBonus(0, Modified[IE_WIS]);
 	int adjustmentPercent = gamedata->GetDifficultyMod(1, CFGCache.gameDifficulty);
 	// the "Suppress Extra Difficulty Damage" also switches off the XP bonus
@@ -10583,6 +10612,8 @@ void Actor::CreateDerivedStats()
 
 	if (third) {
 		CreateDerivedStatsIWD2();
+	} else if (core->HasFeature(GFFlags::RULES_DCC)) {
+		CreateDerivedStatsDCC();
 	} else {
 		CreateDerivedStatsBG();
 	}

@@ -559,6 +559,43 @@ namespace GemRB {
 #define IE_BOUNCE       253 // has projectile bouncing effect
 #define IE_MIRRORIMAGES 254
 
+// DCC rules (ethren, DCCRules = 1): stats past the IE range, see core/DCC and
+// docs/architecture/rules-dcc.md. The abilities map onto the IE ones: Str IE_STR,
+// Agi IE_DEX, Sta IE_CON, Per IE_CHR, Int IE_INT; Luck is IE_DCC_LUCK (IE_LUCK stays
+// the IE roll modifier). Base ability stats hold the score, modified ones the current
+// score (after loss). Kept in the CRE, see CREImporter's DCC block:
+#define IE_DCC_LUCK     256 // Luck score; base: the natural maximum, modified: current
+#define IE_DCC_AUGUR    257 // birth augur, 1-30 (0: none)
+#define IE_DCC_AUGURMOD 258 // Luck modifier frozen at creation, for the augur's roll
+#define IE_DCC_LOSS_STR 259 // ability loss, one stat per ability in DCC::Ability order
+#define IE_DCC_LOSS_AGI 260
+#define IE_DCC_LOSS_STA 261
+#define IE_DCC_LOSS_PER 262
+#define IE_DCC_LOSS_INT 263
+#define IE_DCC_LOSS_LCK 264
+// derived, not saved: class table values (base, CreateDerivedStatsDCC) and totals (modified, RefreshDCCStats)
+#define IE_DCC_STATE     265 // states at 0 (DCC::STATE_*)
+#define IE_DCC_AC        266 // ascending AC
+#define IE_DCC_ATTACK    267 // fixed attack bonus
+#define IE_DCC_DEEDDIE   268 // deed die sides (warriors, dwarves), 0: none
+#define IE_DCC_DEEDADD   269 // fixed part of the deed (d10+N)
+#define IE_DCC_CRITDICE  270 // crit roll: CRITDICE d CRITDIE + CRITADD on table CRITTABLE (1-5)
+#define IE_DCC_CRITDIE   271
+#define IE_DCC_CRITADD   272
+#define IE_DCC_CRITTABLE 273
+#define IE_DCC_THREAT    274 // lowest natural roll that threatens a crit
+#define IE_DCC_ACTDIE1   275 // action dice sides, 0: none
+#define IE_DCC_ACTDIE2   276
+#define IE_DCC_ACTDIE3   277
+#define IE_DCC_FORT      278 // save totals; base: class bonus (or the monster's own)
+#define IE_DCC_REF       279
+#define IE_DCC_WILL      280
+#define IE_DCC_INIT      281 // initiative modifier
+#define IE_DCC_LUCKDIE   282 // thieves' luck die sides
+#define IE_DCC_SPEED     283 // in feet
+#define IE_DCC_HITDIE    284 // the hit die of the next level
+#define IE_DCC_LAST      284
+
 }
 
 #endif // ! IE_STATS_H

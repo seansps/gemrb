@@ -811,7 +811,7 @@ bool NetInventory::Read(NetReader& r)
 void NetActorStats::Write(NetWriter& w) const
 {
 	w.U32(netID);
-	size_t count = WriteCount(w, stats.size());
+	size_t count = WriteCount(w, stats.size(), NET_MAX_STATS);
 	for (size_t i = 0; i < count; ++i) {
 		w.U16(stats[i].stat);
 		w.U32(stats[i].base);
@@ -822,10 +822,10 @@ void NetActorStats::Write(NetWriter& w) const
 bool NetActorStats::Read(NetReader& r)
 {
 	netID = r.U32();
-	stats.resize(ReadCount(r));
+	stats.resize(ReadCount(r, NET_MAX_STATS));
 	for (auto& entry : stats) {
 		entry.stat = r.U16();
-		if (entry.stat >= NET_MAX_ENTRIES) r.Fail();
+		if (entry.stat >= NET_MAX_STATS) r.Fail();
 		entry.base = r.U32();
 		entry.modified = r.U32();
 	}

@@ -1556,6 +1556,13 @@ bool Game::EveryoneDead() const
 		}
 		return false;
 	}
+	// DCC: a party where everyone is dead or held at 0 by ability loss is wiped too
+	if (core->HasFeature(GFFlags::RULES_DCC)) {
+		bool wiped = std::all_of(PCs.begin(), PCs.end(), [](const Actor* pc) {
+			return (pc->GetStat(IE_STATE_ID) & STATE_NOSAVE) || pc->IsDCCHeld();
+		});
+		if (wiped) return true;
+	}
 	// if protagonist died
 	if (protagonist == ProtagonistMode::Yes) {
 		if (PCs[0]->GetStat(IE_STATE_ID) & STATE_NOSAVE || PCs[0]->GetInternalFlag() & IF_JUSTDIED) {
@@ -1770,6 +1777,8 @@ bool Game::CanPartyRest(RestChecks checks, ieStrRef* err) const
 
 	if (checks & RestChecks::InControl) {
 		for (const auto& pc : PCs) {
+			// DCC: those held at 0 by ability loss recover by resting, so they don't stop it
+			if (core->HasFeature(GFFlags::RULES_DCC) && pc->IsDCCHeld()) continue;
 			if (pc->GetStat(IE_STATE_ID) & STATE_MINDLESS || pc->GetStat(IE_CHECKFORBERSERK)) {
 				// You cannot rest at this time because you do not have control of all your party members
 				*err = DisplayMessage::GetStringReference(HCStrings::CantRestNoControl);
@@ -1898,6 +1907,8 @@ bool Game::RestPartyInternal(RestChecks checks, int hp, int& hours)
 		// removes fatigue, recharges spells
 		tar->Rest(hours);
 		if (!hoursLeft) tar->PartyRested();
+		// DCC: a full night heals ability loss, Luck excepted
+		if (!hoursLeft && core->HasFeature(GFFlags::RULES_DCC)) tar->DCCRestHeal(restInBed);
 	}
 
 	// also let familiars rest
@@ -1939,6 +1950,9 @@ bool Game::RestParty(RestChecks checks, int dream, int hp)
 	if (!CanPartyRest(checks)) {
 		return false;
 	}
+
+	// DCC: resting where GemRB checks the area is camping; inns (GUISTORE) and scripted rests are bed rest
+	restInBed = !(checks & RestChecks::Area);
 
 	// rest once
 	ieDword restUntilHealed = core->GetDictionary().Get("Heal Party on Rest", 0);

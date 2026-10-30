@@ -32,6 +32,53 @@ static std::set<ieDword> modalFeats;
 
 constexpr ieDword FAKE_VARIABLE_OPCODE = 187;
 
+// DCC (ethren, DCCRules): BG CREs keep 32 unused bytes for a tracking target, after the
+// tracking skill. A DCC game stores its character data there:
+//   0-3 'D' 'C' 'C' and version 1, 4 Luck score (natural maximum), 5 birth augur,
+//   6 frozen augur Luck modifier (signed), 7 reserved, 8-13 ability loss Str..Luck, 14-31 reserved
+// Creatures without the block get Luck 10 (modifier 0), no augur and no loss.
+constexpr size_t DCC_BLOCK_SIZE = 32;
+constexpr ieByte DCC_BLOCK_VERSION = 1;
+constexpr ieDword DCC_DEFAULT_LUCK = 10;
+
+static void ReadDCCBlock(DataStream* str, Actor* act)
+{
+	std::array<ieByte, DCC_BLOCK_SIZE> block {};
+	str->Read(block.data(), block.size());
+	for (unsigned int stat = IE_DCC_LUCK; stat <= IE_DCC_LOSS_LCK; ++stat) {
+		act->BaseStats[stat] = 0;
+	}
+	if (block[0] != 'D' || block[1] != 'C' || block[2] != 'C' || block[3] != DCC_BLOCK_VERSION) {
+		act->BaseStats[IE_DCC_LUCK] = DCC_DEFAULT_LUCK;
+		return;
+	}
+	act->BaseStats[IE_DCC_LUCK] = block[4];
+	act->BaseStats[IE_DCC_AUGUR] = block[5];
+	act->BaseStats[IE_DCC_AUGURMOD] = static_cast<ieDwordSigned>(static_cast<ieByteSigned>(block[6]));
+	for (unsigned int i = 0; i < 6; ++i) {
+		act->BaseStats[IE_DCC_LOSS_STR + i] = block[8 + i];
+	}
+}
+
+static void WriteDCCBlock(DataStream* stream, const Actor* act)
+{
+	auto byte = [act](unsigned int stat) {
+		return static_cast<ieByte>(Clamp<ieDwordSigned>(static_cast<ieDwordSigned>(act->BaseStats[stat]), 0, 255));
+	};
+	std::array<ieByte, DCC_BLOCK_SIZE> block {};
+	block[0] = 'D';
+	block[1] = 'C';
+	block[2] = 'C';
+	block[3] = DCC_BLOCK_VERSION;
+	block[4] = byte(IE_DCC_LUCK);
+	block[5] = byte(IE_DCC_AUGUR);
+	block[6] = static_cast<ieByte>(static_cast<ieByteSigned>(Clamp<ieDwordSigned>(static_cast<ieDwordSigned>(act->BaseStats[IE_DCC_AUGURMOD]), -128, 127)));
+	for (unsigned int i = 0; i < 6; ++i) {
+		block[8 + i] = byte(IE_DCC_LOSS_STR + i);
+	}
+	stream->Write(block.data(), block.size());
+}
+
 class SpellEntry {
 public:
 	const ResRef& GetSpell() const;
@@ -1334,7 +1381,11 @@ void CREImporter::GetActorBG(Actor* act)
 	}
 
 	str->ReadScalar<Actor::stat_t, ieByte>(act->BaseStats[IE_TRACKING]);
-	str->Seek(32, GEM_CURRENT_POS);
+	if (core->HasFeature(GFFlags::RULES_DCC)) {
+		ReadDCCBlock(str, act);
+	} else {
+		str->Seek(32, GEM_CURRENT_POS);
+	}
 	for (auto& ref : act->StrRefs) {
 		str->ReadStrRef(ref);
 	}
@@ -2239,7 +2290,11 @@ int CREImporter::PutHeader(DataStream* stream, const Actor* actor) const
 			stream->WriteScalar<Actor::stat_t, ieByte>(actor->BaseStats[IE_PROFICIENCYBASTARDSWORD + i]);
 		}
 		stream->WriteScalar<Actor::stat_t, ieByte>(actor->BaseStats[IE_TRACKING]);
-		stream->WriteFilling(32);
+		if (core->HasFeature(GFFlags::RULES_DCC) && (actor->creVersion == CREVersion::V1_0 || actor->creVersion == CREVersion::V1_1)) {
+			WriteDCCBlock(stream, actor);
+		} else {
+			stream->WriteFilling(32);
+		}
 		for (const auto& ref : actor->StrRefs) {
 			stream->WriteStrRef(ref);
 		}

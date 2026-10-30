@@ -30,6 +30,7 @@
 #include "GameScript/GSUtils.h" //needs for MoveBetweenAreasCore
 #include "GameScript/Matching.h" //needs for GetAllObjects
 #include "GameScript/Targets.h" // fx_teleport_to_target
+#include "DCC/Stats.h"
 #include "Scriptable/Actor.h"
 #include "Scriptable/Container.h"
 #include "Scriptable/Door.h"
@@ -399,6 +400,7 @@ int fx_set_concealment(Scriptable* Owner, Actor* target, Effect* fx); // 1ca - 4
 int fx_uncanny_dodge(Scriptable* Owner, Actor* target, Effect* fx); // 1cb - 459
 
 int fx_unknown(Scriptable* Owner, Actor* target, Effect* fx); //???
+int fx_dcc_ability_loss(Scriptable* Owner, Actor* target, Effect* fx); // DCC (ethren)
 
 static EffectDesc effectnames[] = {
 	EffectDesc("*Crash*", fx_crash, EFFECT_NO_ACTOR, -1),
@@ -505,6 +507,7 @@ static EffectDesc effectnames[] = {
 	EffectDesc("Cure:Stun", fx_cure_stun_state, 0, -1),
 	EffectDesc("CurrentHPModifier", fx_current_hp_modifier, EFFECT_DICED, -1),
 	EffectDesc("Damage", fx_damage, EFFECT_DICED, -1),
+	EffectDesc("DCC:AbilityLoss", fx_dcc_ability_loss, 0, -1),
 	EffectDesc("DamageAnimation", fx_damage_animation, 0, -1),
 	EffectDesc("DamageBonusModifier", fx_damage_bonus_modifier, 0, -1),
 	EffectDesc("DamageBonusModifier2", fx_damage_bonus_modifier2, 0, -1), // 49 (iwd, ee)
@@ -8662,6 +8665,40 @@ int fx_modal_movement_check(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 // 0x16e (366) TODO: ee, Spell: Apply Spell On Move (unused in bg2ee)
 
 // 0x16f (367) MinimumBaseStats (EE-only) is implemented as a generic effect
+
+// DCC:AbilityLoss (ethren, DCCRules; unhardcoded/ethren/effects.ids)
+// drains (or with a negative amount restores) points of a DCC ability, tracked as loss
+// apart from the score (IE_DCC_LOSS_*): docs/rules/combat.md, "Ability score at 0"
+// Parameter1: points; Parameter2: ability in the low byte (0 Str, 1 Agi, 2 Sta, 3 Per, 4 Int,
+//   5 Luck) and DCC_LOSS_LETHAL (0x100): the target dies when the score reaches 0
+// Instant permanent effects change the stored loss (healed on rest, Luck excepted);
+// timed ones add loss only while they last (curses and the like)
+#define DCC_LOSS_LETHAL 0x100
+int fx_dcc_ability_loss(Scriptable* Owner, Actor* target, Effect* fx)
+{
+	if (!core->HasFeature(GFFlags::RULES_DCC)) return FX_NOT_APPLIED;
+	unsigned int which = fx->Parameter2 & 0xff;
+	if (which >= unsigned(DCC::ABILITY_COUNT)) return FX_NOT_APPLIED;
+	if (STATE_GET(STATE_DEAD)) return FX_NOT_APPLIED;
+
+	DCC::Ability ability = static_cast<DCC::Ability>(which);
+	unsigned int lossStat = DCC::LossStat(ability);
+	int amount = static_cast<ieDwordSigned>(fx->Parameter1);
+	int scoreNow = static_cast<ieDwordSigned>(STAT_GET(DCC::AbilityStat(ability))); // already after loss
+
+	bool permanent = fx->TimingMode == FX_DURATION_INSTANT_PERMANENT;
+	if (permanent) {
+		int loss = static_cast<ieDwordSigned>(target->GetBase(lossStat));
+		BASE_SET(lossStat, std::max(0, loss + amount));
+	} else {
+		STAT_ADD(lossStat, amount);
+	}
+
+	if ((fx->Parameter2 & DCC_LOSS_LETHAL) && amount > 0 && DCC::CurrentScore(scoreNow, amount) <= 0) {
+		target->Die(Owner);
+	}
+	return permanent ? FX_NOT_APPLIED : FX_APPLIED;
+}
 
 // unknown
 int fx_unknown(Scriptable* /*Owner*/, Actor* /*target*/, Effect* fx)

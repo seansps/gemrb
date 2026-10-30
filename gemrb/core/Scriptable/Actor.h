@@ -22,6 +22,8 @@
 #include "Spellbook.h"
 
 #include "Audio/Playback.h"
+#include "DCC/Augur.h"
+#include "DCC/Character.h"
 #include "Scriptable/Movable.h"
 #include "Scriptable/PCStatStruct.h"
 
@@ -38,7 +40,7 @@ class DataFileMgr;
 class Map;
 enum class Feat : uint8_t;
 
-#define MAX_STATS 256
+#define MAX_STATS 320 // 256 IE stats, then the DCC ones (ie_stats.h, IE_DCC_*)
 #define MAX_LEVEL 128
 
 //lucky roll
@@ -574,6 +576,14 @@ private:
 	void CreateDerivedStatsBG();
 	/* Set up all the missing stats on load time, or after level up */
 	void CreateDerivedStatsIWD2();
+	/* DCC rules (DCCRules): class table values, on load time, after level up or a class change (ActorDCC.cpp) */
+	void CreateDerivedStatsDCC();
+	/* DCC: current abilities, totals and the states at 0, after the effects applied */
+	void RefreshDCCStats(const stats_t& previous);
+	/* DCC: GetSavingThrow with Fort/Ref/Will vs a DC */
+	bool GetSavingThrowDCC(ieDword type, int modifier, const Effect* fx);
+	int dccDerivedClass = -1; // class and level CreateDerivedStatsDCC last ran for
+	int dccDerivedLevel = -1;
 	/* Returns true if the dual class is backwards */
 	bool IsDualSwap() const;
 	int GetNonProficiencyPenalty(int stars) const;
@@ -642,6 +652,35 @@ public:
 	void RollSaves();
 	/** returns a saving throw */
 	bool GetSavingThrow(ieDword type, int modifier, const Effect* fx = nullptr);
+
+	// DCC rules (DCCRules), beside the 2e/3e ones; ActorDCC.cpp, docs/architecture/rules-dcc.md
+	/** has a DCC class (0-level characters included); monsters don't */
+	bool IsDCCCharacter() const;
+	/** the DCC modifier of an ability's current score */
+	int GetDCCAbilityMod(DCC::Ability ability) const;
+	/** the frozen augur modifier if the birth augur is the lucky roll for roll, else 0;
+	 * the hook for every DCC roll (saves, AC, HP, initiative now; attacks, spell checks, crits later) */
+	int GetDCCAugurBonus(DCC::AugurRoll roll, uint32_t flags = DCC::AF_NONE) const;
+	/** the DCC states at 0 (DCC::STATE_*) */
+	ieDword GetDCCStates() const;
+	/** out of action from ability loss (immobile, unconscious or witless) */
+	bool IsDCCHeld() const;
+	/** every DCC d20-style roll goes through here: rolls natural (if 0) on dieSides and resolves it,
+	 * failing everything while cursed by fortune (Luck 0); M2.3 attack rolls use kind Attack */
+	DCC::RollResult DCCRoll(DCC::RollKind kind, int modifier, int target, int natural = 0, int dieSides = 20, int threat = 0) const;
+	/** d20 + the save total + modifier (+ trap/poison augurs from augurFlags) vs dc */
+	DCC::RollResult DCCRollSave(DCC::Save save, int modifier, int dc, int natural = 0, uint32_t augurFlags = DCC::AF_NONE) const;
+	/** d20 <= the current Luck score */
+	DCC::RollResult DCCRollLuckCheck(int natural = 0) const;
+	/** the level the current XP reaches (dccxp.2da) */
+	int DCCLevelForXP() const;
+	bool DCCCanLevelUp() const;
+	/** gains a level: from level 0 classID picks the class (demi-humans must take their race's),
+	 * later it must be the current class. Rolls the hit die + Sta mod (+ augur), at least 1.
+	 * Returns the hp gained, -1 if refused. roller (1..sides) replaces the RNG, for tests */
+	int DCCLevelUp(int classID, const DCC::Roller* roller = nullptr);
+	/** a night's rest heals ability loss (Luck excepted): 1 point, 2 with bed rest */
+	void DCCRestHeal(bool bedRest);
 	/* returns the weapon proficiency stat of the actor */
 	int GetProficiency(ieByte proftype) const;
 	/** Returns true if the actor is targetable */
