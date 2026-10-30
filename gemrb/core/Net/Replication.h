@@ -97,6 +97,54 @@ GEM_EXPORT bool NetInterpolate(const NetLerp& lerp, uint64_t now, int32_t& x, in
 // host keeps everyone and two players alternate; players lists the slots in play (host first)
 GEM_EXPORT uint8_t NetDefaultOwner(uint8_t partySlot, const std::vector<uint8_t>& players);
 
+// what the host lets a player do, modelled on the BG/IWD multiplayer permissions screen;
+// Control is the per-actor ownership rule, the rest are per player
+enum class NetPermission : uint8_t {
+	Control, // order a party member (it must be the player's own)
+	Purchase, // buy, sell and spend party gold
+	AreaTransition,
+	Dialog, // start conversations and pick replies
+	CharacterRecords, // change inventories, spellbooks and records
+	Pause,
+	Leader,
+	count
+};
+
+GEM_EXPORT const char* NetPermissionName(NetPermission perm);
+
+// per player slot; the host (slot 0) may always do everything
+class GEM_EXPORT NetPermissions {
+	std::map<uint8_t, uint32_t> denied; // slot -> bit per NetPermission
+
+public:
+	void Set(uint8_t slot, NetPermission perm, bool allowed);
+	// for Control, actorOwner is the slot that owns the actor in question
+	bool Allowed(uint8_t slot, NetPermission perm, uint8_t actorOwner = 0) const;
+};
+
+// who answers a conversation: the owner of the party member in it (the speaker,
+// else the target), so the one who started it, or the PC an NPC talks to; -1 = no PC
+GEM_EXPORT uint8_t NetDialogOwner(int speakerOwner, int targetOwner, uint8_t fallback);
+
+// the stats that changed between two copies of an actor's base and modified stats,
+// leaving out the ones snapshots carry (skip)
+GEM_EXPORT std::vector<NetStatEntry> NetStatsDiff(const std::vector<NetStatEntry>& before, const std::vector<NetStatEntry>& now, const std::vector<uint16_t>& skip);
+
+// what each GUI call refers to and needs
+struct NetGuiOpInfo {
+	int actorArg = -1; // index of the actor argument, -1 for none
+	size_t minArgs = 0;
+	NetPermission permission = NetPermission::Control;
+	const char* name = "?"; // the GemRB function
+};
+
+GEM_EXPORT NetGuiOpInfo NetGuiInfo(NetGuiOp op);
+
+// change detection for state sent as a whole (inventories, spellbooks, stores)
+GEM_EXPORT uint64_t NetMessageHash(const NetInventory& msg);
+GEM_EXPORT uint64_t NetMessageHash(const NetSpellbook& msg);
+GEM_EXPORT uint64_t NetMessageHash(const NetStoreState& msg);
+
 }
 
 #endif

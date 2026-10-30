@@ -487,4 +487,243 @@ TEST(NetProtocolTest, StringLimits)
 	EXPECT_FALSE(NetDecode(w2.Data().data(), w2.Data().size(), state));
 }
 
+// every truncation and any trailing byte must fail
+template<typename MSG>
+static void ExpectStrict(const MSG& msg)
+{
+	auto data = NetEncode(msg);
+	MSG out;
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), out));
+	for (size_t len = 0; len < data.size(); ++len) {
+		EXPECT_FALSE(NetDecode(data.data(), len, out)) << "len " << len;
+	}
+	data.push_back(0);
+	EXPECT_FALSE(NetDecode(data.data(), data.size(), out));
+}
+
+TEST(NetProtocolTest, DialogRoundTrip)
+{
+	NetDialog state;
+	state.kind = NetDialog::STATE;
+	state.seq = 7;
+	state.owner = 1;
+	state.flags = NetDialog::FREEZE;
+	state.speakerID = 10002;
+	state.targetID = 10011;
+	state.options = { { 0, "What do you have for sale?" }, { 3, u8"Farewell, Tamsín." } };
+	NetDialog out;
+	auto data = NetEncode(state);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), out));
+	EXPECT_EQ(out.kind, NetDialog::STATE);
+	EXPECT_EQ(out.seq, 7U);
+	EXPECT_EQ(out.owner, 1);
+	EXPECT_EQ(out.flags, NetDialog::FREEZE);
+	EXPECT_EQ(out.speakerID, 10002U);
+	EXPECT_EQ(out.targetID, 10011U);
+	ASSERT_EQ(out.options.size(), 2U);
+	EXPECT_EQ(out.options[1].index, 3);
+	EXPECT_EQ(out.options[1].text, u8"Farewell, Tamsín.");
+	ExpectStrict(state);
+
+	NetDialog line;
+	line.kind = NetDialog::LINE;
+	line.flags = NetDialog::PARTY;
+	line.speakerID = 10002;
+	line.text = "Where is the key?";
+	data = NetEncode(line);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), out));
+	EXPECT_EQ(out.kind, NetDialog::LINE);
+	EXPECT_EQ(out.text, line.text);
+	EXPECT_TRUE(out.options.empty());
+
+	// unknown kinds and flags are rejected
+	NetDialog bad = line;
+	bad.kind = NetDialog::count;
+	data = NetEncode(bad);
+	EXPECT_FALSE(NetDecode(data.data(), data.size(), out));
+	bad = line;
+	bad.flags = 0x80;
+	data = NetEncode(bad);
+	EXPECT_FALSE(NetDecode(data.data(), data.size(), out));
+
+	NetDialogChoice choice;
+	choice.seq = 7;
+	choice.index = 3;
+	NetDialogChoice choice2;
+	data = NetEncode(choice);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), choice2));
+	EXPECT_EQ(choice2.seq, 7U);
+	EXPECT_EQ(choice2.index, 3);
+	ExpectStrict(choice);
+}
+
+TEST(NetProtocolTest, InventoryRoundTrip)
+{
+	NetInventory inv;
+	inv.netID = 10009;
+	inv.equipped = -1000; // IW_NO_EQUIPPED
+	inv.equippedHeader = 2;
+	NetItem potion;
+	potion.slot = 21;
+	potion.resref = "MPTPOT";
+	potion.usages = { 2, 0, 0 };
+	potion.flags = 1;
+	NetItem sword;
+	sword.slot = 9;
+	sword.resref = "MPTSWRD";
+	sword.usages = { 1, 0, 0 };
+	sword.expired = 12;
+	inv.items = { potion, sword };
+	NetInventory out;
+	auto data = NetEncode(inv);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), out));
+	EXPECT_EQ(out.netID, 10009U);
+	EXPECT_EQ(out.kind, NetObjectKind::Actor);
+	EXPECT_EQ(out.equipped, -1000);
+	EXPECT_EQ(out.equippedHeader, 2);
+	ASSERT_EQ(out.items.size(), 2U);
+	EXPECT_TRUE(out.items[0] == potion);
+	EXPECT_TRUE(out.items[1] == sword);
+	ExpectStrict(inv);
+
+	// a ground pile: no network ID, found by area and position
+	NetInventory pile;
+	pile.kind = NetObjectKind::Container;
+	pile.area = "MPT01";
+	pile.x = 1208;
+	pile.y = 1060;
+	data = NetEncode(pile);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), out));
+	EXPECT_EQ(out.netID, 0U);
+	EXPECT_EQ(out.kind, NetObjectKind::Container);
+	EXPECT_EQ(out.area, "MPT01");
+	EXPECT_EQ(out.x, 1208);
+	EXPECT_TRUE(out.items.empty());
+
+	// only actors and containers have inventories
+	NetInventory door = pile;
+	door.kind = NetObjectKind::Door;
+	data = NetEncode(door);
+	EXPECT_FALSE(NetDecode(data.data(), data.size(), out));
+}
+
+TEST(NetProtocolTest, StatsPartyAndSpellbookRoundTrip)
+{
+	NetActorStats stats;
+	stats.netID = 10002;
+	stats.stats = { { 44, 150, 150 }, { 36, 12, 14 } }; // IE_XP, IE_STR
+	NetActorStats stats2;
+	auto data = NetEncode(stats);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), stats2));
+	ASSERT_EQ(stats2.stats.size(), 2U);
+	EXPECT_EQ(stats2.stats[0].stat, 44);
+	EXPECT_EQ(stats2.stats[0].base, 150U);
+	EXPECT_EQ(stats2.stats[1].modified, 14U);
+	ExpectStrict(stats);
+	// stat indices past the stat array are rejected
+	stats.stats[0].stat = uint16_t(NET_MAX_ENTRIES);
+	data = NetEncode(stats);
+	EXPECT_FALSE(NetDecode(data.data(), data.size(), stats2));
+
+	NetPartyState party;
+	party.gold = 120;
+	party.reputation = 100;
+	NetPartyState party2;
+	data = NetEncode(party);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), party2));
+	EXPECT_EQ(party2.gold, 120U);
+	EXPECT_EQ(party2.reputation, 100U);
+	ExpectStrict(party);
+
+	NetSpellbook book;
+	book.netID = 10009;
+	NetSpellPage page;
+	page.type = 1;
+	page.level = 0;
+	page.slots = 3;
+	page.slotsWithBonus = 3;
+	page.known = { "MPTBOLT" };
+	page.memorized = { { "MPTBOLT", 1 }, { "MPTBOLT", 0 }, { "MPTBOLT", 1 } };
+	book.pages = { page };
+	NetSpellbook book2;
+	data = NetEncode(book);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), book2));
+	ASSERT_EQ(book2.pages.size(), 1U);
+	EXPECT_EQ(book2.pages[0].type, 1);
+	EXPECT_EQ(book2.pages[0].slots, 3);
+	ASSERT_EQ(book2.pages[0].known.size(), 1U);
+	EXPECT_EQ(book2.pages[0].known[0], "MPTBOLT");
+	ASSERT_EQ(book2.pages[0].memorized.size(), 3U);
+	EXPECT_EQ(book2.pages[0].memorized[1].flags, 0U);
+	ExpectStrict(book);
+}
+
+TEST(NetProtocolTest, GuiCallStoreAndContainerRoundTrip)
+{
+	NetGuiCall call;
+	call.op = NetGuiOp::ChangeStoreItem;
+	call.selected = 2;
+	call.args = { 10010, 0, 0x41 };
+	NetGuiCall call2;
+	auto data = NetEncode(call);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), call2));
+	EXPECT_EQ(call2.op, NetGuiOp::ChangeStoreItem);
+	EXPECT_EQ(call2.selected, 2);
+	EXPECT_EQ(call2.args, call.args);
+	ExpectStrict(call);
+	// unknown operations and too many arguments are rejected
+	NetWriter w(NetMsgType::GuiCall);
+	w.U8(uint8_t(NetGuiOp::count));
+	w.U8(0);
+	w.U16(0);
+	EXPECT_FALSE(NetDecode(w.Data().data(), w.Data().size(), call2));
+	NetWriter w2(NetMsgType::GuiCall);
+	w2.U8(uint8_t(NetGuiOp::DragItem));
+	w2.U8(0);
+	w2.U16(uint16_t(NET_GUI_ARGS + 1));
+	for (size_t i = 0; i <= NET_GUI_ARGS; ++i) {
+		w2.I32(0);
+	}
+	EXPECT_FALSE(NetDecode(w2.Data().data(), w2.Data().size(), call2));
+
+	NetStoreState store;
+	store.flags = NetStoreState::OPEN;
+	store.store = "MPTSTORE";
+	store.ownerID = 10011;
+	store.actorID = 10010;
+	NetStoreItem potions;
+	potions.resref = "MPTPOT";
+	potions.usages = { 1, 0, 0 };
+	potions.amount = 9;
+	potions.purchased = 1;
+	potions.flags = 0x40;
+	NetStoreItem sword;
+	sword.resref = "MPTSWRD";
+	sword.infinite = -1;
+	store.items = { potions, sword };
+	NetStoreState store2;
+	data = NetEncode(store);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), store2));
+	EXPECT_EQ(store2.flags, NetStoreState::OPEN);
+	EXPECT_EQ(store2.store, "MPTSTORE");
+	EXPECT_EQ(store2.ownerID, 10011U);
+	EXPECT_EQ(store2.actorID, 10010U);
+	ASSERT_EQ(store2.items.size(), 2U);
+	EXPECT_EQ(store2.items[0].amount, 9U);
+	EXPECT_EQ(store2.items[0].purchased, 1);
+	EXPECT_EQ(store2.items[0].flags, 0x40U);
+	EXPECT_EQ(store2.items[1].infinite, -1);
+	ExpectStrict(store);
+
+	NetContainerOpen open;
+	open.actorID = 10010;
+	open.containerID = 10004;
+	NetContainerOpen open2;
+	data = NetEncode(open);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), open2));
+	EXPECT_EQ(open2.actorID, 10010U);
+	EXPECT_EQ(open2.containerID, 10004U);
+	ExpectStrict(open);
+}
+
 }

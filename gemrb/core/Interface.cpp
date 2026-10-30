@@ -1954,6 +1954,9 @@ void Interface::HandleGUIBehaviour(GameControl* gc)
 		if ((int) var == -2) {
 			// TODO: this seems to never be called? (EndDialog is called from elsewhere instead)
 			gc->dialoghandler->EndDialog();
+		} else if ((int) var != -3 && (int) var != -1 && netSession && netSession->DialogChoiceHandled(int(var))) {
+			// co-op: only the conversation's owner picks, and a client's pick goes to the host
+			vars.Set("DialogChoose", -3);
 		} else if ((int) var != -3) {
 			if ((int) var == -1) {
 				guiscript->RunFunction("GUIWORLD", "DialogStarted");
@@ -3561,6 +3564,15 @@ Store* Interface::SetCurrentStore(const ResRef& resName, ieDword owner)
 	return CurrentStore;
 }
 
+void Interface::SwapGUIState(GUIState& state)
+{
+	std::swap(DraggedItem, state.draggedItem);
+	std::swap(CurrentContainer, state.container);
+	std::swap(UseContainer, state.useContainer);
+	std::swap(CurrentStore, state.store);
+	winmgr->GetGameWindow()->SetCursor(DraggedItem ? DraggedItem->cursor : nullptr);
+}
+
 void Interface::SetMouseScrollSpeed(int speed)
 {
 	mousescrollspd = speed * 2;
@@ -4091,9 +4103,9 @@ bool Interface::SetPause(PauseState pause, int flags) const
 			if (pause == PauseState::On) gc->SetDisplayText(strref, 0); // time 0 = removed instantly on unpause (for pst)
 			displaymsg->DisplayConstantString(strref, GUIColors::RED);
 		}
-		// in co-op everyone shares one pause
+		// in co-op everyone shares one pause (but a client's windows pause quietly, just for itself)
 		if (netSession) {
-			netSession->OnPause(pause == PauseState::On);
+			netSession->OnPause(pause == PauseState::On, flags & PF_QUIET);
 		}
 		return true;
 	}

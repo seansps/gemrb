@@ -148,4 +148,119 @@ uint8_t NetDefaultOwner(uint8_t partySlot, const std::vector<uint8_t>& players)
 	return players[(partySlot - 1) % players.size()];
 }
 
+const char* NetPermissionName(NetPermission perm)
+{
+	switch (perm) {
+		case NetPermission::Control:
+			return "control";
+		case NetPermission::Purchase:
+			return "purchase";
+		case NetPermission::AreaTransition:
+			return "area transition";
+		case NetPermission::Dialog:
+			return "dialog";
+		case NetPermission::CharacterRecords:
+			return "character records";
+		case NetPermission::Pause:
+			return "pause";
+		case NetPermission::Leader:
+			return "leader";
+		default:
+			return "?";
+	}
+}
+
+void NetPermissions::Set(uint8_t slot, NetPermission perm, bool allowed)
+{
+	uint32_t bit = 1u << uint8_t(perm);
+	if (allowed) {
+		denied[slot] &= ~bit;
+	} else {
+		denied[slot] |= bit;
+	}
+}
+
+bool NetPermissions::Allowed(uint8_t slot, NetPermission perm, uint8_t actorOwner) const
+{
+	if (slot == NET_HOST_SLOT) return true;
+	if (perm == NetPermission::Control) return actorOwner == slot;
+	auto it = denied.find(slot);
+	return it == denied.end() || !(it->second & (1u << uint8_t(perm)));
+}
+
+uint8_t NetDialogOwner(int speakerOwner, int targetOwner, uint8_t fallback)
+{
+	if (speakerOwner >= 0) return uint8_t(speakerOwner);
+	if (targetOwner >= 0) return uint8_t(targetOwner);
+	return fallback;
+}
+
+std::vector<NetStatEntry> NetStatsDiff(const std::vector<NetStatEntry>& before, const std::vector<NetStatEntry>& now, const std::vector<uint16_t>& skip)
+{
+	std::vector<NetStatEntry> changed;
+	for (size_t i = 0; i < now.size(); ++i) {
+		const NetStatEntry& entry = now[i];
+		if (std::find(skip.begin(), skip.end(), entry.stat) != skip.end()) continue;
+		if (i < before.size() && before[i].base == entry.base && before[i].modified == entry.modified) continue;
+		changed.push_back(entry);
+	}
+	return changed;
+}
+
+NetGuiOpInfo NetGuiInfo(NetGuiOp op)
+{
+	switch (op) {
+		case NetGuiOp::DragItem:
+			return { 0, 2, NetPermission::Control, "DragItem" };
+		case NetGuiOp::DropDraggedItem:
+			return { 0, 2, NetPermission::Control, "DropDraggedItem" };
+		case NetGuiOp::ChangeContainerItem:
+			return { 0, 3, NetPermission::Control, "ChangeContainerItem" };
+		case NetGuiOp::LeaveContainer:
+			return { -1, 0, NetPermission::Control, "LeaveContainer" };
+		case NetGuiOp::ChangeStoreItem:
+			return { 0, 3, NetPermission::Purchase, "ChangeStoreItem" };
+		case NetGuiOp::SetPurchasedAmount:
+			return { -1, 2, NetPermission::Purchase, "SetPurchasedAmount" };
+		case NetGuiOp::LeaveStore:
+			return { -1, 0, NetPermission::Control, "LeaveStore" };
+		case NetGuiOp::AddPartyGold:
+			return { -1, 1, NetPermission::Purchase, "GameSetPartyGold" };
+		case NetGuiOp::SetEquippedQuickSlot:
+			return { 0, 2, NetPermission::Control, "SetEquippedQuickSlot" };
+		case NetGuiOp::UseItem:
+			return { 0, 3, NetPermission::Control, "UseItem" };
+		case NetGuiOp::MemorizeSpell:
+			return { 0, 4, NetPermission::Control, "MemorizeSpell" };
+		case NetGuiOp::UnmemorizeSpell:
+			return { 0, 4, NetPermission::Control, "UnmemorizeSpell" };
+		case NetGuiOp::ChangeItemFlag:
+			return { 0, 4, NetPermission::Control, "ChangeItemFlag" };
+		default:
+			return {};
+	}
+}
+
+template<typename MSG>
+static uint64_t EncodedHash(const MSG& msg)
+{
+	auto data = NetEncode(msg);
+	return NetHash(data.data(), data.size());
+}
+
+uint64_t NetMessageHash(const NetInventory& msg)
+{
+	return EncodedHash(msg);
+}
+
+uint64_t NetMessageHash(const NetSpellbook& msg)
+{
+	return EncodedHash(msg);
+}
+
+uint64_t NetMessageHash(const NetStoreState& msg)
+{
+	return EncodedHash(msg);
+}
+
 }

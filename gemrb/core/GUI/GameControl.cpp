@@ -2018,7 +2018,7 @@ void GameControl::TryToTalk(Actor* source, const Actor* tgt) const
 	// dialog initiation
 	source->SetModal(Modal::None);
 	auto action = GenerateActionDirect("NIDSpecial1()", tgt);
-	// TODO: M1.5 dialog runs on the host and is shown to its owner
+	// co-op: the host runs the dialog and shows it to whoever owns the speaker
 	if (ForwardOrder(source, action)) return;
 	dialoghandler->SetTarget(tgt); //this is a hack, but not so deadly
 	source->CommandActor(std::move(action));
@@ -2064,9 +2064,13 @@ void GameControl::HandleContainer(Container* container, Actor* actor)
 		return;
 	}
 
-	// TODO: M1.5 the container window, with the host moving the items
+	// co-op: the host walks there, opens it and has our screen show it
+	NetSession* net = core->GetNetSession();
+	if (net && net->IsReplica()) {
+		net->ForwardUseContainer(*actor, *container);
+		return;
+	}
 	auto action = GenerateAction("UseContainer()");
-	if (ForwardOrder(actor, action)) return;
 	container->AddTrigger(TriggerEntry(trigger_clicked, actor->GetGlobalID()));
 	core->SetCurrentContainer(actor, container);
 	actor->CommandActor(std::move(action));
@@ -2147,7 +2151,11 @@ bool GameControl::HandleActiveRegion(InfoPoint* trap, Actor* actor, const Point&
 			//there. Here we have to check on the
 			//reset trap and deactivated flags
 			if (trap->Scripts[0]) {
-				if (!(trap->Flags & TRAP_DEACTIVATED) && !(GetDialogueFlags() & DF_FREEZE_SCRIPTS)) {
+				NetSession* net = core->GetNetSession();
+				if (net && net->IsReplica()) {
+					// co-op: the script runs on the host
+					net->ForwardRegionClick(*actor, *trap);
+				} else if (!(trap->Flags & TRAP_DEACTIVATED) && !(GetDialogueFlags() & DF_FREEZE_SCRIPTS)) {
 					trap->AddTrigger(TriggerEntry(trigger_clicked, actor->GetGlobalID()));
 					actor->objects.LastMarked = trap->GetGlobalID();
 					//directly feeding the event, even if there are actions in the queue

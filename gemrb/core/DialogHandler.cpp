@@ -18,6 +18,7 @@
 #include "GUI/GameControl.h"
 #include "GUI/TextArea.h"
 #include "GameScript/GameScript.h"
+#include "Net/NetSession.h"
 
 namespace GemRB {
 
@@ -164,6 +165,9 @@ void DialogHandler::EndDialog(bool try_to_break)
 	dlg = nullptr;
 
 	core->ToggleViewsEnabled(true, "NOT_DLG");
+	if (NetSession* net = core->GetNetSession()) {
+		net->OnDialogEnd();
+	}
 	// FIXME: it's not so nice having this here, but things call EndDialog directly :(
 	core->GetGUIScriptEngine()->RunFunction("GUIWORLD", "DialogEnded");
 	//restoring original size
@@ -266,6 +270,9 @@ int DialogHandler::DialogChooseTransition(unsigned int choose, Scriptable*& targ
 		//allow_zero is for PST (deionarra's text)
 		ta->AppendText(u"\n");
 		displaymsg->DisplayStringName(tr->textStrRef, GUIColors::DIALOGPARTY, speaker, STRING_FLAGS::SOUND | STRING_FLAGS::SPEECH | STRING_FLAGS::ALLOW_ZERO);
+		if (NetSession* net = core->GetNetSession()) {
+			net->OnDialogLine(speaker, core->GetString(tr->textStrRef, STRING_FLAGS::ALLOW_ZERO), true);
+		}
 	}
 	target->ImmediateEvent();
 	target->ProcessActions(); // run the action queue now
@@ -427,6 +434,9 @@ bool DialogHandler::DialogChoose(unsigned int choose)
 		}
 		ta->AppendText(u"\n");
 		displaymsg->DisplayStringName(ds->StrRef, GUIColors::DIALOG, target, STRING_FLAGS::SOUND | STRING_FLAGS::SPEECH);
+		if (NetSession* net = core->GetNetSession()) {
+			net->OnDialogLine(target, core->GetString(ds->StrRef), false);
+		}
 	}
 
 	std::vector<SelectOption> dialogOptions;
@@ -435,6 +445,9 @@ bool DialogHandler::DialogChoose(unsigned int choose)
 	ta->SetColor(displaymsg->GetSpeakerColor(tmp, speaker), TextArea::COLOR_SELECTED);
 	ta->SetSelectOptions(dialogOptions, true);
 	ControlEventHandler handler = [this](const Control* c) {
+		// co-op: only the conversation's owner picks, and a client's pick goes to the host
+		NetSession* net = core->GetNetSession();
+		if (net && net->DialogChoiceHandled(int(c->GetValue()))) return;
 		DialogChoose(c->GetValue());
 	};
 	ta->SetAction(std::move(handler), TextArea::Action::Select);
@@ -443,6 +456,9 @@ bool DialogHandler::DialogChoose(unsigned int choose)
 	if (!idx) {
 		Log(WARNING, "DialogHandler", "There were no valid dialog options!");
 		gc->SetDialogueFlags(DF_OPENENDWINDOW, BitOp::OR);
+	}
+	if (NetSession* net = core->GetNetSession()) {
+		net->OnDialogState(dialogOptions);
 	}
 
 	return true;

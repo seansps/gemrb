@@ -658,4 +658,277 @@ bool NetOwnership::Read(NetReader& r)
 	return r.Ok();
 }
 
+// reads a u16 list count, failing on more than limit
+static size_t ReadCount(NetReader& r, size_t limit = NET_MAX_ENTRIES)
+{
+	uint16_t count = r.U16();
+	if (count > limit) r.Fail();
+	return r.Ok() ? count : 0;
+}
+
+static size_t WriteCount(NetWriter& w, size_t size, size_t limit = NET_MAX_ENTRIES)
+{
+	size_t count = std::min(size, limit);
+	w.U16(uint16_t(count));
+	return count;
+}
+
+void NetDialog::Write(NetWriter& w) const
+{
+	w.U8(kind);
+	w.U32(seq);
+	w.U8(owner);
+	w.U8(flags);
+	w.U32(speakerID);
+	w.U32(targetID);
+	w.U16(continueIndex);
+	w.Str(text);
+	size_t count = WriteCount(w, options.size());
+	for (size_t i = 0; i < count; ++i) {
+		w.U16(options[i].index);
+		w.Str(options[i].text);
+	}
+}
+
+bool NetDialog::Read(NetReader& r)
+{
+	kind = r.U8();
+	if (kind >= count) r.Fail();
+	seq = r.U32();
+	owner = r.U8();
+	flags = r.U8();
+	if (flags & ~(FREEZE | CONTINUE | END_BUTTON | PARTY)) r.Fail();
+	speakerID = r.U32();
+	targetID = r.U32();
+	continueIndex = r.U16();
+	text = r.Str();
+	options.resize(ReadCount(r));
+	for (auto& option : options) {
+		option.index = r.U16();
+		option.text = r.Str();
+	}
+	return r.Ok();
+}
+
+void NetDialogChoice::Write(NetWriter& w) const
+{
+	w.U32(seq);
+	w.U16(index);
+}
+
+bool NetDialogChoice::Read(NetReader& r)
+{
+	seq = r.U32();
+	index = r.U16();
+	return r.Ok();
+}
+
+void NetInventory::Write(NetWriter& w) const
+{
+	w.U32(netID);
+	w.U8(uint8_t(kind));
+	w.Str(area);
+	w.I32(x);
+	w.I32(y);
+	w.U16(uint16_t(equipped));
+	w.U16(equippedHeader);
+	size_t count = WriteCount(w, items.size());
+	for (size_t i = 0; i < count; ++i) {
+		const NetItem& item = items[i];
+		w.U16(item.slot);
+		w.Str(item.resref);
+		for (uint16_t usage : item.usages) {
+			w.U16(usage);
+		}
+		w.U32(item.flags);
+		w.U16(item.expired);
+	}
+}
+
+bool NetInventory::Read(NetReader& r)
+{
+	netID = r.U32();
+	uint8_t raw = r.U8();
+	if (raw != uint8_t(NetObjectKind::Actor) && raw != uint8_t(NetObjectKind::Container)) r.Fail();
+	kind = NetObjectKind(raw);
+	area = r.Str();
+	x = r.I32();
+	y = r.I32();
+	equipped = int16_t(r.U16());
+	equippedHeader = r.U16();
+	items.resize(ReadCount(r));
+	for (auto& item : items) {
+		item.slot = r.U16();
+		item.resref = r.Str();
+		for (auto& usage : item.usages) {
+			usage = r.U16();
+		}
+		item.flags = r.U32();
+		item.expired = r.U16();
+	}
+	return r.Ok();
+}
+
+void NetActorStats::Write(NetWriter& w) const
+{
+	w.U32(netID);
+	size_t count = WriteCount(w, stats.size());
+	for (size_t i = 0; i < count; ++i) {
+		w.U16(stats[i].stat);
+		w.U32(stats[i].base);
+		w.U32(stats[i].modified);
+	}
+}
+
+bool NetActorStats::Read(NetReader& r)
+{
+	netID = r.U32();
+	stats.resize(ReadCount(r));
+	for (auto& entry : stats) {
+		entry.stat = r.U16();
+		if (entry.stat >= NET_MAX_ENTRIES) r.Fail();
+		entry.base = r.U32();
+		entry.modified = r.U32();
+	}
+	return r.Ok();
+}
+
+void NetPartyState::Write(NetWriter& w) const
+{
+	w.U32(gold);
+	w.U32(reputation);
+}
+
+bool NetPartyState::Read(NetReader& r)
+{
+	gold = r.U32();
+	reputation = r.U32();
+	return r.Ok();
+}
+
+void NetSpellbook::Write(NetWriter& w) const
+{
+	w.U32(netID);
+	size_t count = WriteCount(w, pages.size());
+	for (size_t i = 0; i < count; ++i) {
+		const NetSpellPage& page = pages[i];
+		w.U8(page.type);
+		w.U8(page.level);
+		w.U16(page.slots);
+		w.U16(page.slotsWithBonus);
+		size_t known = WriteCount(w, page.known.size());
+		for (size_t k = 0; k < known; ++k) {
+			w.Str(page.known[k]);
+		}
+		size_t memorized = WriteCount(w, page.memorized.size());
+		for (size_t m = 0; m < memorized; ++m) {
+			w.Str(page.memorized[m].resref);
+			w.U32(page.memorized[m].flags);
+		}
+	}
+}
+
+bool NetSpellbook::Read(NetReader& r)
+{
+	netID = r.U32();
+	pages.resize(ReadCount(r));
+	for (auto& page : pages) {
+		page.type = r.U8();
+		page.level = r.U8();
+		page.slots = r.U16();
+		page.slotsWithBonus = r.U16();
+		page.known.resize(ReadCount(r));
+		for (auto& known : page.known) {
+			known = r.Str();
+		}
+		page.memorized.resize(ReadCount(r));
+		for (auto& memorized : page.memorized) {
+			memorized.resref = r.Str();
+			memorized.flags = r.U32();
+		}
+	}
+	return r.Ok();
+}
+
+void NetGuiCall::Write(NetWriter& w) const
+{
+	w.U8(uint8_t(op));
+	w.U8(selected);
+	size_t count = WriteCount(w, args.size(), NET_GUI_ARGS);
+	for (size_t i = 0; i < count; ++i) {
+		w.I32(args[i]);
+	}
+}
+
+bool NetGuiCall::Read(NetReader& r)
+{
+	uint8_t raw = r.U8();
+	if (raw == 0 || raw >= uint8_t(NetGuiOp::count)) r.Fail();
+	op = NetGuiOp(raw);
+	selected = r.U8();
+	args.resize(ReadCount(r, NET_GUI_ARGS));
+	for (auto& arg : args) {
+		arg = r.I32();
+	}
+	return r.Ok();
+}
+
+void NetStoreState::Write(NetWriter& w) const
+{
+	w.U8(flags);
+	w.Str(store);
+	w.U32(ownerID);
+	w.U32(actorID);
+	size_t count = WriteCount(w, items.size());
+	for (size_t i = 0; i < count; ++i) {
+		const NetStoreItem& item = items[i];
+		w.Str(item.resref);
+		for (uint16_t usage : item.usages) {
+			w.U16(usage);
+		}
+		w.U32(item.flags);
+		w.U32(item.amount);
+		w.I32(item.infinite);
+		w.U16(item.purchased);
+	}
+}
+
+bool NetStoreState::Read(NetReader& r)
+{
+	flags = r.U8();
+	if (flags & ~(OPEN | CLOSE)) r.Fail();
+	store = r.Str();
+	ownerID = r.U32();
+	actorID = r.U32();
+	items.resize(ReadCount(r));
+	for (auto& item : items) {
+		item.resref = r.Str();
+		for (auto& usage : item.usages) {
+			usage = r.U16();
+		}
+		item.flags = r.U32();
+		item.amount = r.U32();
+		item.infinite = r.I32();
+		item.purchased = r.U16();
+	}
+	return r.Ok();
+}
+
+void NetContainerOpen::Write(NetWriter& w) const
+{
+	w.U32(actorID);
+	w.U32(containerID);
+	w.I32(x);
+	w.I32(y);
+}
+
+bool NetContainerOpen::Read(NetReader& r)
+{
+	actorID = r.U32();
+	containerID = r.U32();
+	x = r.I32();
+	y = r.I32();
+	return r.Ok();
+}
+
 }

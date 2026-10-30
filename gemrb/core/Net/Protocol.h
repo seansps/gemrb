@@ -29,7 +29,7 @@
 namespace GemRB {
 
 constexpr uint8_t NET_MAGIC = 0xE7;
-constexpr uint8_t NET_PROTOCOL_VERSION = 3;
+constexpr uint8_t NET_PROTOCOL_VERSION = 4;
 constexpr uint16_t NET_DEFAULT_PORT = 27015;
 constexpr size_t NET_HEADER_SIZE = 3;
 constexpr size_t NET_MAX_STRING = 1024;
@@ -48,6 +48,8 @@ constexpr uint8_t NET_HOST_SLOT = 0;
 constexpr size_t NET_OBJECT_FIELDS = 10;
 constexpr size_t NET_OBJECT_FILTERS = 5;
 constexpr size_t NET_ACTION_OBJECTS = 3;
+// a GUI call carries at most this many integer arguments
+constexpr size_t NET_GUI_ARGS = 8;
 
 enum class NetChannel : uint8_t {
 	Reliable = 0, // ordered and reliable: handshake, chat, commands, events
@@ -78,6 +80,15 @@ enum class NetMsgType : uint8_t {
 	Pause, // both ways, the host relays
 	AreaChange, // host -> client, the party moved; a resync follows
 	Ownership, // host -> client, who controls which party member
+	Dialog, // host -> client, a conversation's lines, replies and end
+	DialogChoice, // client -> host, the conversation's owner picked a reply
+	Inventory, // host -> client, everything in an actor, container or ground pile
+	ActorStats, // host -> client, changed base and modified stats of an actor
+	PartyState, // host -> client, party gold and reputation
+	Spellbook, // host -> client, an actor's known and memorized spells
+	GuiCall, // client -> host, a state changing GemRB.* call from the GUI
+	StoreState, // host -> client, a store's stock; may open or close its window
+	ContainerOpen, // host -> client, a party member opened a container for its owner
 	count
 };
 
@@ -456,6 +467,192 @@ struct NetOwnershipEntry {
 struct GEM_EXPORT NetOwnership {
 	static constexpr NetMsgType Type = NetMsgType::Ownership;
 	std::vector<NetOwnershipEntry> entries;
+
+	void Write(NetWriter& w) const;
+	bool Read(NetReader& r);
+};
+
+// a conversation, as the host's DialogHandler runs it
+struct NetDialogOption {
+	uint16_t index = 0; // transition index, what the owner sends back
+	std::string text;
+};
+
+struct GEM_EXPORT NetDialog {
+	static constexpr NetMsgType Type = NetMsgType::Dialog;
+	enum Kind : uint8_t {
+		LINE = 0, // someone said text (speakerID)
+		STATE, // the replies of a new node; the owner picks one
+		END, // the conversation is over
+		count
+	};
+	enum Flags : uint8_t {
+		FREEZE = 1, // the world is frozen meanwhile (DF_FREEZE_SCRIPTS)
+		CONTINUE = 2, // no replies, just a continue button (continueIndex)
+		END_BUTTON = 4, // no replies, just an end button (continueIndex)
+		PARTY = 8 // LINE: a party member's reply, not the NPC's text
+	};
+	uint8_t kind = LINE;
+	uint32_t seq = 0; // STATE: node counter, so late choices are ignored
+	uint8_t owner = 0; // player slot that picks the replies
+	uint8_t flags = 0;
+	uint32_t speakerID = 0;
+	uint32_t targetID = 0;
+	uint16_t continueIndex = 0;
+	std::string text; // LINE: UTF-8
+	std::vector<NetDialogOption> options; // STATE
+
+	void Write(NetWriter& w) const;
+	bool Read(NetReader& r);
+};
+
+struct GEM_EXPORT NetDialogChoice {
+	static constexpr NetMsgType Type = NetMsgType::DialogChoice;
+	uint32_t seq = 0; // the STATE this answers
+	uint16_t index = 0;
+
+	void Write(NetWriter& w) const;
+	bool Read(NetReader& r);
+};
+
+// one stack in an inventory
+struct NetItem {
+	uint16_t slot = 0;
+	std::string resref;
+	std::array<uint16_t, 3> usages {};
+	uint32_t flags = 0;
+	uint16_t expired = 0;
+
+	bool operator==(const NetItem& other) const
+	{
+		return slot == other.slot && resref == other.resref && usages == other.usages && flags == other.flags && expired == other.expired;
+	}
+};
+
+// full contents, sent whenever anything in it changed; ground piles have no network
+// ID (they come and go) and are found by area and position instead, like Map::GetPile
+struct GEM_EXPORT NetInventory {
+	static constexpr NetMsgType Type = NetMsgType::Inventory;
+	uint32_t netID = 0; // 0 for a pile
+	NetObjectKind kind = NetObjectKind::Actor; // Actor or Container
+	std::string area; // piles
+	int32_t x = 0;
+	int32_t y = 0;
+	int16_t equipped = 0; // actors: Inventory::Equipped and its header
+	uint16_t equippedHeader = 0;
+	std::vector<NetItem> items;
+
+	void Write(NetWriter& w) const;
+	bool Read(NetReader& r);
+};
+
+struct NetStatEntry {
+	uint16_t stat = 0;
+	uint32_t base = 0;
+	uint32_t modified = 0;
+};
+
+struct GEM_EXPORT NetActorStats {
+	static constexpr NetMsgType Type = NetMsgType::ActorStats;
+	uint32_t netID = 0;
+	std::vector<NetStatEntry> stats;
+
+	void Write(NetWriter& w) const;
+	bool Read(NetReader& r);
+};
+
+struct GEM_EXPORT NetPartyState {
+	static constexpr NetMsgType Type = NetMsgType::PartyState;
+	uint32_t gold = 0;
+	uint32_t reputation = 0;
+
+	void Write(NetWriter& w) const;
+	bool Read(NetReader& r);
+};
+
+struct NetMemorizedSpell {
+	std::string resref;
+	uint32_t flags = 0; // 1 = still castable
+};
+
+// one type and level of a spellbook (CRESpellMemorization)
+struct NetSpellPage {
+	uint8_t type = 0;
+	uint8_t level = 0;
+	uint16_t slots = 0;
+	uint16_t slotsWithBonus = 0;
+	std::vector<std::string> known;
+	std::vector<NetMemorizedSpell> memorized;
+};
+
+struct GEM_EXPORT NetSpellbook {
+	static constexpr NetMsgType Type = NetMsgType::Spellbook;
+	uint32_t netID = 0;
+	std::vector<NetSpellPage> pages;
+
+	void Write(NetWriter& w) const;
+	bool Read(NetReader& r);
+};
+
+// the GemRB.* GUI functions a client may ask the host to run for it
+enum class NetGuiOp : uint8_t {
+	DragItem = 1, // actor, slot, count, type (1: from the pile at its feet)
+	DropDraggedItem, // actor, slot
+	ChangeContainerItem, // actor, slot, action (actor 0: the opened container)
+	LeaveContainer,
+	ChangeStoreItem, // actor, slot, action
+	SetPurchasedAmount, // index, amount, type
+	LeaveStore,
+	AddPartyGold, // amount (GameSetPartyGold, as a difference)
+	SetEquippedQuickSlot, // actor, slot, ability
+	UseItem, // actor, slot, header, target (items used without a target)
+	MemorizeSpell, // actor, type, level, index, enabled
+	UnmemorizeSpell, // actor, type, level, index, flags
+	ChangeItemFlag, // actor, slot, flags, mode
+	count
+};
+
+struct GEM_EXPORT NetGuiCall {
+	static constexpr NetMsgType Type = NetMsgType::GuiCall;
+	NetGuiOp op = NetGuiOp::DragItem;
+	uint8_t selected = 0; // the client's GameGetSelectedPCSingle
+	std::vector<int32_t> args; // actors as network IDs (or party slots below 1000)
+
+	void Write(NetWriter& w) const;
+	bool Read(NetReader& r);
+};
+
+struct NetStoreItem {
+	std::string resref;
+	std::array<uint16_t, 3> usages {};
+	uint32_t flags = 0;
+	uint32_t amount = 0;
+	int32_t infinite = 0;
+	uint16_t purchased = 0;
+};
+
+struct GEM_EXPORT NetStoreState {
+	static constexpr NetMsgType Type = NetMsgType::StoreState;
+	enum Flags : uint8_t {
+		OPEN = 1, // open the store window for actorID
+		CLOSE = 2 // the host closed it (the owner left the area or the game)
+	};
+	uint8_t flags = 0;
+	std::string store;
+	uint32_t ownerID = 0; // the merchant
+	uint32_t actorID = 0; // the party member shopping
+	std::vector<NetStoreItem> items;
+
+	void Write(NetWriter& w) const;
+	bool Read(NetReader& r);
+};
+
+struct GEM_EXPORT NetContainerOpen {
+	static constexpr NetMsgType Type = NetMsgType::ContainerOpen;
+	uint32_t actorID = 0;
+	uint32_t containerID = 0; // 0 for a pile at (x, y)
+	int32_t x = 0;
+	int32_t y = 0;
 
 	void Write(NetWriter& w) const;
 	bool Read(NetReader& r);

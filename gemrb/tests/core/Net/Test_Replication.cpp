@@ -227,4 +227,98 @@ TEST(NetReplicationTest, MatchObjectsByKind)
 	EXPECT_EQ(map[20102], 7U);
 }
 
+TEST(NetReplicationTest, Permissions)
+{
+	NetPermissions perms;
+	// everything is allowed by default, except other players' party members
+	EXPECT_TRUE(perms.Allowed(1, NetPermission::Purchase));
+	EXPECT_TRUE(perms.Allowed(1, NetPermission::Dialog));
+	EXPECT_TRUE(perms.Allowed(1, NetPermission::Control, 1));
+	EXPECT_FALSE(perms.Allowed(1, NetPermission::Control, 0));
+	EXPECT_FALSE(perms.Allowed(2, NetPermission::Control, 1));
+
+	perms.Set(1, NetPermission::Purchase, false);
+	EXPECT_FALSE(perms.Allowed(1, NetPermission::Purchase));
+	EXPECT_TRUE(perms.Allowed(2, NetPermission::Purchase));
+	EXPECT_TRUE(perms.Allowed(1, NetPermission::Dialog));
+	perms.Set(1, NetPermission::Purchase, true);
+	EXPECT_TRUE(perms.Allowed(1, NetPermission::Purchase));
+
+	// the host can't be locked out, not even of other players' characters
+	perms.Set(NET_HOST_SLOT, NetPermission::Pause, false);
+	EXPECT_TRUE(perms.Allowed(NET_HOST_SLOT, NetPermission::Pause));
+	EXPECT_TRUE(perms.Allowed(NET_HOST_SLOT, NetPermission::Control, 2));
+	EXPECT_STREQ(NetPermissionName(NetPermission::CharacterRecords), "character records");
+}
+
+TEST(NetReplicationTest, DialogOwner)
+{
+	// a player's PC talks to an NPC: that PC's owner answers
+	EXPECT_EQ(NetDialogOwner(1, -1, NET_HOST_SLOT), 1);
+	// an NPC talks to a PC: the PC's owner answers
+	EXPECT_EQ(NetDialogOwner(-1, 2, NET_HOST_SLOT), 2);
+	// two PCs: the speaker's owner
+	EXPECT_EQ(NetDialogOwner(2, 1, NET_HOST_SLOT), 2);
+	// no PC involved: the host
+	EXPECT_EQ(NetDialogOwner(-1, -1, NET_HOST_SLOT), NET_HOST_SLOT);
+}
+
+TEST(NetReplicationTest, StatsDiff)
+{
+	std::vector<NetStatEntry> before = { { 0, 10, 10 }, { 1, 20, 20 }, { 2, 5, 7 }, { 3, 0, 0 } };
+	std::vector<NetStatEntry> now = before;
+	EXPECT_TRUE(NetStatsDiff(before, now, {}).empty());
+	now[1].base = 25; // base changed
+	now[2].modified = 6; // only the modified value changed
+	now[3].base = now[3].modified = 9; // skipped
+	auto diff = NetStatsDiff(before, now, { 3 });
+	ASSERT_EQ(diff.size(), 2U);
+	EXPECT_EQ(diff[0].stat, 1);
+	EXPECT_EQ(diff[0].base, 25U);
+	EXPECT_EQ(diff[1].stat, 2);
+	EXPECT_EQ(diff[1].modified, 6U);
+	// nothing known yet: everything is new
+	EXPECT_EQ(NetStatsDiff({}, now, {}).size(), now.size());
+}
+
+TEST(NetReplicationTest, GuiOps)
+{
+	for (uint8_t raw = 1; raw < uint8_t(NetGuiOp::count); ++raw) {
+		NetGuiOpInfo info = NetGuiInfo(NetGuiOp(raw));
+		EXPECT_STRNE(info.name, "?") << int(raw);
+		// the actor, if any, is one of the required arguments
+		EXPECT_LT(info.actorArg, int(info.minArgs)) << info.name;
+	}
+	EXPECT_EQ(NetGuiInfo(NetGuiOp::ChangeStoreItem).permission, NetPermission::Purchase);
+	EXPECT_EQ(NetGuiInfo(NetGuiOp::AddPartyGold).permission, NetPermission::Purchase);
+	EXPECT_EQ(NetGuiInfo(NetGuiOp::DropDraggedItem).actorArg, 0);
+	EXPECT_EQ(NetGuiInfo(NetGuiOp::LeaveContainer).actorArg, -1);
+	EXPECT_STREQ(NetGuiInfo(NetGuiOp::count).name, "?");
+}
+
+TEST(NetReplicationTest, MessageHashes)
+{
+	NetInventory inv;
+	inv.netID = 10002;
+	NetItem item;
+	item.slot = 15;
+	item.resref = "MPTPOT";
+	item.usages = { 2, 0, 0 };
+	inv.items.push_back(item);
+	uint64_t first = NetMessageHash(inv);
+	EXPECT_EQ(first, NetMessageHash(inv));
+	inv.items[0].usages[0] = 1; // a potion drunk
+	EXPECT_NE(first, NetMessageHash(inv));
+	inv.items[0].usages[0] = 2;
+	inv.equipped = 1; // a different weapon readied
+	EXPECT_NE(first, NetMessageHash(inv));
+
+	NetSpellbook book;
+	book.pages.resize(1);
+	book.pages[0].memorized = { { "MPTBOLT", 1 } };
+	uint64_t ready = NetMessageHash(book);
+	book.pages[0].memorized[0].flags = 0; // cast
+	EXPECT_NE(ready, NetMessageHash(book));
+}
+
 }
