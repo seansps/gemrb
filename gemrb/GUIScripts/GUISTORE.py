@@ -1244,8 +1244,9 @@ def RedrawStoreShoppingWindow (Window):
 		else:
 			Button.SetState (IE_GUI_BUTTON_LOCKED)
 
-	# also disable the button if the inventory is full
-	if BuySum and selected_count <= free_slots:
+	# also disable the button if the inventory is full; co-op hosts may not let us trade
+	trade = GemRB.NetAllowed ("purchase")
+	if BuySum and selected_count <= free_slots and trade:
 		LeftButton.SetState (IE_GUI_BUTTON_ENABLED)
 	else:
 		LeftButton.SetState (IE_GUI_BUTTON_DISABLED)
@@ -1255,7 +1256,7 @@ def RedrawStoreShoppingWindow (Window):
 		Label.SetText ("")
 	else:
 		Label.SetText (str(SellSum) )
-	if SellSum:
+	if SellSum and trade:
 		RightButton.SetState (IE_GUI_BUTTON_ENABLED)
 	else:
 		RightButton.SetState (IE_GUI_BUTTON_DISABLED)

@@ -152,12 +152,14 @@ void NetHello::Write(NetWriter& w) const
 {
 	w.Str(name);
 	w.Str(gameType);
+	w.U64(token);
 }
 
 bool NetHello::Read(NetReader& r)
 {
 	name = r.Str();
 	gameType = r.Str();
+	token = r.U64();
 	return r.Ok();
 }
 
@@ -165,12 +167,17 @@ void NetWelcome::Write(NetWriter& w) const
 {
 	w.U8(slot);
 	w.Str(hostName);
+	w.U64(token);
+	w.U8(flags);
 }
 
 bool NetWelcome::Read(NetReader& r)
 {
 	slot = r.U8();
 	hostName = r.Str();
+	token = r.U64();
+	flags = r.U8();
+	if (flags & ~(REJOINED | IN_GAME)) r.Fail();
 	return r.Ok();
 }
 
@@ -858,6 +865,7 @@ void NetGuiCall::Write(NetWriter& w) const
 	for (size_t i = 0; i < count; ++i) {
 		w.I32(args[i]);
 	}
+	w.Str(text);
 }
 
 bool NetGuiCall::Read(NetReader& r)
@@ -870,6 +878,7 @@ bool NetGuiCall::Read(NetReader& r)
 	for (auto& arg : args) {
 		arg = r.I32();
 	}
+	text = r.Str();
 	return r.Ok();
 }
 
@@ -928,6 +937,132 @@ bool NetContainerOpen::Read(NetReader& r)
 	containerID = r.U32();
 	x = r.I32();
 	y = r.I32();
+	return r.Ok();
+}
+
+void NetHeartbeat::Write(NetWriter& w) const
+{
+	w.U32(seq);
+	w.U32(time);
+	w.U32(echo);
+	w.U16(rtt);
+}
+
+bool NetHeartbeat::Read(NetReader& r)
+{
+	seq = r.U32();
+	time = r.U32();
+	echo = r.U32();
+	rtt = r.U16();
+	return r.Ok();
+}
+
+void NetLobbyState::Write(NetWriter& w) const
+{
+	w.U8(uint8_t(phase));
+	size_t count = WriteCount(w, players.size(), size_t(NET_MAX_PEERS) + 1);
+	for (size_t i = 0; i < count; ++i) {
+		const NetLobbyPlayer& player = players[i];
+		w.U8(player.slot);
+		w.U8(player.flags);
+		w.U16(player.ping);
+		w.Str(player.name);
+		w.U32(player.allowed);
+	}
+	count = WriteCount(w, party.size(), NET_PARTY_SLOTS);
+	for (size_t i = 0; i < count; ++i) {
+		w.U8(party[i].partySlot);
+		w.U8(party[i].owner);
+		w.U8(party[i].controller);
+		w.Str(party[i].name);
+	}
+}
+
+bool NetLobbyState::Read(NetReader& r)
+{
+	uint8_t raw = r.U8();
+	if (raw >= uint8_t(NetPhase::count)) r.Fail();
+	phase = NetPhase(raw);
+	players.resize(ReadCount(r, size_t(NET_MAX_PEERS) + 1));
+	for (auto& player : players) {
+		player.slot = r.U8();
+		player.flags = r.U8();
+		if (player.slot > NET_MAX_PEERS || player.flags & ~(NetLobbyPlayer::CONNECTED | NetLobbyPlayer::READY)) r.Fail();
+		player.ping = r.U16();
+		player.name = r.Str();
+		player.allowed = r.U32();
+	}
+	party.resize(ReadCount(r, NET_PARTY_SLOTS));
+	for (auto& slot : party) {
+		slot.partySlot = r.U8();
+		slot.owner = r.U8();
+		slot.controller = r.U8();
+		if (!slot.partySlot || slot.partySlot > NET_PARTY_SLOTS || slot.owner > NET_MAX_PEERS || slot.controller > NET_MAX_PEERS) r.Fail();
+		slot.name = r.Str();
+	}
+	return r.Ok();
+}
+
+void NetLobbyReady::Write(NetWriter& w) const
+{
+	w.U8(ready);
+}
+
+bool NetLobbyReady::Read(NetReader& r)
+{
+	ready = r.U8();
+	if (ready > 1) r.Fail();
+	return r.Ok();
+}
+
+void NetAreaData::Write(NetWriter& w) const
+{
+	w.U32(transferID);
+	w.Str(area);
+	size_t count = WriteCount(w, party.size(), NET_PARTY_SLOTS);
+	for (size_t i = 0; i < count; ++i) {
+		const NetAreaPartyEntry& entry = party[i];
+		w.U32(entry.netID);
+		w.U8(entry.partySlot);
+		w.I32(entry.x);
+		w.I32(entry.y);
+		w.U8(entry.orientation);
+	}
+	w.Bytes(are.data(), are.size());
+}
+
+bool NetAreaData::Read(NetReader& r)
+{
+	transferID = r.U32();
+	area = r.Str();
+	party.resize(ReadCount(r, NET_PARTY_SLOTS));
+	for (auto& entry : party) {
+		entry.netID = r.U32();
+		entry.partySlot = r.U8();
+		entry.x = r.I32();
+		entry.y = r.I32();
+		entry.orientation = r.U8();
+	}
+	are = r.Bytes(NET_MAX_AREA_SIZE);
+	return r.Ok();
+}
+
+void NetGlobals::Write(NetWriter& w) const
+{
+	size_t count = WriteCount(w, vars.size(), NET_MAX_ACTORS);
+	for (size_t i = 0; i < count; ++i) {
+		w.Str(vars[i].name);
+		w.I32(vars[i].value);
+	}
+}
+
+bool NetGlobals::Read(NetReader& r)
+{
+	vars.resize(ReadCount(r, NET_MAX_ACTORS));
+	for (auto& var : vars) {
+		var.name = r.Str();
+		var.value = r.I32();
+	}
 	return r.Ok();
 }
 

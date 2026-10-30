@@ -1899,9 +1899,31 @@ bool Interface::IsFreezed() const
 	return !update_scripts;
 }
 
+bool Interface::StartNetSession(const std::string& mode, const std::string& host, int port, const std::string& name)
+{
+	if (netSession) return false;
+	config.NetMode = mode;
+	config.NetHost = host;
+	config.NetPort = port;
+	config.NetName = name;
+	netSession = NetSession::Create(config, true);
+	if (!netSession) config.NetMode.clear();
+	return netSession != nullptr;
+}
+
+void Interface::StopNetSession()
+{
+	stopNetSession = netSession != nullptr;
+}
+
 void Interface::GameLoop(void)
 {
 	TRACY(ZoneScoped);
+	if (stopNetSession) {
+		netSession.reset();
+		config.NetMode.clear();
+		stopNetSession = false;
+	}
 	// receive first, so orders (and pauses) forwarded by clients count in this very tick
 	if (netSession) {
 		netSession->PreTick();

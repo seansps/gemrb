@@ -16,6 +16,7 @@
 #include "InterfaceConfig.h"
 #include "Item.h"
 #include "Map.h"
+#include "MapMgr.h"
 #include "PluginMgr.h"
 #include "Projectile.h"
 #include "ProjectileServer.h"
@@ -52,6 +53,7 @@
 
 #include <algorithm>
 #include <map>
+#include <random>
 #include <set>
 #include <vector>
 
@@ -94,6 +96,16 @@ static constexpr tick_t DESYNC_COOLDOWN = 20000;
 static const std::vector<uint16_t> SNAPSHOT_STATS = { IE_HITPOINTS, IE_MAXHITPOINTS, IE_STATE_ID };
 // dialog replies shown to players who don't own the conversation
 static constexpr const char* READONLY_REPLY = "[p][color=A0A0A0FF]   {}. {}[/color][/p]";
+// both sides send a heartbeat this often (ms); silence longer than NetTimeout drops the connection
+static constexpr tick_t HEARTBEAT_INTERVAL = 1000;
+// ENet's own timeout is a little longer than ours, as a backstop
+static constexpr tick_t ENET_TIMEOUT_SLACK = 2000;
+// lines of chat kept for the lobby window
+static constexpr size_t CHAT_LOG_LINES = 50;
+// the lobby goes out again this often anyway, for the pings (ms)
+static constexpr tick_t LOBBY_REFRESH = 5000;
+// "X is controlled by player N" at most this often per party member (ms)
+static constexpr tick_t REFUSAL_THROTTLE = 2000;
 
 // one written save, ready to stream to every peer that asked for it in this tick
 struct NetSnapshot {
@@ -104,11 +116,20 @@ struct NetSnapshot {
 
 struct NetPeerInfo {
 	ENetPeer* peer = nullptr;
-	uint8_t slot = 0;
+	uint8_t slot = 0; // from the roster, once it said hello
 	std::string name;
+	uint64_t token = 0;
 	bool welcomed = false;
+	// heartbeats: when we last heard from it, its clock for the echo, the round trip
+	tick_t lastHeard = 0;
+	uint32_t theirTime = 0;
+	tick_t theirTimeAt = 0;
+	uint16_t rtt = 0;
 	// joined or asked for a resync: gets a save at the next safe point
 	bool wantsSave = false;
+	// the party moved: gets the new area (lighter than a save) at the next safe point
+	bool wantsArea = false;
+	tick_t areaChangeAt = 0; // for the log
 	std::shared_ptr<NetSaveSender> transfer;
 	NetActorTable table; // goes out after the last chunk
 	// loaded the latest save and reported Ready: gets snapshots and every event
@@ -301,6 +322,20 @@ struct NetSession::Impl {
 	std::string remoteHost;
 	uint16_t port;
 	ENetHost* host = nullptr;
+	// heartbeats and timeouts (ms)
+	tick_t timeout;
+	tick_t nextHeartbeat = 0;
+	uint32_t heartbeatSeq = 0;
+	// test hook: no polling or heartbeats until then, like a hung process
+	tick_t hangUntil = 0;
+	// both sides: the lobby as the host has it, and our chat
+	NetPhase phase = NetPhase::Game;
+	NetLobbyState lobby;
+	uint32_t lobbyRevision = 1;
+	std::vector<std::string> chatLog;
+	std::string status;
+	std::map<ieDword, tick_t> refusals; // when we last told our player an actor isn't theirs
+	bool localMessage = false; // what we tell our own player isn't replicated
 	// scratch space for save transfers, next to the cache dir (which loading wipes)
 	path_t transferDir;
 
@@ -322,9 +357,18 @@ struct NetSession::Impl {
 	// party member -> area, to notice area changes
 	std::map<ieDword, std::string> partyAreas;
 	int areaSettle = 0;
-	// who controls which party member
-	std::map<uint8_t, uint8_t> ownerOverride; // party slot -> player slot
-	NetOwnership owners;
+	// players by slot and token; who owns which party slot (the lobby's assignments)
+	NetRoster roster;
+	std::map<uint8_t, uint8_t> assigned; // party slot -> player slot
+	NetOwnership owners; // who controls which party member now
+	uint64_t lobbyHash = 0;
+	tick_t lobbySentAt = 0;
+	// party members in slot order, to tell area changes (lighter) from party changes (a save)
+	std::vector<ieDword> partyMembers;
+	bool partyChanged = false;
+	bool lightAreas = true;
+	// global variables the clients know of
+	std::map<std::string, int32_t> knownGlobals;
 	uint8_t pauseRequester = NET_HOST_SLOT;
 	std::string lastSound;
 	unsigned int lastSoundTick = 0;
@@ -332,6 +376,11 @@ struct NetSession::Impl {
 	HostDialog dialog;
 	// the last conversation, for the actions it runs once it is over (StartStore)
 	HostDialog lastDialog;
+	// its last NPC line and node, for players who join in the middle of it
+	NetDialog dialogLine;
+	NetDialog dialogState;
+	bool haveDialogLine = false;
+	bool haveDialogState = false;
 	bool applyingChoice = false;
 	// GUI calls of remote players, run in the simulation window of the tick they arrived in
 	std::vector<std::pair<uint8_t, NetGuiCall>> guiCalls;
@@ -347,6 +396,14 @@ struct NetSession::Impl {
 
 	// client side
 	ENetPeer* server = nullptr;
+	uint64_t token = 0; // our identity at this host, kept across reconnects
+	tick_t lastHeard = 0;
+	uint32_t hostTime = 0;
+	tick_t hostTimeAt = 0;
+	uint16_t rtt = 0;
+	NetPermissions myPermissions; // as the lobby says, for the local checks
+	tick_t areaChangeAt = 0; // when the host said the party moved, for the log
+	bool lightLoad = false; // the area being loaded came as area data, not a save
 	tick_t nextConnectAttempt = 0;
 	bool stopped = false; // gave up (rejected or broken transfer), no more reconnects
 	ClientState state = ClientState::Connecting;
@@ -389,11 +446,15 @@ struct NetSession::Impl {
 	unsigned int ticks = 0;
 	std::map<uint32_t, Point> lastLoggedPos;
 
-	Impl(Mode mode, const CoreSettings& config)
+	Impl(Mode mode, const CoreSettings& config, bool inLobby)
 		: mode(mode), name(config.NetName), remoteHost(config.NetHost), port(uint16_t(config.NetPort)),
+		  timeout(tick_t(std::max(config.NetTimeout, 1000))), lightAreas(config.NetLightAreas != 0),
 		  testChat(config.NetTestChat), testMove(config.NetTestMove), testVar(config.NetTestVar),
 		  testOrders(config.NetTestOrders), testResync(config.NetTestResync), slowTransfer(config.NetTestSlowTransfer != 0)
 	{
+		roster.SetHost(name);
+		phase = mode == Mode::Host && !inLobby ? NetPhase::Game : NetPhase::Lobby;
+		status = mode == Mode::Host ? "Hosting" : "Connecting";
 		path_t cache = config.CachePath;
 		while (cache.size() > 1 && cache.back() == PathDelimiter) {
 			cache.pop_back();
@@ -455,6 +516,9 @@ struct NetSession::Impl {
 		}
 		address.port = port;
 		server = enet_host_connect(host, &address, size_t(NetChannel::count), NET_PROTOCOL_VERSION);
+		lastHeard = GetMilliseconds();
+		if (server) enet_peer_timeout(server, 0, enet_uint32(timeout + ENET_TIMEOUT_SLACK), enet_uint32(timeout + ENET_TIMEOUT_SLACK));
+		SetStatus(fmt::format("Connecting to {}:{}...", remoteHost, port));
 		Log(MESSAGE, "Net", "Connecting to {}:{} as '{}'...", remoteHost, port, name);
 	}
 
@@ -530,9 +594,19 @@ struct NetSession::Impl {
 		return fmt::format("{}:{}", ip, peer->address.port);
 	}
 
-	static void ShowChat(const NetChat& chat)
+	void SetStatus(const std::string& text)
+	{
+		if (status == text) return;
+		status = text;
+		lobbyRevision++;
+	}
+
+	void ShowChat(const NetChat& chat)
 	{
 		Log(MESSAGE, "Net", "Chat <{}#{}>: {}", chat.name, chat.slot, chat.text);
+		chatLog.push_back(fmt::format("{}: {}", chat.name, chat.text));
+		if (chatLog.size() > CHAT_LOG_LINES) chatLog.erase(chatLog.begin());
+		lobbyRevision++;
 		if (core->GetGame()) {
 			displaymsg->DisplayMarkupString(fmt::format(u"[p][color=80C0FFFF]{}:[/color] {}[/p]", StringFromUtf8(chat.name.c_str()), StringFromUtf8(chat.text.c_str())));
 		}
@@ -549,6 +623,7 @@ struct NetSession::Impl {
 			ShowChat(chat);
 		} else if (server && state != ClientState::Connecting) {
 			Send(server, chat);
+			ShowChat(chat); // the host relays it to everyone else
 		} else {
 			Log(WARNING, "Net", "Not connected, chat dropped: {}", text);
 		}
@@ -716,6 +791,7 @@ struct NetSession::Impl {
 
 	void Poll()
 	{
+		if (Hanging()) return;
 		if (mode == Mode::Client && !server && !stopped && GetMilliseconds() >= nextConnectAttempt) {
 			Connect();
 		}
@@ -739,32 +815,31 @@ struct NetSession::Impl {
 		}
 	}
 
+	bool Hanging() const
+	{
+		return hangUntil && GetMilliseconds() < hangUntil;
+	}
+
 	void OnConnect(ENetPeer* peer)
 	{
+		enet_peer_timeout(peer, 0, enet_uint32(timeout + ENET_TIMEOUT_SLACK), enet_uint32(timeout + ENET_TIMEOUT_SLACK));
 		if (mode == Mode::Client) {
-			Log(MESSAGE, "Net", "Connected to host {}, saying hello.", PeerAddress(peer));
+			Log(MESSAGE, "Net", "Connected to host {}, saying hello{}.", PeerAddress(peer), token ? " (we were here before)" : "");
+			lastHeard = GetMilliseconds();
 			NetHello hello;
 			hello.name = name;
 			hello.gameType = core->config.GameType;
+			hello.token = token;
 			Send(peer, hello);
+			SetStatus("Connected, waiting for the host");
 			return;
 		}
 
-		uint8_t slot = 1;
-		while (FindSlot(slot)) ++slot;
 		NetPeerInfo info;
 		info.peer = peer;
-		info.slot = slot;
+		info.lastHeard = GetMilliseconds();
 		peers.push_back(std::move(info));
-		Log(MESSAGE, "Net", "Peer {} connected, assigned slot {}.", PeerAddress(peer), slot);
-	}
-
-	bool FindSlot(uint8_t slot) const
-	{
-		for (const auto& info : peers) {
-			if (info.slot == slot) return true;
-		}
-		return false;
+		Log(MESSAGE, "Net", "Peer {} connected.", PeerAddress(peer));
 	}
 
 	void OnDisconnect(ENetPeer* peer)
@@ -774,6 +849,7 @@ struct NetSession::Impl {
 			if (state != ClientState::Connecting) {
 				LeaveGame("Lost the connection to the host.");
 			} else if (!stopped) {
+				SetStatus("Could not reach the host, retrying");
 				Log(MESSAGE, "Net", "Could not reach the host, retrying in {}s.", RECONNECT_DELAY / 1000);
 			}
 			nextConnectAttempt = GetMilliseconds() + RECONNECT_DELAY;
@@ -781,16 +857,98 @@ struct NetSession::Impl {
 		}
 
 		for (auto it = peers.begin(); it != peers.end(); ++it) {
-			if (it->peer == peer) {
-				if (it->transfer) {
-					Log(MESSAGE, "Net", "Dropped the save transfer to slot {} after {} of {} bytes.", it->slot, it->transfer->Sent(), it->transfer->Begin().size);
-				}
-				Log(MESSAGE, "Net", "Player '{}' (slot {}) disconnected.", it->name, it->slot);
-				DropDragged(*it);
-				peers.erase(it);
-				break;
-			}
+			if (it->peer != peer) continue;
+			RemovePeer(it, "disconnected");
+			break;
 		}
+	}
+
+	// a player is gone (left, dropped or timed out): it keeps its slot for a rejoin, its party
+	// members go to the host meanwhile, and nothing it had open keeps the host waiting
+	void RemovePeer(std::vector<NetPeerInfo>::iterator it, const char* how)
+	{
+		NetPeerInfo& info = *it;
+		if (info.transfer) {
+			Log(MESSAGE, "Net", "Dropped the save transfer to slot {} after {} of {} bytes.", info.slot, info.transfer->Sent(), info.transfer->Begin().size);
+		}
+		if (!info.welcomed) {
+			Log(MESSAGE, "Net", "Peer {} {} before saying hello.", PeerAddress(info.peer), how);
+			peers.erase(it);
+			return;
+		}
+		Log(MESSAGE, "Net", "Player '{}' (slot {}) {}; its slot and characters are kept for a rejoin.", info.name, info.slot, how);
+		DropDragged(info);
+		if (!info.store.IsEmpty()) {
+			Log(MESSAGE, "Net", "Slot {} was trading at {}: the store is closed for it.", info.slot, info.store);
+		}
+		if (info.container) {
+			Log(MESSAGE, "Net", "Slot {} had container {} open: closed.", info.slot, info.container);
+		}
+		uint8_t slot = info.slot;
+		roster.Leave(slot);
+		peers.erase(it);
+		if (dialog.active && dialog.owner == slot) {
+			HandDialogToHost(slot);
+		}
+		if (core->GetGame()) {
+			displaymsg->DisplayMarkupString(StringFromUtf8(fmt::format("[p][color=FFC080FF]Player {} left; its characters are yours until it returns.[/color][/p]", slot).c_str()));
+		}
+	}
+
+	// heartbeats both ways; silence longer than the timeout drops the connection
+	void Heartbeats()
+	{
+		if (Hanging()) return;
+		tick_t now = GetMilliseconds();
+		if (mode == Mode::Host) {
+			for (auto it = peers.begin(); it != peers.end();) {
+				if (now - it->lastHeard <= timeout) {
+					++it;
+					continue;
+				}
+				Log(WARNING, "Net", "Player '{}' (slot {}) timed out: nothing for {} ms.", it->name, it->slot, now - it->lastHeard);
+				ENetPeer* peer = it->peer;
+				RemovePeer(it, "timed out");
+				enet_peer_reset(peer);
+				it = peers.begin();
+			}
+		} else if (server && now - lastHeard > timeout) {
+			Log(WARNING, "Net", "The host timed out: nothing for {} ms.", now - lastHeard);
+			enet_peer_reset(server);
+			server = nullptr;
+			if (state != ClientState::Connecting) {
+				LeaveGame("Lost the connection to the host (timed out).");
+			}
+			SetStatus("The host timed out, retrying");
+			nextConnectAttempt = now + RECONNECT_DELAY;
+		}
+
+		if (now < nextHeartbeat) return;
+		nextHeartbeat = now + HEARTBEAT_INTERVAL;
+		NetHeartbeat beat;
+		beat.seq = ++heartbeatSeq;
+		beat.time = uint32_t(now);
+		if (mode == Mode::Host) {
+			for (const auto& info : peers) {
+				if (!info.welcomed) continue;
+				// their clock plus how long we held it, so the round trip leaves that out
+				beat.echo = info.theirTime ? info.theirTime + uint32_t(now - info.theirTimeAt) : 0;
+				beat.rtt = info.rtt;
+				Send(info.peer, beat, NetChannel::State);
+			}
+		} else if (server && state != ClientState::Connecting) {
+			beat.echo = hostTime ? hostTime + uint32_t(now - hostTimeAt) : 0;
+			beat.rtt = rtt;
+			Send(server, beat, NetChannel::State);
+		}
+	}
+
+	// the other side's heartbeat: its echo of our clock gives the round trip
+	static uint16_t RoundTrip(const NetHeartbeat& beat)
+	{
+		if (!beat.echo) return 0;
+		uint32_t now = uint32_t(GetMilliseconds());
+		return uint16_t(std::min<uint32_t>(now - beat.echo, 0xffff));
 	}
 
 	void OnReceive(ENetPeer* peer, const uint8_t* data, size_t size)
@@ -799,6 +957,11 @@ struct NetSession::Impl {
 		if (!NetPeekType(data, size, type)) {
 			Log(WARNING, "Net", "Dropping malformed or incompatible packet ({} bytes) from {}.", size, PeerAddress(peer));
 			return;
+		}
+		if (mode == Mode::Client) {
+			lastHeard = GetMilliseconds();
+		} else if (NetPeerInfo* info = FindPeer(peer)) {
+			info->lastHeard = GetMilliseconds();
 		}
 
 		bool ok = mode == Mode::Host ? HostReceive(peer, type, data, size) : ClientReceive(type, data, size);
@@ -827,14 +990,45 @@ struct NetSession::Impl {
 						Log(WARNING, "Net", "Rejected '{}': {}", hello.name, reject.reason);
 						return true;
 					}
+					// a returning player whose old connection we haven't noticed is gone yet
+					for (auto it = peers.begin(); hello.token && it != peers.end(); ++it) {
+						if (it->peer == peer || !it->welcomed || it->token != hello.token) continue;
+						Log(MESSAGE, "Net", "Slot {} is back from {}; dropping its old connection.", it->slot, PeerAddress(peer));
+						ENetPeer* old = it->peer;
+						RemovePeer(it, "reconnected");
+						enet_peer_reset(old);
+						info = FindPeer(peer);
+						break;
+					}
+					// nobody loses characters to a newcomer: the round robin only hands out the host's
+					for (uint8_t partySlot = 1; partySlot <= NET_PARTY_SLOTS; ++partySlot) {
+						uint8_t owner = NetSlotOwner(partySlot, assigned, roster);
+						if (owner != NET_HOST_SLOT) assigned[partySlot] = owner;
+					}
+					bool rejoined = false;
+					uint8_t slot = roster.Join(hello.name, hello.token, NewToken(), rejoined);
+					if (!slot) {
+						NetReject reject;
+						reject.reason = "the game is full";
+						Send(peer, reject);
+						enet_peer_disconnect_later(peer, 0);
+						Log(WARNING, "Net", "Rejected '{}': {}", hello.name, reject.reason);
+						return true;
+					}
+					info->slot = slot;
 					info->name = hello.name;
+					info->token = roster.Find(slot)->token;
 					info->welcomed = true;
-					info->wantsSave = true;
+					// in the lobby the game follows once the host starts it
+					info->wantsSave = phase == NetPhase::Game;
 					NetWelcome welcome;
 					welcome.slot = info->slot;
 					welcome.hostName = name;
+					welcome.token = info->token;
+					welcome.flags = (rejoined ? NetWelcome::REJOINED : 0) | (phase == NetPhase::Game ? NetWelcome::IN_GAME : 0);
 					Send(peer, welcome);
-					Log(MESSAGE, "Net", "Player '{}' joined in slot {}.", info->name, info->slot);
+					Log(MESSAGE, "Net", "Player '{}' {} slot {}{}.", info->name, rejoined ? "rejoined in its old" : "joined in", info->slot, phase == NetPhase::Game ? ", the game follows" : ", waiting in the lobby");
+					SendLobby(true);
 					if (!testChat.empty()) {
 						SendChat(testChat);
 						testChat.clear();
@@ -897,9 +1091,34 @@ struct NetSession::Impl {
 					guiCalls.emplace_back(info->slot, std::move(call));
 					return true;
 				}
+			case NetMsgType::Heartbeat:
+				{
+					NetHeartbeat beat;
+					if (!NetDecode(data, size, beat)) return false;
+					info->theirTime = beat.time;
+					info->theirTimeAt = GetMilliseconds();
+					if (beat.echo) info->rtt = RoundTrip(beat);
+					return true;
+				}
+			case NetMsgType::LobbyReady:
+				{
+					NetLobbyReady ready;
+					if (!info->welcomed || !NetDecode(data, size, ready)) return false;
+					roster.SetReady(info->slot, ready.ready);
+					Log(MESSAGE, "Net", "Slot {} ({}) is {}.", info->slot, info->name, ready.ready ? "ready" : "not ready");
+					return true;
+				}
 			default:
 				return false;
 		}
+	}
+
+	static uint64_t NewToken()
+	{
+		static std::mt19937_64 rng(std::random_device {}() ^ uint64_t(GetMilliseconds()));
+		uint64_t value = 0;
+		while (!value) value = rng();
+		return value;
 	}
 
 	// the one place that decides what a player may do; Control is about one party member
@@ -940,6 +1159,10 @@ struct NetSession::Impl {
 			return;
 		}
 		Log(MESSAGE, "Net", "Slot {} ({}) loaded save #{} and mapped {} actors and objects; replaying {} events.", info.slot, info.name, ready.transferID, ready.mapped, info.pending.size());
+		if (info.areaChangeAt) {
+			Log(MESSAGE, "Net", "Slot {} followed the party in {} ms after it settled.", info.slot, GetMilliseconds() - info.areaChangeAt);
+			info.areaChangeAt = 0;
+		}
 		info.live = true;
 		info.awaitedTransfer = 0;
 		for (const auto& event : info.pending) {
@@ -952,6 +1175,20 @@ struct NetSession::Impl {
 		pause.on = IsPaused();
 		Send(info.peer, pause);
 		Send(info.peer, owners);
+		// a conversation in progress, read only unless it is the player's own
+		if (dialog.active) {
+			if (haveDialogLine) {
+				NetDialog line = dialogLine;
+				line.owner = dialog.owner;
+				Send(info.peer, line);
+			}
+			if (haveDialogState) {
+				NetDialog node = dialogState;
+				node.owner = dialog.owner;
+				Send(info.peer, node);
+			}
+			Log(MESSAGE, "Net", "Slot {} joined during dialog node #{} (player {} answers); sent it the conversation.", info.slot, dialog.seq, dialog.owner);
+		}
 		// what a save loads the client's own way (effects), as the host has it
 		const Game* g = core->GetGame();
 		for (int pcSlot = 1; g && pcSlot <= g->GetPartySize(false); ++pcSlot) {
@@ -1015,6 +1252,7 @@ struct NetSession::Impl {
 	// tells one player something in its message window
 	static void Notify(const NetPeerInfo& info, const std::string& text)
 	{
+		Log(MESSAGE, "Net", "Told slot {} ({}): {}", info.slot, info.name, text);
 		NetText msg;
 		msg.text = fmt::format("[p][color=FF8080FF]{}[/color][/p]", text);
 		Send(info.peer, msg);
@@ -1296,6 +1534,10 @@ struct NetSession::Impl {
 		msg.speakerID = speaker ? speaker->GetGlobalID() : 0;
 		msg.text = Utf8(text);
 		SendEvent(msg, false);
+		if (!partyLine) {
+			dialogLine = msg;
+			haveDialogLine = true;
+		}
 		Log(MESSAGE, "Net", "Event: dialog line of net id {}: '{}'", msg.speakerID, msg.text);
 	}
 
@@ -1315,6 +1557,8 @@ struct NetSession::Impl {
 			list += fmt::format(" [{}] '{}'", option.first, msg.options.back().text);
 		}
 		SendEvent(msg, false);
+		dialogState = msg;
+		haveDialogState = true;
 		Log(MESSAGE, "Net", "Event: dialog node #{} for slot {}{}:{}{}", msg.seq, dialog.owner, msg.flags & NetDialog::FREEZE ? " (world frozen)" : "", list.empty() ? " no replies" : list, msg.flags & (NetDialog::CONTINUE | NetDialog::END_BUTTON) ? fmt::format(", {} button (#{})", msg.flags & NetDialog::CONTINUE ? "continue" : "end", msg.continueIndex) : "");
 	}
 
@@ -1327,6 +1571,20 @@ struct NetSession::Impl {
 		Log(MESSAGE, "Net", "Event: dialog #{} owned by slot {} ended.", dialog.seq, dialog.owner);
 		lastDialog = dialog;
 		dialog = HostDialog();
+		haveDialogLine = haveDialogState = false;
+	}
+
+	// the player answering a conversation left: the host answers it from now on, so
+	// nobody waits for a reply that won't come; the others see who is choosing now
+	void HandDialogToHost(uint8_t slot)
+	{
+		dialog.owner = NET_HOST_SLOT;
+		Log(MESSAGE, "Net", "Dialog node #{}: its owner (slot {}) left, the host answers it now.", dialog.seq, slot);
+		displaymsg->DisplayMarkupString(StringFromUtf8(fmt::format("[p][color=FFC080FF]Player {} left the conversation; you answer it now.[/color][/p]", slot).c_str()));
+		if (haveDialogState) {
+			dialogState.owner = NET_HOST_SLOT;
+			SendEvent(dialogState, false);
+		}
 	}
 
 	// the owner's reply, the same call a click on it makes on the host
@@ -1380,14 +1638,39 @@ struct NetSession::Impl {
 	}
 
 	// StartStore from a conversation a remote player owns: the store opens on its screen
+	// a store has one copy of its stock and selection, so one player trades at a time (BG
+	// does the same); the shopper is a remote player, or -1 for our own GUI
+	int StoreShopper(const ResRef& storeRef, int except) const
+	{
+		for (const auto& info : peers) {
+			if (info.live && info.store == storeRef && info.slot != except) return info.slot;
+		}
+		const Store* mine = core->GetCurrentStore();
+		if (except != NET_HOST_SLOT && mine && mine->Name == storeRef) return NET_HOST_SLOT;
+		return -1;
+	}
+
 	bool OnStartStore(const ResRef& storeRef, const Scriptable& merchant)
 	{
 		if (mode != Mode::Host) return false;
 		const HostDialog& talk = dialog.active ? dialog : lastDialog;
 		ieDword merchantID = merchant.GetGlobalID();
-		if (talk.owner == NET_HOST_SLOT || (merchantID != talk.speakerID && merchantID != talk.targetID)) return false;
-		NetPeerInfo* info = FindSlotPeer(talk.owner);
-		if (!info || !info->live) return false;
+		bool ours = talk.owner == NET_HOST_SLOT || (merchantID != talk.speakerID && merchantID != talk.targetID);
+		NetPeerInfo* info = ours ? nullptr : FindSlotPeer(talk.owner);
+		if (!ours && (!info || !info->live)) return false;
+		int busy = StoreShopper(storeRef, info ? info->slot : NET_HOST_SLOT);
+		if (busy >= 0) {
+			const Actor* trader = Scriptable::As<Actor>(&merchant);
+			std::string why = fmt::format("Player {} is trading with {} right now; try again once they are done.", busy, trader ? Utf8(trader->GetShortName()) : std::string("them"));
+			Log(MESSAGE, "Net", "Store {} is busy (slot {} trades there), not opening it for slot {}.", storeRef, busy, info ? info->slot : NET_HOST_SLOT);
+			if (info) {
+				Notify(*info, why);
+			} else {
+				ShowLocal(why);
+			}
+			return true;
+		}
+		if (ours) return false;
 		if (!Allowed(info->slot, NetPermission::Purchase)) {
 			Notify(*info, "The host doesn't let you trade.");
 			return true;
@@ -1439,16 +1722,54 @@ struct NetSession::Impl {
 		return game->FindPC(arg);
 	}
 
+	// a Python string literal
+	static std::string PyString(const std::string& text)
+	{
+		std::string literal = "\"";
+		for (char ch : text) {
+			if (ch == '\\' || ch == '"') literal += '\\';
+			if (ch == '\n') {
+				literal += "\\n";
+				continue;
+			}
+			literal += ch;
+		}
+		return literal + "\"";
+	}
+
 	static std::string PythonCall(const NetGuiOpInfo& opInfo, const NetGuiCall& call)
 	{
-		std::string args;
-		for (size_t i = 0; i < call.args.size(); ++i) {
-			args += fmt::format("{}{}", i ? ", " : "", call.args[i]);
-			// the dragged item's picture isn't used by the core
-			if (call.op == NetGuiOp::DragItem && i == 1) args += ", ''";
+		std::vector<std::string> args;
+		for (int32_t arg : call.args) {
+			args.push_back(fmt::format("{}", arg));
 		}
-		if (call.op == NetGuiOp::AddPartyGold) args += ", 1";
-		return fmt::format("import GemRB\nGemRB.{}({})", opInfo.name, args);
+		switch (call.op) {
+			case NetGuiOp::DragItem:
+				// the dragged item's picture isn't used by the core
+				args.insert(args.begin() + 2, "''");
+				break;
+			case NetGuiOp::AddPartyGold:
+				args.emplace_back("1");
+				break;
+			case NetGuiOp::SetModalState:
+				args.push_back(PyString(call.text));
+				break;
+			case NetGuiOp::SetJournalEntry:
+				// a text entry instead of a strref; no feedback string
+				if (!call.text.empty()) args[0] = PyString(call.text);
+				if (call.args[3] == -1) args.pop_back();
+				break;
+			case NetGuiOp::SetMapnote:
+				args.push_back(PyString(call.text));
+				break;
+			default:
+				break;
+		}
+		std::string list;
+		for (const auto& arg : args) {
+			list += (list.empty() ? "" : ", ") + arg;
+		}
+		return fmt::format("import GemRB\nGemRB.{}({})", opInfo.name, list);
 	}
 
 	void RunGuiCalls()
@@ -1517,6 +1838,21 @@ struct NetSession::Impl {
 				info.store.Reset();
 				info.storeActor = info.storeOwner = 0;
 				return;
+			case NetGuiOp::RestParty:
+				{
+					// what GemRB.RestParty does, telling the player why not
+					ieStrRef err = ieStrRef::INVALID;
+					if (!game->CanPartyRest(RestChecks(call.args[0]), &err)) {
+						std::string why = err == ieStrRef::INVALID ? "you may not rest now" : Utf8(core->GetString(err));
+						Log(MESSAGE, "Net", "Slot {} ({}) wants to rest, but the party can't: {}.", info.slot, info.name, why);
+						Notify(info, fmt::format("The party can't rest: {}", why));
+						return;
+					}
+					game->RestParty(RestChecks(call.args[0] & (RestChecks::Area | RestChecks::NoRepeats)), call.args[1], call.args[2]);
+					Log(MESSAGE, "Net", "Slot {} ({}) rested the party.", info.slot, info.name);
+					partyDirty = true;
+					return;
+				}
 			case NetGuiOp::UseItem:
 				// only items used without a target come this way (the rest are orders)
 				if (!actor->inventory.GetSlotItem(ieDword(call.args[1]))) {
@@ -1837,6 +2173,34 @@ struct NetSession::Impl {
 	// serve pending joins and resyncs, then push the transfers along
 	void HostTransfers()
 	{
+		bool anyArea = false;
+		for (const auto& info : peers) {
+			anyArea |= info.welcomed && info.wantsArea && !info.wantsSave && !info.transfer;
+		}
+		NetAreaData area;
+		NetActorTable areaTable;
+		if (anyArea) {
+			bool ok = TakeAreaSnapshot(area, areaTable);
+			if (ok) TrackGlobals(); // before the peers stop taking live events
+			for (auto& info : peers) {
+				if (!info.welcomed || !info.wantsArea || info.wantsSave || info.transfer) continue;
+				info.wantsArea = false;
+				if (!ok) {
+					info.wantsSave = true;
+					continue;
+				}
+				area.transferID = areaTable.transferID = nextTransferID++;
+				info.live = false;
+				info.awaitedTransfer = area.transferID;
+				info.pending.clear();
+				auto data = NetEncode(area);
+				auto tableData = NetEncode(areaTable);
+				SendRaw(info.peer, data, NetChannel::Transfer);
+				SendRaw(info.peer, tableData, NetChannel::Transfer);
+				Log(MESSAGE, "Net", "Area change for slot {}: sent {} as area data #{}, {} bytes (ARE {}) and a table of {} entries, {} bytes.", info.slot, area.area, area.transferID, data.size(), area.are.size(), areaTable.actors.size(), tableData.size());
+			}
+		}
+
 		bool anyWaiting = false;
 		for (const auto& info : peers) {
 			anyWaiting |= info.welcomed && info.wantsSave && !info.transfer;
@@ -1855,7 +2219,7 @@ struct NetSession::Impl {
 				info.pending.clear();
 				const NetSaveBegin& begin = info.transfer->Begin();
 				Send(info.peer, begin, NetChannel::Transfer);
-				Log(MESSAGE, "Net", "Sending save #{} to slot {}: {} bytes, hash {:016x}, party in {}.", begin.transferID, info.slot, begin.size, begin.hash, begin.area);
+				Log(MESSAGE, "Net", "Sending save #{} to slot {}: {} bytes, hash {:016x}, party in {}{}.", begin.transferID, info.slot, begin.size, begin.hash, begin.area, info.areaChangeAt ? " (an area change)" : "");
 			}
 		}
 
@@ -1874,16 +2238,11 @@ struct NetSession::Impl {
 		}
 	}
 
-	// the default control of party members, unless the host reassigned one
+	// who controls each party member: its slot's owner (the lobby's assignment or the default),
+	// or the host while that player is away
 	void UpdateOwnership()
 	{
 		const Game* game = core->GetGame();
-		std::vector<uint8_t> players = { NET_HOST_SLOT };
-		for (const auto& info : peers) {
-			if (info.welcomed) players.push_back(info.slot);
-		}
-		std::sort(players.begin(), players.end());
-
 		NetOwnership now;
 		for (int slot = 1; slot <= game->GetPartySize(false); ++slot) {
 			const Actor* pc = game->FindPC(slot);
@@ -1891,11 +2250,7 @@ struct NetSession::Impl {
 			NetOwnershipEntry entry;
 			entry.netID = pc->GetGlobalID();
 			entry.partySlot = uint8_t(slot);
-			entry.owner = NetDefaultOwner(entry.partySlot, players);
-			auto it = ownerOverride.find(entry.partySlot);
-			if (it != ownerOverride.end() && std::find(players.begin(), players.end(), it->second) != players.end()) {
-				entry.owner = it->second;
-			}
+			entry.owner = NetSlotController(entry.partySlot, assigned, roster);
 			now.entries.push_back(entry);
 		}
 
@@ -1907,9 +2262,121 @@ struct NetSession::Impl {
 		owners = now;
 		for (const auto& entry : owners.entries) {
 			const Actor* pc = game->GetActorByGlobalID(entry.netID);
-			Log(MESSAGE, "Net", "Ownership: party slot {} {} (net id {}) -> player slot {}.", entry.partySlot, pc ? fmt::format("{}", fmt::WideToChar { pc->GetShortName() }) : "?", entry.netID, entry.owner);
+			uint8_t owner = NetSlotOwner(entry.partySlot, assigned, roster);
+			Log(MESSAGE, "Net", "Ownership: party slot {} {} (net id {}) -> player slot {}{}.", entry.partySlot, pc ? fmt::format("{}", fmt::WideToChar { pc->GetShortName() }) : "?", entry.netID, entry.owner, owner != entry.owner ? fmt::format(" (for player {}, who is away)", owner) : "");
 		}
 		SendEvent(owners, false);
+	}
+
+	// lobby (host) ------------------------------------------------------------------
+
+	NetLobbyState BuildLobby() const
+	{
+		NetLobbyState state;
+		state.phase = phase;
+		for (const NetPlayer& player : roster.All()) {
+			NetLobbyPlayer entry;
+			entry.slot = player.slot;
+			entry.name = player.name;
+			entry.flags = (player.connected ? NetLobbyPlayer::CONNECTED : 0) | (player.ready ? NetLobbyPlayer::READY : 0);
+			entry.allowed = permissions.Mask(player.slot);
+			for (const auto& info : peers) {
+				if (info.welcomed && info.slot == player.slot) entry.ping = info.rtt;
+			}
+			state.players.push_back(std::move(entry));
+		}
+		// before the game runs there are six slots to hand out, BG style
+		const Game* game = core->GetGame();
+		int slots = game && game->GetPartySize(false) ? game->GetPartySize(false) : NET_PARTY_SLOTS;
+		for (int slot = 1; slot <= slots && slot <= NET_PARTY_SLOTS; ++slot) {
+			NetLobbySlot entry;
+			entry.partySlot = uint8_t(slot);
+			entry.owner = NetSlotOwner(entry.partySlot, assigned, roster);
+			entry.controller = NetSlotController(entry.partySlot, assigned, roster);
+			const Actor* pc = game ? game->FindPC(slot) : nullptr;
+			if (pc) entry.name = Utf8(pc->GetShortName());
+			state.party.push_back(std::move(entry));
+		}
+		return state;
+	}
+
+	// everyone gets the lobby whenever it changes (and now and then for the pings)
+	void SendLobby(bool force = false)
+	{
+		NetLobbyState state = BuildLobby();
+		NetLobbyState noPings = state;
+		for (auto& player : noPings.players) {
+			player.ping = 0;
+		}
+		auto data = NetEncode(noPings);
+		uint64_t hash = NetHash(data.data(), data.size());
+		tick_t now = GetMilliseconds();
+		if (hash == lobbyHash && !force && now - lobbySentAt < LOBBY_REFRESH) return;
+		if (hash != lobbyHash) {
+			std::string list;
+			for (const auto& player : state.players) {
+				list += fmt::format(" {}:'{}'{}{}", player.slot, player.name, player.flags & NetLobbyPlayer::CONNECTED ? "" : " (away)", player.flags & NetLobbyPlayer::READY ? " ready" : "");
+			}
+			std::string party;
+			for (const auto& slot : state.party) {
+				party += fmt::format(" {}->{}{}", slot.partySlot, slot.owner, slot.controller != slot.owner ? fmt::format("(host meanwhile)") : "");
+			}
+			Log(MESSAGE, "Net", "Lobby ({}): players{}; party slots{}.", phase == NetPhase::Lobby ? "waiting" : "in game", list, party);
+			lobbyRevision++;
+		}
+		lobbyHash = hash;
+		lobbySentAt = now;
+		lobby = std::move(state);
+		Broadcast(lobby);
+	}
+
+	bool Assign(uint8_t partySlot, uint8_t playerSlot)
+	{
+		// players may join later, until then the slot goes by the default
+		if (mode != Mode::Host || !partySlot || partySlot > NET_PARTY_SLOTS || playerSlot > NET_MAX_PEERS) return false;
+		assigned[partySlot] = playerSlot;
+		Log(MESSAGE, "Net", "Party slot {} assigned to player slot {}.", partySlot, playerSlot);
+		SendLobby();
+		return true;
+	}
+
+	bool SetPermission(uint8_t slot, NetPermission perm, bool allowed)
+	{
+		if (mode != Mode::Host || slot == NET_HOST_SLOT || perm == NetPermission::Control || perm >= NetPermission::count) return false;
+		permissions.Set(slot, perm, allowed);
+		Log(MESSAGE, "Net", "Slot {}: {} permission {}.", slot, NetPermissionName(perm), allowed ? "granted" : "taken away");
+		SendLobby();
+		return true;
+	}
+
+	bool CanStart() const
+	{
+		return mode == Mode::Host && phase == NetPhase::Lobby && roster.AllReady();
+	}
+
+	bool StartGame()
+	{
+		if (!CanStart()) {
+			Log(WARNING, "Net", "Not starting: {}.", phase != NetPhase::Lobby ? "the game runs already" : "not everyone is ready");
+			return false;
+		}
+		phase = NetPhase::Game;
+		size_t count = 0;
+		for (auto& info : peers) {
+			if (!info.welcomed) continue;
+			info.wantsSave = true;
+			count++;
+		}
+		Log(MESSAGE, "Net", "Starting the game for {} player(s); they get it once it runs.", count);
+		SendLobby(true);
+		return true;
+	}
+
+	// our own permissions: the host may do everything, clients what the lobby says
+	bool MayI(NetPermission perm) const
+	{
+		if (mode == Mode::Host) return true;
+		return myPermissions.Allowed(slot, perm, slot);
 	}
 
 	bool SpawnMessage(const Actor* actor, NetSpawn& spawn) const
@@ -1962,13 +2429,20 @@ struct NetSession::Impl {
 	{
 		const Game* game = core->GetGame();
 		std::map<ieDword, std::string> party;
+		std::vector<ieDword> members;
+		bool oneArea = true;
 		for (int slot = 1; slot <= game->GetPartySize(false); ++slot) {
 			const Actor* pc = game->FindPC(slot);
-			if (pc && pc->GetCurrentArea()) {
+			if (!pc) continue;
+			members.push_back(pc->GetGlobalID());
+			if (pc->GetCurrentArea()) {
 				party[pc->GetGlobalID()] = std::string(pc->GetCurrentArea()->GetScriptRef());
 			}
+			oneArea &= pc->GetCurrentArea() == map;
 		}
-		if (!partyAreas.empty() && party != partyAreas) {
+		if (!partyAreas.empty() && (party != partyAreas || members != partyMembers)) {
+			// joins, leaves and a new party order need a save; only moving, the area is enough
+			partyChanged |= members != partyMembers;
 			if (!areaSettle) {
 				Log(MESSAGE, "Net", "The party changed (areas or members); the clients follow once it settles.");
 			}
@@ -1982,16 +2456,85 @@ struct NetSession::Impl {
 			}
 		}
 		partyAreas = std::move(party);
+		partyMembers = std::move(members);
 
 		if (areaSettle && --areaSettle == 0) {
+			NetAreaChangeInfo change;
+			change.lightEnabled = lightAreas;
+			change.partyChanged = partyChanged;
+			change.oneArea = oneArea;
+			change.noSave = map->AreaFlags & AF_NOSAVE;
+			bool light = NetAreaChangeKind(change) == NetAreaFollow::Area;
 			size_t count = 0;
 			for (auto& info : peers) {
 				if (!info.welcomed) continue;
-				info.wantsSave = true;
+				// players in sync get the area, the others (joining, loading) a save anyway
+				change.peerLive = info.live && !info.transfer && !info.wantsSave;
+				if (NetAreaChangeKind(change) == NetAreaFollow::Area) {
+					info.wantsArea = true;
+				} else {
+					info.wantsSave = true;
+				}
+				info.areaChangeAt = GetMilliseconds();
 				count++;
 			}
-			Log(MESSAGE, "Net", "Party settled in {}: resyncing {} player(s).", map->GetScriptRef(), count);
+			Log(MESSAGE, "Net", "Party settled in {}: {} {} player(s).", map->GetScriptRef(), light ? "sending the area to" : "resyncing", count);
+			partyChanged = false;
 		}
+	}
+
+	// the party's area as an ARE file, the way a save stores it, and who is who in it
+	bool TakeAreaSnapshot(NetAreaData& out, NetActorTable& table)
+	{
+		const Actor* first = GameReady();
+		if (!first) return false;
+		tick_t start = GetMilliseconds();
+		Map* map = first->GetCurrentArea();
+		auto mm = GetImporter<MapMgr>(IE_ARE_CLASS_ID);
+		int size = mm ? mm->GetStoredFileSize(map) : 0;
+		if (size <= 0 || size_t(size) > NET_MAX_AREA_SIZE) {
+			Log(ERROR, "Net", "Unable to size area {} for the clients ({}).", map->GetScriptRef(), size);
+			return false;
+		}
+		void* buffer = malloc(size);
+		MemoryStream stream("netarea.are", buffer, size); // owns the buffer
+		if (mm->PutArea(&stream, map) != GEM_OK) {
+			Log(ERROR, "Net", "Unable to write area {} for the clients.", map->GetScriptRef());
+			return false;
+		}
+		const uint8_t* bytes = static_cast<const uint8_t*>(buffer);
+		out.are.assign(bytes, bytes + size);
+		out.area = std::string(map->GetScriptRef());
+		const Game* game = core->GetGame();
+		for (int slot = 1; slot <= game->GetPartySize(false); ++slot) {
+			const Actor* pc = game->FindPC(slot);
+			if (!pc) continue;
+			out.party.push_back(NetAreaPartyEntry { pc->GetGlobalID(), uint8_t(slot), pc->Pos.x, pc->Pos.y, uint8_t(pc->GetOrientation()) });
+		}
+		table.actors = NetAreaTable(ListActors(), out.area);
+		Log(MESSAGE, "Net", "Area data of {} written in {} ms: ARE {} bytes, {} party members, {} actors and objects.", out.area, GetMilliseconds() - start, size, out.party.size(), table.actors.size());
+		return true;
+	}
+
+	// global variables the clients don't know yet; the GUI reads some (eg. the chapter)
+	void TrackGlobals()
+	{
+		const Game* game = core->GetGame();
+		if (!game) return;
+		std::map<std::string, int32_t> now;
+		for (const auto& var : game->locals) {
+			now[std::string(var.first.c_str())] = int32_t(var.second);
+		}
+		NetGlobals msg;
+		msg.vars = NetVariablesDiff(knownGlobals, now);
+		knownGlobals = std::move(now);
+		if (msg.vars.empty()) return;
+		SendEvent(msg, true);
+		std::string list;
+		for (size_t i = 0; i < msg.vars.size() && i < 6; ++i) {
+			list += fmt::format(" {}={}", msg.vars[i].name, msg.vars[i].value);
+		}
+		Log(MESSAGE, "Net", "Event: {} global(s) changed:{}{}", msg.vars.size(), list, msg.vars.size() > 6 ? " ..." : "");
 	}
 
 	// spawns, despawns, door/container/region changes and actor effects in the replicated area
@@ -2100,6 +2643,8 @@ struct NetSession::Impl {
 
 	void HostPostTick()
 	{
+		Heartbeats();
+		SendLobby();
 		if (GameReady()) {
 			hostGameTicks++;
 			testTicks++;
@@ -2141,6 +2686,7 @@ struct NetSession::Impl {
 		}
 		state.actors = delta.Build(state.tick, keyframe, current);
 		if (keyframe) {
+			TrackGlobals();
 			size_t count = 0;
 			state.flags = NetActorState::KEYFRAME | NetActorState::CHECKSUM;
 			state.checksum = Checksum(area, count);
@@ -2176,7 +2722,7 @@ struct NetSession::Impl {
 
 	void OnFeedback(const String& markup)
 	{
-		if (!Capturing()) return;
+		if (!Capturing() || localMessage) return;
 		if (guiCaller) {
 			// what a remote player's GUI call says is for that player
 			NetText msg;
@@ -2298,7 +2844,10 @@ struct NetSession::Impl {
 					if (!NetDecode(data, size, welcome)) return false;
 					state = ClientState::Joining;
 					slot = welcome.slot;
-					Log(MESSAGE, "Net", "Welcomed by host '{}', we are slot {}. Waiting for the game...", welcome.hostName, slot);
+					token = welcome.token;
+					bool inGame = welcome.flags & NetWelcome::IN_GAME;
+					Log(MESSAGE, "Net", "Welcomed by host '{}', we are slot {}{}. {}", welcome.hostName, slot, welcome.flags & NetWelcome::REJOINED ? " again (rejoined)" : "", inGame ? "Waiting for the game..." : "Waiting in the lobby.");
+					SetStatus(inGame ? "Loading the host's game" : "Waiting for the host to start the game");
 					if (!testChat.empty()) {
 						SendChat(testChat);
 						testChat.clear();
@@ -2311,6 +2860,7 @@ struct NetSession::Impl {
 					if (!NetDecode(data, size, reject)) return false;
 					stopped = true;
 					LeaveGame(fmt::format("The host rejected us: {}", reject.reason));
+					SetStatus(fmt::format("Rejected: {}", reject.reason));
 					return true;
 				}
 			case NetMsgType::Chat:
@@ -2368,6 +2918,29 @@ struct NetSession::Impl {
 					ApplyState(snapshot);
 					return true;
 				}
+			case NetMsgType::Heartbeat:
+				{
+					NetHeartbeat beat;
+					if (!NetDecode(data, size, beat)) return false;
+					hostTime = beat.time;
+					hostTimeAt = GetMilliseconds();
+					if (beat.echo) rtt = RoundTrip(beat);
+					return true;
+				}
+			case NetMsgType::LobbyState:
+				{
+					NetLobbyState msg;
+					if (state == ClientState::Connecting || !NetDecode(data, size, msg)) return false;
+					ApplyLobby(msg);
+					return true;
+				}
+			case NetMsgType::AreaData:
+				{
+					NetAreaData msg;
+					if (state == ClientState::Connecting || !NetDecode(data, size, msg)) return false;
+					ApplyAreaData(msg);
+					return true;
+				}
 			default:
 				break;
 		}
@@ -2391,9 +2964,12 @@ struct NetSession::Impl {
 			case NetMsgType::Pause:
 				return ClientEvent<NetPause>(data, size, live, [this](const NetPause& msg) { ApplyPause(msg); });
 			case NetMsgType::AreaChange:
-				return ClientEvent<NetAreaChange>(data, size, true, [](const NetAreaChange& msg) {
-					Log(MESSAGE, "Net", "The host's party moved to {}; the new area follows as a save.", msg.area);
+				return ClientEvent<NetAreaChange>(data, size, true, [this](const NetAreaChange& msg) {
+					areaChangeAt = GetMilliseconds();
+					Log(MESSAGE, "Net", "The host's party moved to {}; the new area follows.", msg.area);
 				});
+			case NetMsgType::Globals:
+				return ClientEvent<NetGlobals>(data, size, live, [this](const NetGlobals& msg) { ApplyGlobals(msg); });
 			case NetMsgType::Ownership:
 				return ClientEvent<NetOwnership>(data, size, true, [this](const NetOwnership& msg) { ApplyOwnership(msg); });
 			case NetMsgType::Dialog:
@@ -2463,9 +3039,97 @@ struct NetSession::Impl {
 		haveTable = false;
 		table = NetActorTable();
 		ForgetMappings();
+		lightLoad = false;
 		if (!stopped) {
+			SetStatus("Lost the host, trying to reconnect");
 			Log(MESSAGE, "Net", "Will keep trying to reach the host.");
 		}
+	}
+
+	void ApplyLobby(const NetLobbyState& msg)
+	{
+		uint32_t before = myPermissions.Mask(slot);
+		phase = msg.phase;
+		for (const auto& player : msg.players) {
+			if (player.slot != NET_HOST_SLOT) myPermissions.SetMask(player.slot, player.allowed);
+		}
+		bool first = lobby.players.empty();
+		lobby = msg;
+		lobbyRevision++;
+		uint32_t now = myPermissions.Mask(slot);
+		if (first || now != before) {
+			std::string list;
+			for (uint8_t raw = uint8_t(NetPermission::Purchase); raw < uint8_t(NetPermission::count); ++raw) {
+				list += fmt::format(" {}{}", now & (1u << raw) ? "+" : "-", NetPermissionName(NetPermission(raw)));
+			}
+			Log(MESSAGE, "Net", "Lobby: {} player(s), {}; our permissions:{}.", msg.players.size(), phase == NetPhase::Lobby ? "waiting for the host" : "in game", list);
+		}
+	}
+
+	void ApplyGlobals(const NetGlobals& msg)
+	{
+		Game* game = core->GetGame();
+		for (const auto& var : msg.vars) {
+			SetVariable(game, StringParam(var.name), ieDword(var.value), "GLOBAL");
+		}
+		Log(MESSAGE, "Net", "{} global(s) from the host{}.", msg.vars.size(), msg.vars.empty() ? "" : fmt::format(", eg. {}={}", msg.vars[0].name, msg.vars[0].value));
+	}
+
+	// can't follow with the area alone: ask for the whole game instead
+	void AreaDataFailed(const std::string& why)
+	{
+		Log(WARNING, "Net", "Can't load the area data: {}; asking for a save instead.", why);
+		NetResyncRequest request;
+		request.reason = NetResyncRequest::MANUAL;
+		if (server) Send(server, request);
+	}
+
+	// the party moved: load the new area from the host's copy and move our party members
+	// into it, the way MoveBetweenAreas does; the actor table follows and maps it
+	void ApplyAreaData(const NetAreaData& msg)
+	{
+		Game* game = core->GetGame();
+		if (state != ClientState::InSync || !game || !GameReady()) {
+			AreaDataFailed("we aren't in a game");
+			return;
+		}
+		tick_t start = GetMilliseconds();
+		ResRef area(msg.area.c_str());
+		// our copy is stale; it can't be the one we look at, all of the party left that
+		int idx = game->FindMap(area);
+		if (idx >= 0 && game->GetMap(unsigned(idx)) != game->GetCurrentArea()) {
+			// its return value doesn't say whether it did, so look
+			game->DelMap(unsigned(idx), true);
+		}
+		if (game->FindMap(area) >= 0) {
+			AreaDataFailed(fmt::format("our copy of {} can't be unloaded", area));
+			return;
+		}
+		// what a save of ours had of it is replaced too
+		core->saveGameAREExtractor.extractARE(area);
+		FileStream file;
+		if (!file.Create(area.c_str(), IE_ARE_CLASS_ID) || file.Write(msg.are.data(), msg.are.size()) != strret_t(msg.are.size())) {
+			AreaDataFailed(fmt::format("can't write {} into the cache", area));
+			return;
+		}
+		file.Close();
+		for (const auto& entry : msg.party) {
+			Actor* pc = game->FindPC(entry.partySlot);
+			if (!pc) continue;
+			MoveBetweenAreasCore(pc, area, Point(entry.x, entry.y), entry.orientation, false);
+		}
+		if (!game->GetMap(area, true)) {
+			AreaDataFailed(fmt::format("{} doesn't load", area));
+			return;
+		}
+		core->GetGameControl()->ChangeMap(game->FindPC(1), true);
+
+		loadingTransfer = msg.transferID;
+		haveTable = false;
+		ForgetMappings();
+		lightLoad = true;
+		state = ClientState::Loading;
+		Log(MESSAGE, "Net", "Area data #{}: loaded {} ({} bytes) and moved {} party member(s) there in {} ms.", msg.transferID, area, msg.are.size(), msg.party.size(), GetMilliseconds() - start);
 	}
 
 	path_t WriteReceivedSave(uint32_t transferID, const std::vector<NetFile>& files) const
@@ -2507,6 +3171,7 @@ struct NetSession::Impl {
 		// the same steps as loading from the menu: drop the running game, load, enter
 		// local scripts never run in between, since clients don't simulate
 		Log(MESSAGE, "Net", "Loading the host's game ({} files from '{}')...", files.size(), dir);
+		SetStatus("Loading the host's game");
 		auto save = MakeHolder<SaveGame>(dir, "network", core->GameNameResRef, "network", 0, 0);
 		if (core->GetGame()) {
 			core->QuitFlag |= QF_QUITGAME;
@@ -2560,9 +3225,13 @@ struct NetSession::Impl {
 			const NetActorTableEntry* mine = localByID[localID];
 			Log(MESSAGE, "Net", "Mapped net id {} '{}' party slot {} -> local id {} at ({}, {}), host had ({}, {})", entry.netID, entry.scriptName, entry.partySlot, localID, mine->x, mine->y, entry.x, entry.y);
 		}
-		// whatever the host doesn't have, doesn't exist
+		// whatever the host doesn't have, doesn't exist (in the areas it told us about)
+		std::set<std::string> areas;
+		for (const auto& entry : table.actors) {
+			areas.insert(entry.area);
+		}
 		for (const auto& entry : local) {
-			if (entry.kind != NetObjectKind::Actor || entry.partySlot || ids.Net(entry.netID)) continue;
+			if (entry.kind != NetObjectKind::Actor || entry.partySlot || ids.Net(entry.netID) || !areas.count(entry.area)) continue;
 			Actor* extra = core->GetGame()->GetActorByGlobalID(entry.netID);
 			if (!extra) continue;
 			Log(WARNING, "Net", "Local actor {} '{}' in {} has no host counterpart, removing it.", entry.netID, entry.scriptName, entry.area);
@@ -2578,7 +3247,13 @@ struct NetSession::Impl {
 		syncedTicks = 0;
 		haveTable = false;
 		table = NetActorTable();
-		Log(MESSAGE, "Net", "In sync with the host: save #{} loaded, replica mode on.", ready.transferID);
+		Log(MESSAGE, "Net", "In sync with the host: {} #{} loaded, replica mode on.", lightLoad ? "area data" : "save", ready.transferID);
+		if (areaChangeAt) {
+			Log(MESSAGE, "Net", "Area change done in {} ms ({}).", GetMilliseconds() - areaChangeAt, lightLoad ? "area data" : "full save");
+			areaChangeAt = 0;
+		}
+		lightLoad = false;
+		SetStatus("In game");
 		ReportTestVar("client after load");
 	}
 
@@ -2713,6 +3388,8 @@ struct NetSession::Impl {
 
 	void CompareChecksum(const Map* map, const NetActorState& snapshot)
 	{
+		// the party moved, our copy of the area it is in may be stale until the new one is in
+		if (areaChangeAt) return;
 		size_t count = 0;
 		uint64_t mine = Checksum(map, count);
 		if (mine == snapshot.checksum) {
@@ -3397,7 +4074,93 @@ except Exception as e:
 		return true;
 	}
 
-	void ForwardGuiCall(NetGuiOp op, std::vector<int32_t> args)
+	// the party member a GUI call is about, here
+	static const Actor* GuiCallActor(const NetGuiOpInfo& opInfo, const std::vector<int32_t>& args)
+	{
+		const Game* game = core->GetGame();
+		if (!game || opInfo.actorArg < 0 || size_t(opInfo.actorArg) >= args.size()) return nullptr;
+		int32_t arg = args[size_t(opInfo.actorArg)];
+		if (arg > 1000) return game->GetActorByGlobalID(ieDword(arg));
+		return arg > 0 ? game->FindPC(arg) : nullptr;
+	}
+
+	// tell our player, at most every couple of seconds per party member
+	void RefuseActor(const Actor& actor, uint8_t owner)
+	{
+		tick_t now = GetMilliseconds();
+		tick_t& last = refusals[actor.GetGlobalID()];
+		if (last && now - last < REFUSAL_THROTTLE) return;
+		last = now;
+		Log(MESSAGE, "Net", "Refused locally: {} (id {}) is controlled by player {}.", fmt::WideToChar { actor.GetShortName() }, actor.GetGlobalID(), owner);
+		ShowLocal(fmt::format("{} is controlled by player {}.", fmt::WideToChar { actor.GetShortName() }, owner));
+	}
+
+	// for our own player only
+	void ShowLocal(const std::string& text)
+	{
+		localMessage = true;
+		displaymsg->DisplayMarkupString(StringFromUtf8(fmt::format("[p][color=FF8080FF]{}[/color][/p]", text).c_str()));
+		localMessage = false;
+	}
+
+	void RefusePermission(NetPermission perm)
+	{
+		Log(MESSAGE, "Net", "Refused locally: no {} permission.", NetPermissionName(perm));
+		ShowLocal(fmt::format("The host doesn't let you do that (no {} permission).", NetPermissionName(perm)));
+	}
+
+	// who controls a party member, as far as we know; -1 when we can't tell
+	int Controller(const Actor& actor) const
+	{
+		if (!actor.InParty) return -1;
+		if (mode == Mode::Host) return OwnerOf(&actor);
+		auto it = myOwners.find(ids.Net(actor.GetGlobalID()));
+		return it == myOwners.end() ? -1 : it->second;
+	}
+
+	bool MayOrder(const Actor& actor)
+	{
+		if (mode == Mode::Client && state != ClientState::InSync) return true;
+		int owner = Controller(actor);
+		uint8_t me = mode == Mode::Host ? NET_HOST_SLOT : slot;
+		if (owner < 0 || owner == me) return true;
+		RefuseActor(actor, uint8_t(owner));
+		return false;
+	}
+
+	// a party swap keeps players with their characters, not with the slots
+	void SwapAssignments(int a, int b)
+	{
+		if (a < 1 || b < 1 || a > NET_PARTY_SLOTS || b > NET_PARTY_SLOTS || a == b) return;
+		uint8_t ownerA = NetSlotOwner(uint8_t(a), assigned, roster);
+		uint8_t ownerB = NetSlotOwner(uint8_t(b), assigned, roster);
+		assigned[uint8_t(a)] = ownerB;
+		assigned[uint8_t(b)] = ownerA;
+		Log(MESSAGE, "Net", "Party slots {} and {} swap places; their players go with them.", a, b);
+	}
+
+	bool GuiCall(NetGuiOp op, std::vector<int32_t> args, const std::string& text)
+	{
+		NetGuiOpInfo opInfo = NetGuiInfo(op);
+		if (mode == Mode::Host) {
+			if (op == NetGuiOp::SwapPCs && args.size() >= 2) SwapAssignments(args[0], args[1]);
+			// a remote player's call, checked already
+			if (guiCaller) return true;
+			const Actor* actor = GuiCallActor(opInfo, args);
+			return !actor || MayOrder(*actor);
+		}
+		if (state != ClientState::InSync || !server) return true;
+		const Actor* actor = GuiCallActor(opInfo, args);
+		if (actor && !MayOrder(*actor)) return false;
+		if (opInfo.permission != NetPermission::Control && !MayI(opInfo.permission)) {
+			RefusePermission(opInfo.permission);
+			return false;
+		}
+		ForwardGuiCall(op, std::move(args), text);
+		return !opInfo.hostOnly;
+	}
+
+	void ForwardGuiCall(NetGuiOp op, std::vector<int32_t> args, const std::string& text)
 	{
 		if (mode != Mode::Client || state != ClientState::InSync || !server) return;
 		NetGuiOpInfo opInfo = NetGuiInfo(op);
@@ -3405,6 +4168,7 @@ except Exception as e:
 		call.op = op;
 		call.selected = uint8_t(core->GetGame()->GetSelectedPCSingle());
 		call.args = std::move(args);
+		call.text = text;
 		if (opInfo.actorArg >= 0 && size_t(opInfo.actorArg) < call.args.size() && call.args[size_t(opInfo.actorArg)] > 1000) {
 			int32_t& actor = call.args[size_t(opInfo.actorArg)];
 			uint32_t netID = ids.Net(ieDword(actor));
@@ -3419,7 +4183,7 @@ except Exception as e:
 		for (int32_t arg : call.args) {
 			list += fmt::format("{}{}", list.empty() ? "" : ", ", arg);
 		}
-		Log(MESSAGE, "Net", "Forwarded GUI call {}({}), selected PC {}.", opInfo.name, list, call.selected);
+		Log(MESSAGE, "Net", "Forwarded GUI call {}({}){}, selected PC {}.", opInfo.name, list, call.text.empty() ? "" : fmt::format(" '{}'", call.text), call.selected);
 	}
 
 	// orders ----------------------------------------------------------------
@@ -3436,6 +4200,10 @@ except Exception as e:
 	bool ForwardAction(const Actor& actor, const Action& action, uint8_t flags)
 	{
 		if (state != ClientState::InSync || !server) return false;
+		if (ActionName(action.actionID) == "nidspecial1" && !MayI(NetPermission::Dialog)) {
+			RefusePermission(NetPermission::Dialog);
+			return false;
+		}
 		NetCommand cmd;
 		cmd.actorID = ids.Net(actor.GetGlobalID());
 		if (!cmd.actorID) {
@@ -3480,6 +4248,10 @@ except Exception as e:
 	bool ForwardUseExit(const Actor& actor, const Scriptable& exit)
 	{
 		if (state != ClientState::InSync || !server) return false;
+		if (!MayI(NetPermission::AreaTransition)) {
+			RefusePermission(NetPermission::AreaTransition);
+			return false;
+		}
 		NetCommand cmd;
 		cmd.actorID = ids.Net(actor.GetGlobalID());
 		cmd.action = "useexit";
@@ -3651,7 +4423,7 @@ except Exception as e:
 			Actor* actor = FindActorNamed(arg1);
 			if (actor) actor->overHead.SetText(StringFromUtf8(arg2.c_str()), true, true, ColorWhite);
 		} else if (verb == "owner") {
-			ownerOverride[uint8_t(atoi(arg1.c_str()))] = uint8_t(atoi(arg2.c_str()));
+			Assign(uint8_t(atoi(arg1.c_str())), uint8_t(atoi(arg2.c_str())));
 		} else if (verb == "perm") {
 			// perm SLOT PERMISSION 0|1, PERMISSION as NetPermissionName with _ for spaces
 			std::string permName = arg2.substr(0, arg2.find(' '));
@@ -3662,8 +4434,13 @@ except Exception as e:
 				Log(MESSAGE, "Net", "Test hook: slot {} {} {}.", arg1, arg2.back() == '1' ? "may now" : "may no longer", permName);
 			}
 		} else if (verb == "talk") {
+			// the GUI doesn't let anyone click while a conversation is up
 			const Actor* target = FindActorNamed(arg);
-			if (selected && target) gc->TryToTalk(selected, target);
+			if (gc->InDialog()) {
+				Log(MESSAGE, "Net", "Test hook: not talking, a conversation is up.");
+			} else if (selected && target) {
+				gc->TryToTalk(selected, target);
+			}
 		} else if (verb == "npctalk") {
 			// npctalk NAME N: what a creature script's Dialogue(PlayerN) does
 			Actor* actor = FindActorNamed(arg1);
@@ -3694,9 +4471,47 @@ except Exception as e:
 			core->GetGUIScriptEngine()->ExecString(code);
 		} else if (verb == "report") {
 			Report();
+		} else if (verb == "drop" && mode == Mode::Client && server) {
+			// the connection goes away without a word, as with a crash or a cable pulled
+			enet_peer_disconnect_now(server, 0);
+			server = nullptr;
+			LeaveGame("Test hook: dropped our connection to the host.");
+			nextConnectAttempt = GetMilliseconds() + RECONNECT_DELAY;
+		} else if (verb == "rawgui" && mode == Mode::Client && server) {
+			// rawgui OP ARGS...: a GUI call straight to the host, past our own checks (actors as party slots)
+			NetGuiCall call;
+			call.op = NetGuiOp(atoi(arg1.c_str()));
+			call.selected = uint8_t(game->GetSelectedPCSingle());
+			for (size_t pos = arg.find(' '); pos != std::string::npos; pos = arg.find(' ', pos + 1)) {
+				call.args.push_back(atoi(arg.c_str() + pos + 1));
+			}
+			Send(server, call);
+		} else if (verb == "rawexit" && mode == Mode::Client && server && selected) {
+			// rawexit REGION: UseExit straight to the host, past our own permission check
+			const InfoPoint* exit = game->GetCurrentArea()->GetTileMap()->GetInfoPoint(ieVariable(arg.c_str()));
+			NetCommand cmd;
+			cmd.actorID = ids.Net(selected->GetGlobalID());
+			cmd.action = "useexit";
+			cmd.int0 = exit ? int32_t(ids.Net(exit->GetGlobalID())) : 0;
+			Send(server, cmd);
+		} else if (verb == "hang") {
+			// no polling and no heartbeats for that many seconds, like a hung process
+			hangUntil = GetMilliseconds() + tick_t(atoi(arg.c_str())) * 1000;
+			Log(MESSAGE, "Net", "Test hook: not listening to the network for {} s.", atoi(arg.c_str()));
+		} else if (verb == "lobby") {
+			Log(MESSAGE, "Net", "Test hook: lobby is {}.", Utf8(StringFromUtf8(LobbyLine().c_str())));
 		} else {
 			Log(WARNING, "Net", "Unknown test order '{}'.", order);
 		}
+	}
+
+	std::string LobbyLine() const
+	{
+		std::string line = fmt::format("{}, we are slot {}", phase == NetPhase::Lobby ? "waiting" : "in game", mode == Mode::Host ? NET_HOST_SLOT : slot);
+		for (const auto& slotEntry : lobby.party) {
+			line += fmt::format("; PC {} '{}' owner {} controller {}", slotEntry.partySlot, slotEntry.name, slotEntry.owner, slotEntry.controller);
+		}
+		return line;
 	}
 
 	// NetTestOrders "report": what both sides should agree on, for comparing logs
@@ -3704,7 +4519,7 @@ except Exception as e:
 	{
 		const Game* game = core->GetGame();
 		const char* side = mode == Mode::Host ? "host" : "client";
-		Log(MESSAGE, "Net", "Report ({}): party gold {}, reputation {}.", side, game->PartyGold, game->Reputation);
+		Log(MESSAGE, "Net", "Report ({}): party gold {}, reputation {}, formation {}, {} journal entries, {} map notes in {}, game time {}.", side, game->PartyGold, game->Reputation, game->WhichFormation, game->GetJournalCount(), game->GetCurrentArea()->GetMapNoteCount(), game->GetCurrentArea()->GetScriptRef(), game->GameTime);
 		for (int pcSlot = 1; pcSlot <= game->GetPartySize(false); ++pcSlot) {
 			const Actor* pc = game->FindPC(pcSlot);
 			if (!pc) continue;
@@ -3714,7 +4529,7 @@ except Exception as e:
 				items += fmt::format(" {}:{}x{}", item.slot, item.resref, item.usages[0]);
 			}
 			NetSpellbook book = SpellbookMessage(pc);
-			Log(MESSAGE, "Net", "Report ({}): PC {} {} XP {} hp {} equipped {}, {} spells ready, items:{}", side, pcSlot, fmt::WideToChar { pc->GetShortName() }, pc->GetStat(IE_XP), pc->GetStat(IE_HITPOINTS), inv.equipped, CountReady(book), items);
+			Log(MESSAGE, "Net", "Report ({}): PC {} {} (net id {}) XP {} hp {} modal {} equipped {}, {} spells ready, items:{}", side, pcSlot, fmt::WideToChar { pc->GetShortName() }, mode == Mode::Host ? pc->GetGlobalID() : ids.Net(pc->GetGlobalID()), pc->GetStat(IE_XP), pc->GetStat(IE_HITPOINTS), int(pc->Modal.State), inv.equipped, CountReady(book), items);
 		}
 		for (const auto& holder : game->GetCurrentArea()->GetTileMap()->GetContainers()) {
 			const Container* container = holder.get();
@@ -3783,7 +4598,7 @@ except Exception as e:
 	}
 };
 
-std::unique_ptr<NetSession> NetSession::Create(const CoreSettings& config)
+std::unique_ptr<NetSession> NetSession::Create(const CoreSettings& config, bool lobby)
 {
 	if (config.NetMode.empty()) return nullptr;
 
@@ -3801,9 +4616,14 @@ std::unique_ptr<NetSession> NetSession::Create(const CoreSettings& config)
 		return nullptr;
 	}
 
-	auto impl = std::make_unique<Impl>(mode, config);
+	auto impl = std::make_unique<Impl>(mode, config, lobby);
 	if (!impl->Start()) return nullptr;
 	return std::unique_ptr<NetSession>(new NetSession(mode, std::move(impl)));
+}
+
+bool NetSession::Available()
+{
+	return true;
 }
 
 bool NetSession::IsReplica() const
@@ -3838,8 +4658,10 @@ void NetSession::PostTick()
 	if (mode == Mode::Host) {
 		impl->capturing = false;
 		impl->HostPostTick();
+	} else {
+		impl->Heartbeats();
 	}
-	enet_host_flush(impl->host);
+	if (!impl->Hanging()) enet_host_flush(impl->host);
 }
 
 void NetSession::Frame()
@@ -3937,16 +4759,90 @@ bool NetSession::ForwardRegionClick(const Actor& actor, const InfoPoint& region)
 	return impl->ForwardRegionClick(actor, region);
 }
 
-void NetSession::ForwardGuiCall(NetGuiOp op, std::vector<int32_t> args)
+bool NetSession::GuiCall(NetGuiOp op, std::vector<int32_t> args, const std::string& text)
 {
-	impl->ForwardGuiCall(op, std::move(args));
+	return impl->GuiCall(op, std::move(args), text);
+}
+
+bool NetSession::MayOrder(const Actor& actor)
+{
+	return impl->MayOrder(actor);
+}
+
+NetPhase NetSession::GetPhase() const
+{
+	return impl->phase;
+}
+
+const NetLobbyState& NetSession::GetLobby() const
+{
+	return impl->lobby;
+}
+
+uint32_t NetSession::GetLobbyRevision() const
+{
+	return impl->lobbyRevision;
+}
+
+uint8_t NetSession::GetSlot() const
+{
+	return mode == Mode::Host ? NET_HOST_SLOT : impl->slot;
+}
+
+const std::string& NetSession::GetStatus() const
+{
+	return impl->status;
+}
+
+const std::vector<std::string>& NetSession::GetChatLog() const
+{
+	return impl->chatLog;
+}
+
+bool NetSession::Allowed(NetPermission perm) const
+{
+	return impl->MayI(perm);
+}
+
+void NetSession::SetReady(bool ready)
+{
+	if (mode == Mode::Host) {
+		impl->roster.SetReady(NET_HOST_SLOT, ready);
+		Log(MESSAGE, "Net", "We (the host) are {}.", ready ? "ready" : "not ready");
+		impl->SendLobby();
+	} else if (impl->server && impl->state != Impl::ClientState::Connecting) {
+		NetLobbyReady msg;
+		msg.ready = ready;
+		impl->Send(impl->server, msg);
+		Log(MESSAGE, "Net", "Told the host we are {}.", ready ? "ready" : "not ready");
+	}
+}
+
+bool NetSession::Assign(uint8_t partySlot, uint8_t playerSlot)
+{
+	return impl->Assign(partySlot, playerSlot);
+}
+
+bool NetSession::SetPermission(uint8_t slot, NetPermission perm, bool allowed)
+{
+	return impl->SetPermission(slot, perm, allowed);
+}
+
+bool NetSession::StartGame()
+{
+	return impl->StartGame();
+}
+
+bool NetSession::CanStart() const
+{
+	return impl->CanStart();
 }
 
 #else // HAVE_ENET
 
 struct NetSession::Impl {};
 
-std::unique_ptr<NetSession> NetSession::Create(const CoreSettings& config)
+std::unique_ptr<NetSession> NetSession::Create(const CoreSettings& config, bool)
 {
 	if (!config.NetMode.empty()) {
 		Log(ERROR, "Net", "NetMode is set, but this build has no networking (ENet wasn't found).");
@@ -4016,7 +4912,80 @@ bool NetSession::ForwardRegionClick(const Actor&, const InfoPoint&)
 	return false;
 }
 
-void NetSession::ForwardGuiCall(NetGuiOp, std::vector<int32_t>) {}
+bool NetSession::GuiCall(NetGuiOp, std::vector<int32_t>, const std::string&)
+{
+	return true;
+}
+
+bool NetSession::MayOrder(const Actor&)
+{
+	return true;
+}
+
+bool NetSession::Available()
+{
+	return false;
+}
+
+NetPhase NetSession::GetPhase() const
+{
+	return NetPhase::Lobby;
+}
+
+const NetLobbyState& NetSession::GetLobby() const
+{
+	static const NetLobbyState none;
+	return none;
+}
+
+uint32_t NetSession::GetLobbyRevision() const
+{
+	return 0;
+}
+
+uint8_t NetSession::GetSlot() const
+{
+	return NET_HOST_SLOT;
+}
+
+const std::string& NetSession::GetStatus() const
+{
+	static const std::string none;
+	return none;
+}
+
+const std::vector<std::string>& NetSession::GetChatLog() const
+{
+	static const std::vector<std::string> none;
+	return none;
+}
+
+bool NetSession::Allowed(NetPermission) const
+{
+	return true;
+}
+
+void NetSession::SetReady(bool) {}
+
+bool NetSession::Assign(uint8_t, uint8_t)
+{
+	return false;
+}
+
+bool NetSession::SetPermission(uint8_t, NetPermission, bool)
+{
+	return false;
+}
+
+bool NetSession::StartGame()
+{
+	return false;
+}
+
+bool NetSession::CanStart() const
+{
+	return false;
+}
 
 #endif // HAVE_ENET
 

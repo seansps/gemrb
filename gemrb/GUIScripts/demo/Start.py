@@ -3,18 +3,19 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 import GemRB
+import NetLobby
 from GUIDefines import *
 
 Name = "Jora the Seeker"
 
 def OnLoad():
-	# co-op clients wait for the host's game instead of starting their own
+	# co-op clients wait in the lobby for the host's game instead of starting their own
 	if GemRB.NetGetMode () == "client":
-		JoinWindow()
+		NetLobby.OpenLobby (NewGame)
 		return
 
 	# shortcircuting support for easier development
-	if GemRB.GetVar ("SkipIntroVideos"):
+	if GemRB.GetVar ("SkipIntroVideos") and not GemRB.NetGetConfig ()["Test"]:
 		NewGame()
 		return
 
@@ -40,6 +41,15 @@ def OnLoad():
 	NameEdit.SetText(Name)
 	NameEdit.Focus()
 
+	# co-op, only where the build can network
+	if NetLobby.Available ():
+		frame = NewGameButton.GetFrame ()
+		# below New demo and Quit
+		MultiButton = StartWindow.CreateButton (10, frame["x"], frame["y"] + 2 * (frame["h"] + 10), frame["w"], frame["h"])
+		MultiButton.SetText ("Multiplayer")
+		MultiButton.OnPress (lambda: NetLobby.OpenMultiplayer (NewGame))
+		NetLobby.StartTest (NewGame)
+
 	GemRB.LoadMusicPL ("theme.mus")
 
 def NewGame():
@@ -47,19 +57,3 @@ def NewGame():
 	# this is needed, so the game loop runs and the load happens
 	# before other code (eg. CreatePlayer) depending on it is run
 	GemRB.SetNextScript("SetupGame")
-
-def JoinWindow():
-	# the engine loads the host's game once it arrives, which closes this window
-	StartWindow = GemRB.LoadWindow(0, "START")
-
-	JoinButton = StartWindow.GetControl(0)
-	JoinButton.SetText("Joining host...")
-	JoinButton.SetState(IE_GUI_BUTTON_DISABLED)
-	QuitGameButton = StartWindow.GetControl(1)
-	QuitGameButton.SetText("Quit")
-	QuitGameButton.OnPress (lambda: GemRB.Quit())
-	QuitGameButton.MakeEscape ()
-
-	VersionLabel = StartWindow.GetControl(0x10000002)
-	VersionLabel.SetText(GemRB.Version)
-	StartWindow.GetControl(3).SetVisible(False)

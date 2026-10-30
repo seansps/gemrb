@@ -117,6 +117,12 @@ struct CoreSettings {
 	std::string NetHost = "127.0.0.1";
 	int NetPort = 27015;
 	std::string NetName = "Player";
+	// ms without a word from the other side before a connection counts as lost
+	int NetTimeout = 10000;
+	// area changes send the new area only (0: a whole save, as M1.4 did)
+	int NetLightAreas = 1;
+	// test hook for the lobby GUI: steps its script runs, see GUIScripts/NetLobby.py
+	std::string NetTestLobby;
 	// test hooks: send a chat line once joined; issue a party move ("x.y", or "x.y;x.y" for one per (re)sync)
 	// once in sync (host: once in game);
 	// set a global on the host and report it on both sides ("NAME=value", or just "NAME" to report);

@@ -355,6 +355,7 @@ private:
 	std::deque<Timer> timers;
 	std::unique_ptr<KeyMap> keyMap;
 	std::unique_ptr<NetSession> netSession; // only set when networked co-op is enabled
+	bool stopNetSession = false; // the lobby left: ends before the next game loop tick
 	Scriptable* CutSceneRunner = nullptr;
 
 	int MaximumAbility = 0;
@@ -508,6 +509,10 @@ public:
 	GameControl* GetGameControl() const { return game ? gamectrl : nullptr; }
 	/** the co-op session, nullptr in single player */
 	NetSession* GetNetSession() const { return netSession.get(); }
+	/** the lobby GUI hosts or joins (mode host or client); false if a session runs already or it fails */
+	bool StartNetSession(const std::string& mode, const std::string& host, int port, const std::string& name);
+	/** the lobby GUI leaves; the session ends at the next tick, so this is safe from anywhere */
+	void StopNetSession();
 	/** if backtomain is not null then goes back to main screen */
 	void QuitGame(int backtomain);
 	/** sets up load game */

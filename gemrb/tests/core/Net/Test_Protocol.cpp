@@ -18,8 +18,8 @@ TEST(NetProtocolTest, HeaderLayout)
 	EXPECT_EQ(data[0], NET_MAGIC);
 	EXPECT_EQ(data[1], NET_PROTOCOL_VERSION);
 	EXPECT_EQ(data[2], uint8_t(NetMsgType::Hello));
-	// u16 length prefixed strings, little-endian
-	EXPECT_EQ(data.size(), NET_HEADER_SIZE + 2 + 4 + 2 + 4);
+	// u16 length prefixed strings, little-endian, then the u64 token
+	EXPECT_EQ(data.size(), NET_HEADER_SIZE + 2 + 4 + 2 + 4 + 8);
 	EXPECT_EQ(data[3], 4);
 	EXPECT_EQ(data[4], 0);
 	EXPECT_EQ(data[5], 'J');
@@ -724,6 +724,121 @@ TEST(NetProtocolTest, GuiCallStoreAndContainerRoundTrip)
 	EXPECT_EQ(open2.actorID, 10010U);
 	EXPECT_EQ(open2.containerID, 10004U);
 	ExpectStrict(open);
+}
+
+TEST(NetProtocolTest, LobbyAndIdentityRoundTrip)
+{
+	NetHello hello;
+	hello.name = "client";
+	hello.gameType = "demo";
+	hello.token = 0x0123456789ABCDEFULL;
+	NetHello hello2;
+	auto data = NetEncode(hello);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), hello2));
+	EXPECT_EQ(hello2.token, hello.token);
+
+	NetWelcome welcome;
+	welcome.slot = 3;
+	welcome.token = 42;
+	welcome.flags = NetWelcome::REJOINED | NetWelcome::IN_GAME;
+	NetWelcome welcome2;
+	data = NetEncode(welcome);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), welcome2));
+	EXPECT_EQ(welcome2.token, 42U);
+	EXPECT_EQ(welcome2.flags, NetWelcome::REJOINED | NetWelcome::IN_GAME);
+	data.back() = 0x80; // unknown flag
+	EXPECT_FALSE(NetDecode(data.data(), data.size(), welcome2));
+
+	NetLobbyState lobby;
+	lobby.phase = NetPhase::Game;
+	lobby.players.push_back(NetLobbyPlayer { 0, NetLobbyPlayer::CONNECTED | NetLobbyPlayer::READY, 0, "host", 0x7e });
+	lobby.players.push_back(NetLobbyPlayer { 2, 0, 35, "gone", 0x02 });
+	lobby.party.push_back(NetLobbySlot { 1, 0, 0, "Jora" });
+	lobby.party.push_back(NetLobbySlot { 2, 2, 0, "" });
+	NetLobbyState lobby2;
+	data = NetEncode(lobby);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), lobby2));
+	EXPECT_EQ(lobby2.phase, NetPhase::Game);
+	ASSERT_EQ(lobby2.players.size(), 2U);
+	EXPECT_EQ(lobby2.players[1].slot, 2);
+	EXPECT_EQ(lobby2.players[1].flags, 0);
+	EXPECT_EQ(lobby2.players[1].ping, 35);
+	EXPECT_EQ(lobby2.players[1].name, "gone");
+	EXPECT_EQ(lobby2.players[0].allowed, 0x7eU);
+	ASSERT_EQ(lobby2.party.size(), 2U);
+	EXPECT_EQ(lobby2.party[1].owner, 2);
+	EXPECT_EQ(lobby2.party[1].controller, 0);
+	EXPECT_EQ(lobby2.party[0].name, "Jora");
+	// party slots are 1-based and at most six
+	lobby.party[0].partySlot = 7;
+	data = NetEncode(lobby);
+	EXPECT_FALSE(NetDecode(data.data(), data.size(), lobby2));
+	lobby.party[0].partySlot = 1;
+	lobby.players[1].slot = NET_MAX_PEERS + 1;
+	data = NetEncode(lobby);
+	EXPECT_FALSE(NetDecode(data.data(), data.size(), lobby2));
+
+	NetLobbyReady ready;
+	ready.ready = 1;
+	NetLobbyReady ready2;
+	data = NetEncode(ready);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), ready2));
+	EXPECT_EQ(ready2.ready, 1);
+	data.back() = 2;
+	EXPECT_FALSE(NetDecode(data.data(), data.size(), ready2));
+
+	NetHeartbeat beat;
+	beat.seq = 7;
+	beat.time = 123456;
+	beat.echo = 123400;
+	beat.rtt = 12;
+	NetHeartbeat beat2;
+	data = NetEncode(beat);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), beat2));
+	EXPECT_EQ(beat2.seq, 7U);
+	EXPECT_EQ(beat2.echo, 123400U);
+	EXPECT_EQ(beat2.rtt, 12);
+}
+
+TEST(NetProtocolTest, AreaDataAndGlobalsRoundTrip)
+{
+	NetAreaData area;
+	area.transferID = 9;
+	area.area = "MPT02";
+	area.party.push_back(NetAreaPartyEntry { 10002, 1, 1500, 1600, 4 });
+	area.party.push_back(NetAreaPartyEntry { 10008, 2, 1520, 1610, 3 });
+	area.are = { 'A', 'R', 'E', 'A', 'V', '1', '.', '0', 0, 1, 2 };
+	NetAreaData area2;
+	auto data = NetEncode(area);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), area2));
+	EXPECT_EQ(area2.transferID, 9U);
+	EXPECT_EQ(area2.area, "MPT02");
+	ASSERT_EQ(area2.party.size(), 2U);
+	EXPECT_EQ(area2.party[1].netID, 10008U);
+	EXPECT_EQ(area2.party[1].y, 1610);
+	EXPECT_EQ(area2.party[1].orientation, 3);
+	EXPECT_EQ(area2.are, area.are);
+	data.pop_back();
+	EXPECT_FALSE(NetDecode(data.data(), data.size(), area2));
+
+	NetGlobals globals;
+	globals.vars.push_back(NetVariable { "MPT_GIFT", 1 });
+	globals.vars.push_back(NetVariable { "CHAPTER", -2 });
+	NetGlobals globals2;
+	data = NetEncode(globals);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), globals2));
+	EXPECT_EQ(globals2.vars, globals.vars);
+
+	NetGuiCall call;
+	call.op = NetGuiOp::SetMapnote;
+	call.args = { 100, 200, 1 };
+	call.text = u8"Tamsin's hut";
+	NetGuiCall call2;
+	data = NetEncode(call);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), call2));
+	EXPECT_EQ(call2.op, NetGuiOp::SetMapnote);
+	EXPECT_EQ(call2.args, call.args);
+	EXPECT_EQ(call2.text, call.text);
 }
 
 }

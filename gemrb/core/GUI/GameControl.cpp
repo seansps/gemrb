@@ -90,11 +90,14 @@ static Actor* GetMainSelectedActor()
 }
 
 // co-op clients don't simulate: they send player orders to the host instead (flags say
-// how it queues them, see NetCommand), and drop what can't be sent, since nothing would run it
+// how it queues them, see NetCommand), and drop what can't be sent, since nothing would run it;
+// on both sides only the player controlling a party member orders it (BG), the host included
 static bool ForwardOrder(const Actor* actor, const Holder<Action>& action, uint8_t flags = NetCommand::NONE)
 {
 	NetSession* net = core->GetNetSession();
-	if (!net || !net->IsReplica()) return false;
+	if (!net) return false;
+	if (actor && !net->MayOrder(*actor)) return true;
+	if (!net->IsReplica()) return false;
 	if (actor && action) {
 		net->ForwardAction(*actor, *action, flags);
 	}
@@ -2066,6 +2069,7 @@ void GameControl::HandleContainer(Container* container, Actor* actor)
 
 	// co-op: the host walks there, opens it and has our screen show it
 	NetSession* net = core->GetNetSession();
+	if (net && !net->MayOrder(*actor)) return;
 	if (net && net->IsReplica()) {
 		net->ForwardUseContainer(*actor, *container);
 		return;
@@ -2152,7 +2156,9 @@ bool GameControl::HandleActiveRegion(InfoPoint* trap, Actor* actor, const Point&
 			//reset trap and deactivated flags
 			if (trap->Scripts[0]) {
 				NetSession* net = core->GetNetSession();
-				if (net && net->IsReplica()) {
+				if (net && !net->MayOrder(*actor)) {
+					// someone else's party member
+				} else if (net && net->IsReplica()) {
 					// co-op: the script runs on the host
 					net->ForwardRegionClick(*actor, *trap);
 				} else if (!(trap->Flags & TRAP_DEACTIVATED) && !(GetDialogueFlags() & DF_FREEZE_SCRIPTS)) {
@@ -2434,6 +2440,7 @@ void GameControl::PerformSelectedAction(const Point& p)
 		// co-op clients tell the host who may pass; it also checks the whole party is near
 		NetSession* net = core->GetNetSession();
 		auto useExit = [net, exitID, this](Actor* actor) {
+			if (net && !net->MayOrder(*actor)) return;
 			if (net && net->IsReplica()) {
 				net->ForwardUseExit(*actor, *overMe);
 			} else {

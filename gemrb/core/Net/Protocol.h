@@ -29,7 +29,7 @@
 namespace GemRB {
 
 constexpr uint8_t NET_MAGIC = 0xE7;
-constexpr uint8_t NET_PROTOCOL_VERSION = 4;
+constexpr uint8_t NET_PROTOCOL_VERSION = 5;
 constexpr uint16_t NET_DEFAULT_PORT = 27015;
 constexpr size_t NET_HEADER_SIZE = 3;
 constexpr size_t NET_MAX_STRING = 1024;
@@ -50,6 +50,10 @@ constexpr size_t NET_OBJECT_FILTERS = 5;
 constexpr size_t NET_ACTION_OBJECTS = 3;
 // a GUI call carries at most this many integer arguments
 constexpr size_t NET_GUI_ARGS = 8;
+// BG style parties: six characters, each assigned to a player in the lobby
+constexpr uint8_t NET_PARTY_SLOTS = 6;
+// a lighter area change carries the area as an ARE file
+constexpr size_t NET_MAX_AREA_SIZE = 16 * 1024 * 1024;
 
 enum class NetChannel : uint8_t {
 	Reliable = 0, // ordered and reliable: handshake, chat, commands, events
@@ -89,6 +93,18 @@ enum class NetMsgType : uint8_t {
 	GuiCall, // client -> host, a state changing GemRB.* call from the GUI
 	StoreState, // host -> client, a store's stock; may open or close its window
 	ContainerOpen, // host -> client, a party member opened a container for its owner
+	Heartbeat, // both ways, unreliable: keeps the connection alive and measures the round trip
+	LobbyState, // host -> client, players, who controls which party slot, permissions
+	LobbyReady, // client -> host, the player's ready toggle
+	AreaData, // host -> client, the party moved: the new area as an ARE, instead of a whole save
+	Globals, // host -> client, global variables that changed
+	count
+};
+
+// before the host starts the game everyone is in the lobby; afterwards joins load the running game
+enum class NetPhase : uint8_t {
+	Lobby,
+	Game,
 	count
 };
 
@@ -155,6 +171,7 @@ struct GEM_EXPORT NetHello {
 	static constexpr NetMsgType Type = NetMsgType::Hello;
 	std::string name;
 	std::string gameType;
+	uint64_t token = 0; // from an earlier welcome in this session, so a returning player gets its slot back
 
 	void Write(NetWriter& w) const;
 	bool Read(NetReader& r);
@@ -162,8 +179,14 @@ struct GEM_EXPORT NetHello {
 
 struct GEM_EXPORT NetWelcome {
 	static constexpr NetMsgType Type = NetMsgType::Welcome;
+	enum Flags : uint8_t {
+		REJOINED = 1, // the token was known: same slot and characters as before
+		IN_GAME = 2 // the game runs already, a save follows; otherwise wait in the lobby
+	};
 	uint8_t slot = 0;
 	std::string hostName;
+	uint64_t token = 0; // the client's identity for this host session
+	uint8_t flags = 0;
 
 	void Write(NetWriter& w) const;
 	bool Read(NetReader& r);
@@ -609,6 +632,16 @@ enum class NetGuiOp : uint8_t {
 	MemorizeSpell, // actor, type, level, index, enabled
 	UnmemorizeSpell, // actor, type, level, index, flags
 	ChangeItemFlag, // actor, slot, flags, mode
+	RestParty, // checks, dream, hp
+	LeaveParty, // actor, dialog
+	SwapPCs, // party slot, party slot
+	SetFormation, // formation, which
+	SetModalState, // actor, state (text: the modal spell)
+	SetupQuickSlot, // actor, slot, action
+	SetupQuickSpell, // actor, slot, index, type
+	SetupQuickItemSlot, // actor, slot, inventory slot, header, translate
+	SetJournalEntry, // strref (-1: text), section, chapter, feedback (text: a new entry)
+	SetMapnote, // x, y, color (text: the note, empty removes it)
 	count
 };
 
@@ -617,6 +650,7 @@ struct GEM_EXPORT NetGuiCall {
 	NetGuiOp op = NetGuiOp::DragItem;
 	uint8_t selected = 0; // the client's GameGetSelectedPCSingle
 	std::vector<int32_t> args; // actors as network IDs (or party slots below 1000)
+	std::string text; // UTF-8, for the calls that take one
 
 	void Write(NetWriter& w) const;
 	bool Read(NetReader& r);
@@ -653,6 +687,90 @@ struct GEM_EXPORT NetContainerOpen {
 	uint32_t containerID = 0; // 0 for a pile at (x, y)
 	int32_t x = 0;
 	int32_t y = 0;
+
+	void Write(NetWriter& w) const;
+	bool Read(NetReader& r);
+};
+
+struct GEM_EXPORT NetHeartbeat {
+	static constexpr NetMsgType Type = NetMsgType::Heartbeat;
+	uint32_t seq = 0;
+	uint32_t time = 0; // sender's clock, ms
+	uint32_t echo = 0; // the time of the last heartbeat we got from the other side, for the round trip
+	uint16_t rtt = 0; // what the sender measured, ms (the host tells each client its own)
+
+	void Write(NetWriter& w) const;
+	bool Read(NetReader& r);
+};
+
+struct NetLobbyPlayer {
+	enum Flags : uint8_t {
+		CONNECTED = 1, // remembered players who left keep their slot (and characters) for a rejoin
+		READY = 2
+	};
+	uint8_t slot = 0;
+	uint8_t flags = 0;
+	uint16_t ping = 0; // ms
+	std::string name;
+	uint32_t allowed = 0; // bit per NetPermission
+};
+
+struct NetLobbySlot {
+	uint8_t partySlot = 0; // 1-based
+	uint8_t owner = 0; // the player it is assigned to
+	uint8_t controller = 0; // who controls it now: the owner, or the host while the owner is away
+	std::string name; // empty until the game runs
+};
+
+struct GEM_EXPORT NetLobbyState {
+	static constexpr NetMsgType Type = NetMsgType::LobbyState;
+	NetPhase phase = NetPhase::Lobby;
+	std::vector<NetLobbyPlayer> players;
+	std::vector<NetLobbySlot> party;
+
+	void Write(NetWriter& w) const;
+	bool Read(NetReader& r);
+};
+
+struct GEM_EXPORT NetLobbyReady {
+	static constexpr NetMsgType Type = NetMsgType::LobbyReady;
+	uint8_t ready = 0;
+
+	void Write(NetWriter& w) const;
+	bool Read(NetReader& r);
+};
+
+struct NetAreaPartyEntry {
+	uint32_t netID = 0;
+	uint8_t partySlot = 0;
+	int32_t x = 0;
+	int32_t y = 0;
+	uint8_t orientation = 0;
+};
+
+// the party moved to another area: the host's copy of it and where everyone stands; the
+// actor table with the same transfer ID follows, then the client reports Ready
+struct GEM_EXPORT NetAreaData {
+	static constexpr NetMsgType Type = NetMsgType::AreaData;
+	uint32_t transferID = 0;
+	std::string area;
+	std::vector<NetAreaPartyEntry> party;
+	std::vector<uint8_t> are; // the ARE file
+
+	void Write(NetWriter& w) const;
+	bool Read(NetReader& r);
+};
+
+struct NetVariable {
+	std::string name;
+	int32_t value = 0;
+
+	bool operator==(const NetVariable& other) const { return name == other.name && value == other.value; }
+};
+
+struct GEM_EXPORT NetGlobals {
+	static constexpr NetMsgType Type = NetMsgType::Globals;
+	std::vector<NetVariable> vars; // at most NET_MAX_ACTORS
 
 	void Write(NetWriter& w) const;
 	bool Read(NetReader& r);

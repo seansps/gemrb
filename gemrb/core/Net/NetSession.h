@@ -20,6 +20,7 @@
 #include "ie_types.h"
 
 #include "Net/Protocol.h"
+#include "Net/Replication.h"
 #include "Strings/String.h"
 #include "Strings/StringView.h"
 
@@ -50,8 +51,11 @@ public:
 		Client
 	};
 
-	/** returns nullptr when networking is off (NetMode unset) or unavailable (built without ENet) */
-	static std::unique_ptr<NetSession> Create(const CoreSettings& config);
+	/** returns nullptr when networking is off (NetMode unset) or unavailable (built without ENet);
+	 * a host started from the GUI (lobby) waits in its lobby, one from the config starts at once */
+	static std::unique_ptr<NetSession> Create(const CoreSettings& config, bool lobby = false);
+	/** whether this build can network at all */
+	static bool Available();
 
 	NetSession(const NetSession&) = delete;
 	NetSession& operator=(const NetSession&) = delete;
@@ -106,8 +110,30 @@ public:
 	/** client: the player clicked a container or an info point */
 	bool ForwardUseContainer(const Actor& actor, const Container& container);
 	bool ForwardRegionClick(const Actor& actor, const InfoPoint& region);
-	/** client: a state changing GemRB.* GUI call ran here; the host runs it too, and its result replicates back */
-	void ForwardGuiCall(NetGuiOp op, std::vector<int32_t> args);
+	/** a state changing GemRB.* GUI call is about to run: false if it is refused here (not our
+	 * party member, no permission); clients forward it, and false for the ones only the host runs */
+	bool GuiCall(NetGuiOp op, std::vector<int32_t> args, const std::string& text = std::string());
+	/** both sides: whether our player may order this party member; tells the player if not */
+	bool MayOrder(const Actor& actor);
+
+	// the lobby (M1.6): players, who controls which party slot, permissions, readiness, chat
+	NetPhase GetPhase() const;
+	/** players, party slots and permissions as the host has them; changes bump the revision */
+	const NetLobbyState& GetLobby() const;
+	uint32_t GetLobbyRevision() const;
+	uint8_t GetSlot() const;
+	/** for the lobby window, eg. "Waiting for the host to start the game" */
+	const std::string& GetStatus() const;
+	const std::vector<std::string>& GetChatLog() const;
+	/** whether we may do this, as the host decided (the host may do everything) */
+	bool Allowed(NetPermission perm) const;
+	void SetReady(bool ready);
+	// host only
+	bool Assign(uint8_t partySlot, uint8_t playerSlot);
+	bool SetPermission(uint8_t slot, NetPermission perm, bool allowed);
+	/** everyone is ready: from now on joins get the game, which the GUI starts next */
+	bool StartGame();
+	bool CanStart() const;
 
 private:
 	struct Impl;
