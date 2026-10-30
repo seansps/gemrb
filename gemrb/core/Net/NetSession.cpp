@@ -647,11 +647,17 @@ struct NetSession::Impl {
 		DisplayChatMarkup(markup);
 	}
 
-	// something only our player is told (a typo, an unknown name): not chat, not kept
+	// something only our player is told (a typo, an unknown name): a system line in our own
+	// chat (so the lobby shows it too), never sent anywhere
 	void ShowNotice(const std::string& text)
 	{
 		Log(MESSAGE, "Net", "Chat notice: {}", text);
-		DisplayChatMarkup(NetSystemMarkup(text));
+		NetChat notice;
+		notice.slot = MySlot();
+		notice.flags = NetChat::SYSTEM;
+		notice.name = name;
+		notice.text = text;
+		ShowChat(notice);
 	}
 
 	// host: remember a line for the history of players who join later
@@ -1081,6 +1087,10 @@ struct NetSession::Impl {
 	{
 		NetMsgType type;
 		if (!NetPeekType(data, size, type)) {
+			if (size >= NET_HEADER_SIZE && data[0] == NET_MAGIC && data[1] != NET_PROTOCOL_VERSION) {
+				Log(WARNING, "Net", "Dropping a packet from {}: it speaks protocol v{}, we speak v{}.", PeerAddress(peer), data[1], NET_PROTOCOL_VERSION);
+				return;
+			}
 			Log(WARNING, "Net", "Dropping malformed or incompatible packet ({} bytes) from {}.", size, PeerAddress(peer));
 			return;
 		}
@@ -4484,8 +4494,8 @@ except Exception as e:
 
 	// types like a player at the keyboard: Enter, the text key by key, then Enter (type) or Esc
 	// (typeesc), through the event manager, so the keys go wherever the windows send them.
-	// Each key is a press and its text: more than SDL sends while a text field has the focus,
-	// so a key that reached the game (space pauses) would show
+	// Each key is sent the way SDLVideoDriver does: a key press (with shift for capitals and
+	// !@#...), left out for unshifted keys while text input is on, then the key's text
 	void TestType(const std::string& text, bool send) const
 	{
 		const WindowManager* wm = core->GetWindowManager();
@@ -4496,14 +4506,28 @@ except Exception as e:
 		};
 		press(GEM_RETURN);
 		Log(MESSAGE, "Net", "Test typing: pressed Enter, text input is {}.", VideoDriver->InTextInput() ? "on" : "off");
+		static const std::string shifted = ")!@#$%^&*(";
+		int pressesSent = 0;
 		for (char c : text) {
-			KeyboardKey key = KeyboardKey(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c);
-			wm->InjectEvent(EventMgr::CreateKeyEvent(key, true));
+			KeyboardKey key = KeyboardKey(c);
+			int mod = 0;
+			if (c >= 'A' && c <= 'Z') {
+				key = KeyboardKey(c - 'A' + 'a');
+				mod = GEM_MOD_SHIFT;
+			} else if (shifted.find(c) != std::string::npos) {
+				key = KeyboardKey('0' + shifted.find(c));
+				mod = GEM_MOD_SHIFT;
+			}
+			bool sendPress = mod != 0 || !VideoDriver->InTextInput();
+			if (sendPress) {
+				wm->InjectEvent(EventMgr::CreateKeyEvent(key, true, mod));
+				pressesSent++;
+			}
 			wm->InjectEvent(EventMgr::CreateTextEvent(std::string(1, c).c_str()));
-			wm->InjectEvent(EventMgr::CreateKeyEvent(key, false));
+			wm->InjectEvent(EventMgr::CreateKeyEvent(key, false, mod));
 		}
 		press(send ? GEM_RETURN : GEM_ESCAPE);
-		Log(MESSAGE, "Net", "Test typing: typed '{}' and pressed {}, text input is {}.", text, send ? "Enter" : "Esc", VideoDriver->InTextInput() ? "on" : "off");
+		Log(MESSAGE, "Net", "Test typing: typed '{}' ({} key presses got through, as SDL lets them) and pressed {}, text input is {}.", text, pressesSent, send ? "Enter" : "Esc", VideoDriver->InTextInput() ? "on" : "off");
 	}
 
 	void SelectOnly(Actor* actor) const
