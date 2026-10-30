@@ -4718,8 +4718,9 @@ static PyObject* GemRB_SaveGame(PyObject* /*self*/, PyObject* args)
 		return RuntimeError("No savegame iterator");
 	}
 
+	// the preview is optional: left out, or None
 	Holder<Sprite2D> areaPic;
-	if (preview != Py_None) {
+	if (preview && preview != Py_None) {
 		areaPic = SpriteFromPy(preview);
 	}
 
