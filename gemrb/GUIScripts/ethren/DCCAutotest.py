@@ -1385,6 +1385,9 @@ def _StepFight ():
 	global FightSteps
 	if FightSteps is None:
 		FightSteps = _Fight ()
+		# the fight is driven by forced dice: party AI joining in with real dice (a natural 1 fouls a
+		# weapon, say) would make later steps depend on luck
+		GemRB.GameSetScreenFlags (GS_PARTYAI, OP_NAND)
 	try:
 		next (FightSteps)
 		return "fight"

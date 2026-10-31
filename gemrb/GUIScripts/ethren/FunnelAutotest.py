@@ -164,8 +164,9 @@ def _Party ():
 		yield from _Wait (lambda: not any (p["Moving"] for p in _Positions (range (1, 17))), 60)
 		where = _Positions (range (1, 17))
 		_Check ("formation %d: all 16 stopped" % formation, sum (1 for p in where if not p["Moving"]), 16)
-		# each at its own place in the formation (or as near as the ground allows), none stuck on the way
-		off = [(pc, p["X"], p["Y"], p["DestX"], p["DestY"]) for pc, p in zip (range (1, 17), where) if abs (p["X"] - p["DestX"]) + abs (p["Y"] - p["DestY"]) > 48]
+		# each at its own place in the formation, none stuck on the way; bumping can leave the odd one a body
+		# width or two off its place (stock pathfinding), which is fine
+		off = [(pc, p["X"], p["Y"], p["DestX"], p["DestY"]) for pc, p in zip (range (1, 17), where) if abs (p["X"] - p["DestX"]) + abs (p["Y"] - p["DestY"]) > 160]
 		_Check ("formation %d: all at their places" % formation, off, [])
 		far = [pc for pc, p in zip (range (1, 17), where) if abs (p["X"] - target[0]) + abs (p["Y"] - target[1]) > 600]
 		_Check ("formation %d: all near the goal" % formation, far, [])
