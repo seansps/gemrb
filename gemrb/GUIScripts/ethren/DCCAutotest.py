@@ -843,6 +843,27 @@ def _FightCompletion ():
 	GemRB.DCCSetCombat (brak, 0, 0)
 	yield
 
+def _FightDemons ():
+	"""Funnel prep (M2.9): Crit Table DN's CORRUPT from real crits, with forced dice"""
+	demon1, demon2, mord = _ID ("dctdemn1"), _ID ("dctdemn2"), _ID ("dctmord")
+	_Check ("demons and their target", all ([demon1, demon2, mord]), True)
+	d1, d2 = GemRB.GetDCCStats (demon1), GemRB.GetDCCStats (demon2)
+	# Table 9-10: a 5 HD demon crits on DN with a d6, a 9 HD one with a d10
+	_Check ("demon crit dice", [d1["CritTable"], d1["CritDie"], d2["CritTable"], d2["CritDie"]], [8, 6, 8, 10])
+	before = len (GemRB.GetDCCMagic (mord)["Corruptions"])
+	# a natural 20 crits; d6 5 on Crit Table DN: corruption; 1d10 4 + Luck 0 on the minor table (up to 5 HD)
+	r = _Attack (demon1, mord, [20, 2, 5, 4])
+	_Check ("demon crit DN-5", _Pick (r[0], ["Critical", "CritRoll", "Result"]), [1, 5, "corruption"])
+	corruptions = GemRB.GetDCCMagic (mord)["Corruptions"]
+	_Check ("a minor corruption, row 4", [(c["Table"], c["Row"]) for c in corruptions[before:]], [(1, 4)])
+	# d10 10: double corruption, on the major table (6-10 HD): rows 3 and 7
+	r = _Attack (demon2, mord, [20, 2, 10, 3, 7])
+	_Check ("demon crit DN-10", _Pick (r[0], ["Critical", "CritRoll", "Result"]), [1, 10, "double corruption"])
+	corruptions = GemRB.GetDCCMagic (mord)["Corruptions"]
+	_Check ("two major corruptions, rows 3 and 7", [(c["Table"], c["Row"]) for c in corruptions[before + 1:]], [(2, 3), (2, 7)])
+	_Check ("log: the demon's corruption", _Logged ("Mord is corrupted"), True)
+	yield
+
 def _Fight ():
 	GemRB.GetDCCCombatLog (1)
 	korg, vex, pip, eda, brun, peas = [_ID (n) for n in ("dctkorg", "dctvex", "dctpip", "dcteda", "dctbrun", "dctpeas")]
@@ -1009,6 +1030,7 @@ def _Fight ():
 
 	yield from _FightLuck ()
 	yield from _FightCompletion ()
+	yield from _FightDemons ()
 
 	# Korg fumbles: leather's d8, 7 on Table 4-2 drops the weapon
 	r = _Attack (korg, gob2, [1, 1, 7])
