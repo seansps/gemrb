@@ -620,6 +620,11 @@ private:
 	std::shared_ptr<DCCAttackState> dccPendingAttack;
 	// Luck burned on each pre-rolled IE save die, so all effects of a spell get it (RollSaves clears)
 	std::array<int, 5> dccSaveBurn {};
+	/* DCC: a failed save vs death of a party member who pauses on key rolls: the lethal effects
+	 * wait (as saved for now) until the owner says how much Luck to burn; true if they wait */
+	struct DCCHeldSave;
+	std::shared_ptr<DCCHeldSave> dccHeldSave;
+	bool DCCAskSaveBurn(const Effect& fx, ieDword type, const DCC::RollResult& roll);
 	/* Returns true if the dual class is backwards */
 	bool IsDualSwap() const;
 	int GetNonProficiencyPenalty(int stars) const;

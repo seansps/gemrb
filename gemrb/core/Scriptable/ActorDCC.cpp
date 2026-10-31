@@ -13,12 +13,16 @@
 #include "Game.h"
 #include "Interface.h"
 #include "Map.h"
+#include "Prompts.h"
 #include "RNG.h"
 
 #include "DCC/Combat.h"
 #include "DCC/Luck.h"
 #include "DCC/Rules.h"
 #include "DCC/Stats.h"
+#include "GUI/GameControl.h"
+#include "Logging/Logging.h"
+#include "Net/NetSession.h"
 #include "Scriptable/Actor.h"
 
 namespace GemRB {
@@ -254,6 +258,12 @@ RollResult Actor::DCCRollLuckCheck(int natural) const
 	return ResolveLuckCheck(natural, Signed(GetStat(IE_DCC_LUCK)), cursed);
 }
 
+static const char16_t* SaveName(Save save)
+{
+	static const char16_t* names[] = { u"Fortitude", u"Reflex", u"Willpower" };
+	return names[static_cast<int>(save)];
+}
+
 // a failed save against this kills: Death (slay, disintegrate) and petrification
 static bool IsLethalEffect(const Effect* fx)
 {
@@ -287,30 +297,114 @@ bool Actor::GetSavingThrowDCC(ieDword type, int modifier, const Effect* fx)
 		if (fx->Opcode == ieDword(EffectQueue::ResolveEffect(fx_poisoned_state_ref))) flags |= AF_POISON;
 	}
 
+	// tests: forced dice (DCCForceDice) replace the pre-rolled die, which the spell's effects share
+	if (!dccForcedDice.empty()) lastSave.savingThrow[type] = static_cast<ieByte>(DCCDie(20));
 	RollResult result = DCCRollSave(save, modifier, dc, lastSave.savingThrow[type], flags);
 
 	// Luck: a burn on this save die counts for every effect that shares the die (one spell's
-	// effects); else the policy may burn on a failure, to avoid death (DCC::BurnReason)
+	// effects); a save vs death may wait for the owner's answer; else the policy may burn
 	if (dccSaveBurn[type] && !result.cursed) {
 		result.total += dccSaveBurn[type];
 		result.success = result.total >= result.target;
 	} else if (!result.success && !result.cursed) {
+		bool lethal = IsLethalEffect(fx);
+		if (lethal && DCCAskSaveBurn(*fx, type, result)) {
+			// counts as saved until the answer comes; the effect waits in dccHeldSave
+			return true;
+		}
 		int before = result.total;
-		BurnReason reason = IsLethalEffect(fx) ? BurnReason::Death : BurnReason::Miss;
-		if (DCCPolicyRollBurn(result, reason, u"a save")) dccSaveBurn[type] = result.total - before;
+		if (DCCPolicyRollBurn(result, lethal ? BurnReason::Death : BurnReason::Miss, u"a save")) dccSaveBurn[type] = result.total - before;
 	}
 
 	// each effect of a spell ends up here, so only report a new roll
-	if (core->HasFeedback(FT_COMBAT) && (lastSave.prevType != type || lastSave.prevRoll != result.total)) {
-		static const char16_t* names[] = { u"Fortitude", u"Reflex", u"Willpower" };
-		String msg = fmt::format(u"{} save: {} {:+} = {} vs DC {}: {}", names[static_cast<int>(save)], result.natural,
-					 result.total - result.natural, result.total, result.target,
+	if (lastSave.prevType != type || lastSave.prevRoll != result.total) {
+		String msg = fmt::format(u"{} save: {} {:+} = {} vs DC {}: {}", SaveName(save), result.natural, result.total - result.natural, result.total, result.target,
 					 result.success ? u"success" : (result.cursed ? u"failed (cursed by fortune)" : u"failed"));
-		displaymsg->DisplayStringName(std::move(msg), GUIColors::WHITE, this);
+		Log(COMBAT, "DCC", "{}: {}", fmt::WideToChar { GetName() }, fmt::WideToChar { msg });
+		if (core->HasFeedback(FT_COMBAT)) displaymsg->DisplayStringName(std::move(msg), GUIColors::WHITE, this);
 	}
 	lastSave.prevType = type;
 	lastSave.prevRoll = result.total;
 	return result.success;
+}
+
+// a lethal effect waiting for the owner's Luck decision (the game is paused meanwhile)
+struct Actor::DCCHeldSave {
+	ieDword type = 0; // the IE save type
+	ieByte die = 0; // its pre-rolled die: further lethal effects of the same spell join in
+	RollResult roll;
+	std::vector<std::shared_ptr<Effect>> effects;
+};
+
+bool Actor::DCCAskSaveBurn(const Effect& fx, ieDword type, const RollResult& roll)
+{
+	if (dccHeldSave) {
+		// the same spell's next lethal effect waits with the first
+		if (dccHeldSave->type != type || dccHeldSave->die != lastSave.savingThrow[type]) return false;
+		dccHeldSave->effects.push_back(std::make_shared<Effect>(fx));
+		return true;
+	}
+	LuckPolicy policy = GetDCCLuckPolicy();
+	if (!InParty || !IsDCCCharacter() || !(policy.flags & LUCK_PAUSE)) return false;
+	const NetSession* net = core->GetNetSession();
+	if ((net && !net->IsHost()) || !core->GetGameControl()) return false;
+	int luck = GetDCCLuck();
+	int gap = roll.target - roll.total;
+	BurnValue value = GetDCCBurnValue();
+	if (luck <= 0 || gap <= 0 || MaxBurnBonus(value, luck) < gap) return false;
+
+	const RulesData* rules = Rules();
+	Save save = rules->saves.Get(type);
+	PromptQuestion q;
+	q.kind = PromptKind::Integer;
+	q.tag = "luckburn";
+	q.title = "Burn Luck?";
+	std::string name = fmt::format("{}", fmt::WideToChar { GetShortName() });
+	std::string how = value.IsDie() ? fmt::format("a d{} each", value.luckDie) : fmt::format("+{} each", value.perPoint);
+	q.text = fmt::format("{} fails a {} save against death by {} ({} vs DC {}). Burn Luck ({}, {} left)?", name, fmt::WideToChar { SaveName(save) }, gap,
+			     roll.total, roll.target, how, luck);
+	q.fields = { { "Luck", 0, luck, PolicyBurn(policy, BurnReason::Death, gap, luck, value) } };
+	q.timeout = uint32_t(Clamp<int>(core->config.PromptTimeout, 1000, LUCK_PROMPT_TIMEOUT));
+
+	auto held = std::make_shared<DCCHeldSave>();
+	held->type = type;
+	held->die = lastSave.savingThrow[type];
+	held->roll = roll;
+	held->effects.push_back(std::make_shared<Effect>(fx));
+	ieDword selfID = GetGlobalID();
+	uint32_t id = core->GetPrompts().Ask(this, std::move(q), [selfID, held](const PromptResult& r) {
+		Game* game = core->GetGame();
+		Actor* self = game ? game->GetActorByGlobalID(selfID) : nullptr;
+		if (!self || self->dccHeldSave != held) return;
+		self->dccHeldSave.reset();
+		if (self->GetStat(IE_STATE_ID) & STATE_DEAD) return;
+		int points = Clamp<int>(r.Value(), 0, self->GetDCCLuck());
+		RollResult result = held->roll;
+		if (points > 0) {
+			BurnValue value = self->GetDCCBurnValue();
+			int bonus = self->DCCBurnLuck(points, value);
+			result.total += bonus;
+			result.success = result.total >= result.target;
+			String how = value.IsDie() ? fmt::format(u"{}d{} = +{}", points, value.luckDie, bonus) : fmt::format(u"+{}", bonus);
+			DCCFeedback(fmt::format(u"{} burns {} Luck on a save vs death ({}): {} -> {} vs DC {}, {} (Luck {} left)", self->GetName(), points, how, held->roll.total,
+						result.total, result.target, result.success ? u"survives" : u"still a failure", self->GetDCCLuck()),
+				    FT_COMBAT);
+		}
+		if (result.success) return;
+		// no burn, or not enough: what the save was against happens now (without another save)
+		Map* map = self->GetCurrentArea();
+		for (const auto& effect : held->effects) {
+			auto fx = std::make_unique<Effect>(*effect);
+			fx->SavingThrowType = 0;
+			fx->Target = FX_TARGET_PRESET;
+			Scriptable* caster = map ? map->GetScriptableByGlobalID(fx->CasterID) : nullptr;
+			core->ApplyEffect(std::move(fx), self, caster ? caster : self);
+		}
+	});
+	if (!id) return false;
+	dccHeldSave = std::move(held);
+	DCCFeedback(fmt::format(u"{} fails a {} save against death: {} vs DC {}; burn Luck?", GetName(), SaveName(save), roll.total, roll.target), FT_COMBAT);
+	return true;
 }
 
 int Actor::DCCLevelForXP() const

@@ -25,7 +25,8 @@
 #      recovery and a warrior's lack of it (step 5); in the fight a policy burn that turns a
 #      miss into a hit, "never", a warrior cancelling a fumble, a thief's luck dice, a
 #      halfling burning for an ally at +2, a prompt answered with GemRB.AnswerPrompt and one
-#      left to time out (the policy's answer), and deeds: the deed die on attack and damage,
+#      left to time out (the policy's answer), a save vs death that waits for the answer
+#      (burn and survive; decline and die), and deeds: the deed die on attack and damage,
 #      a signature trip on 3+, nothing on 2, a queued one-off disarm used once, defend, precision
 # Every check logs "[DCC] ok ..." or "[DCC] FAIL ...", and the end "[DCC] autotest done:
 # N checks, F failed"; the DCT_AT_DCC global becomes 1 if all passed, 2 if not.
@@ -461,6 +462,38 @@ def _FightLuck ():
 	_Check ("brak Luck 7 -> 4", _Luck (brak), 4)
 	_Check ("log: brak's policy burn", _Logged ("Brak burns 3 Luck (+3): 22 -> 25, hit and crit (Luck 4 left)"), True)
 	GemRB.ApplyEffect (gob2, "DCC:Combat", -15, 5)
+
+	# a save vs death (DCTSLAY: Fort vs DC 11 or die) pauses and asks too; the death waits for the answer.
+	# Brak (Fort -2 with Sta 2, Luck 4) rolls 11: 9, 2 short; the policy (misses while 1+) would burn 2, he burns 2 (4 -> 2)
+	GemRB.DCCForceDice (brak, [11])
+	GemRB.ApplySpell (brak, "DCTSLAY")
+	GemRB.DCCForceDice (brak, [])
+	_Check ("log: brak's save vs death waits", _Logged ("Brak fails a Fortitude save against death: 9 vs DC 11; burn Luck?"), True)
+	yield
+	prompt = GemRB.GetPrompt ()
+	_Check ("death save prompt", prompt and [prompt["Tag"], prompt["Fields"][0]["Max"], prompt["Fields"][0]["Value"]], ["luckburn", 4, 2])
+	if prompt:
+		_Log ("prompt: " + prompt["Text"])
+		GemRB.AnswerPrompt (prompt["ID"], [2])
+	for i in range (4):
+		yield
+	_Check ("brak survives by burning 2", [_Dead (brak), _Luck (brak)], [False, 2])
+	_Check ("log: brak survives", _Logged ("Brak burns 2 Luck on a save vs death (+2): 9 -> 11 vs DC 11, survives (Luck 2 left)"), True)
+	# Sly (Fort +1) rolls 3: 4 vs 11; he could burn but his player says 0: the death happens then
+	GemRB.DCCForceDice (sly, [3])
+	GemRB.ApplySpell (sly, "DCTSLAY")
+	GemRB.DCCForceDice (sly, [])
+	yield
+	prompt = GemRB.GetPrompt ()
+	_Check ("sly's death save prompt", prompt and prompt["Tag"], "luckburn")
+	_Check ("sly alive while it waits", _Dead (sly), False)
+	if prompt:
+		GemRB.AnswerPrompt (prompt["ID"], [0])
+	waited = 0
+	while not _Dead (sly) and waited < 20:
+		waited += 1
+		yield
+	_Check ("sly declines: dead", [_Dead (sly), _Luck (sly)], [True, 13])
 
 	# back to the M2.3 setup for the last check: Korg's Luck 10 and no burns
 	GemRB.SetPlayerStat (korg, IE_DCC_LOSS_LCK, 0)
