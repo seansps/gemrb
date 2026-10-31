@@ -1614,6 +1614,10 @@ struct NetSession::Impl {
 			}
 			actor->UseExit(exit->GetGlobalID());
 			Log(MESSAGE, "Net", "Slot {} ({}): {} (id {}) may use exit '{}'.", info.slot, info.name, fmt::WideToChar { actor->GetShortName() }, cmd.actorID, exit->GetScriptName());
+			// DCC (M2.10): a click on a party exit brings the whole party, as on the host
+			if (core->HasFeature(GFFlags::RULES_DCC) && (exit->Flags & TRAVEL_PARTY)) {
+				actor->GetCurrentArea()->DCCGatherAtExit(exit, exit->Pos, false);
+			}
 			return;
 		}
 

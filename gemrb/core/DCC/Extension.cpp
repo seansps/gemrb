@@ -20,6 +20,7 @@ constexpr char TAG_SPELLBURN[4] = { 'B', 'U', 'R', 'N' };
 constexpr char TAG_DISAPPROVAL[4] = { 'D', 'I', 'S', 'A' };
 constexpr char TAG_OCCUPATION[4] = { 'O', 'C', 'C', 'U' };
 constexpr char TAG_FUNNEL[4] = { 'F', 'U', 'N', 'L' };
+constexpr char TAG_CHARACTER[4] = { 'C', 'H', 'A', 'R' };
 
 const char* const SKILL_NAMES[OCCUPATION_SKILL_COUNT] = {
 	"ANIMALS", "FARMING", "HERBALISM", "MEDICINE", "ALCHEMY", "SMITHING", "MASONRY", "CARPENTRY", "MINING", "CRAFT_FINE",
@@ -217,10 +218,26 @@ const char* FunnelStatusName(FunnelStatus status)
 	}
 }
 
+const char* PartyAIName(PartyAI mode)
+{
+	switch (mode) {
+		case PartyAI::Defend:
+			return "defend";
+		case PartyAI::Flee:
+			return "flee";
+		case PartyAI::Passive:
+			return "passive";
+		case PartyAI::Engage:
+			return "engage";
+		default:
+			return "?";
+	}
+}
+
 bool CharacterExt::Empty() const
 {
 	return spells.empty() && corruptions.empty() && burn.IsDefault() &&
-		disapproval.range <= 1 && disapproval.flags == 0 && occupation.Empty() && funnel.Empty() && other.empty();
+		disapproval.range <= 1 && disapproval.flags == 0 && occupation.Empty() && funnel.Empty() && body.Empty() && other.empty();
 }
 
 KnownSpell* CharacterExt::FindSpell(const std::string& resref)
@@ -313,6 +330,14 @@ std::vector<uint8_t> WriteExtension(const CharacterExt& ext)
 		EndRecord(out, at);
 		++records;
 	}
+	if (!ext.body.Empty()) {
+		size_t at = BeginRecord(out, TAG_CHARACTER, 1);
+		out.U16(ext.body.weight);
+		out.U8(uint8_t(ext.body.partyAI));
+		out.U8(0);
+		EndRecord(out, at);
+		++records;
+	}
 	for (const auto& raw : ext.other) {
 		size_t at = BeginRecord(out, raw.tag.data(), raw.version);
 		out.bytes.insert(out.bytes.end(), raw.data.begin(), raw.data.end());
@@ -400,6 +425,11 @@ bool ReadExtension(const uint8_t* data, size_t size, CharacterExt& out)
 			funnel.flags = body.U8();
 			funnel.diedAt = body.U32();
 			funnel.diedIn = body.ResRef();
+			if (!body.Ok()) return false;
+		} else if (std::memcmp(tag.data(), TAG_CHARACTER, 4) == 0 && recordVersion >= 1) {
+			ext.body.weight = body.U16();
+			ext.body.partyAI = PartyAI(std::min<uint8_t>(body.U8(), uint8_t(PartyAI::count) - 1));
+			body.U8();
 			if (!body.Ok()) return false;
 		} else {
 			RawRecord raw;

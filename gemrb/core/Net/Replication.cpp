@@ -476,6 +476,9 @@ NetGuiOpInfo NetGuiInfo(NetGuiOp op)
 			return { 0, 1, NetPermission::Control, "DCCReplaceSpell", true, true };
 		case NetGuiOp::DCCConfirmSpells:
 			return { 0, 1, NetPermission::Control, "DCCConfirmSpells", true, true };
+		// M2.10 (v13): what a character does on its own (the DCC party AI), its owner's choice
+		case NetGuiOp::DCCSetPartyAI:
+			return { 0, 2, NetPermission::Control, "DCCSetPartyAI" };
 		default:
 			return {};
 	}

@@ -5360,11 +5360,17 @@ ieDword Actor::GetAnyActiveCasterLevel() const
 
 int Actor::GetEncumbranceFactor(bool feedback) const
 {
-	// DCC: no Strength-based weight allowance (equipment.md: encumbrance is by body weight, not
-	// built yet; strmod.2da's allowance would leave a Str 15+ peasant unable to move in the
-	// demo-based test areas, whose table only has a row for 14). Ethren decision until then
+	// DCC: encumbrance by body weight (equipment.md, M2.10), never the Strength allowance of
+	// strmod.2da (the demo-based test areas' table only has a row for 14: Str 15+ couldn't walk).
+	// Monsters aren't slowed, as in the stock rule below
 	if (core->HasFeature(GFFlags::RULES_DCC)) {
-		return 1;
+		if (BaseStats[IE_EA] > EA_GOODCUTOFF) return 1;
+		DCC::Load load = DCCLoad();
+		if (load == DCC::Load::Light) return 1;
+		if (feedback && core->HasFeedback(FT_STATES)) {
+			displaymsg->DisplayConstantStringName(load == DCC::Load::Heavy ? HCStrings::HalfSpeed : HCStrings::CantMove, GUIColors::WHITE, this);
+		}
+		return load == DCC::Load::Heavy ? 2 : 123456789;
 	}
 	int encumbrance = inventory.GetWeight();
 	int maxWeight = GetMaxEncumbrance();
@@ -6694,6 +6700,9 @@ void Actor::AttackedBy(const Actor* attacker)
 {
 	AddTrigger(TriggerEntry(trigger_attackedby, attacker->GetGlobalID()));
 	if (attacker->GetStat(IE_EA) != EA_PC && Modified[IE_EA] != EA_PC) {
+		objects.LastAttacker = attacker->GetGlobalID();
+	} else if (core->HasFeature(GFFlags::RULES_DCC) && InParty && !attacker->InParty) {
+		// DCC (M2.10): the party AI (DCCPARTY) fights back against whoever attacked a party member
 		objects.LastAttacker = attacker->GetGlobalID();
 	}
 	if (InParty) {
@@ -10457,6 +10466,10 @@ bool Actor::HasSpellState(ieDword spellstate) const
 
 int Actor::GetMaxEncumbrance() const
 {
+	// DCC: the cap of the body weight (equipment.md), never strmod.2da's Strength allowance
+	if (core->HasFeature(GFFlags::RULES_DCC)) {
+		return DCCLoadLimits().cap;
+	}
 	int max = core->GetStrengthBonus(3, GetStat(IE_STR), GetStat(IE_STREXTRA));
 	AutoTable encMod = gamedata->LoadTable("encmod", true);
 	if (encMod) {

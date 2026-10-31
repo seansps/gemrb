@@ -235,6 +235,7 @@ IF (BUILD_TESTING)
   ADD_EXECUTABLE(Test_gemrb_core
     tests/core/DCC/Test_AbilityMod.cpp
     tests/core/DCC/Test_Augur.cpp
+    tests/core/DCC/Test_Body.cpp
     tests/core/DCC/Test_Character.cpp
     tests/core/DCC/Test_Classes.cpp
     tests/core/DCC/Test_Combat.cpp

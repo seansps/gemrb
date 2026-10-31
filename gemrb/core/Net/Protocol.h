@@ -708,6 +708,7 @@ enum class NetGuiOp : uint8_t {
 	DCCLevelUp, // actor, class (v12; host only: the hit die and the spells are the host's rolls)
 	DCCReplaceSpell, // actor (text: the fresh spell and its replacement) (v12)
 	DCCConfirmSpells, // actor (text: the elf's lucky spell, may be empty) (v12)
+	DCCSetPartyAI, // actor, party AI mode (v13, M2.10)
 	count
 };
 

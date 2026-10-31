@@ -6945,6 +6945,19 @@ static PyObject* GemRB_GetDCCStats(PyObject* /*self*/, PyObject* args)
 		DictInt(dict, "Trained", wi.extHeader ? actor->DCCTrainedWith(wi) : 1);
 	}
 
+	// M2.10: encumbrance by body weight and the party AI mode
+	DCC::LoadLimits limits = actor->DCCLoadLimits();
+	DictInt(dict, "BodyWeight", actor->DCCBodyWeight());
+	DictInt(dict, "BodyRolled", actor->GetBase(IE_DCC_WEIGHT) != 0);
+	DictInt(dict, "Carried", actor->inventory.GetWeight());
+	DictInt(dict, "LoadHalf", limits.half);
+	DictInt(dict, "LoadCap", limits.cap);
+	DictInt(dict, "Load", static_cast<int>(actor->DCCLoad()));
+	PyDict_SetItemString(dict, "LoadName", DecRef(PyString_FromString, DCC::LoadName(actor->DCCLoad())));
+	DictInt(dict, "WalkSpeed", actor->CalculateSpeed(false));
+	DictInt(dict, "PartyAI", actor->GetBase(IE_DCC_PARTYAI));
+	PyDict_SetItemString(dict, "PartyAIName", DecRef(PyString_FromString, DCC::PartyAIName(DCC::PartyAI(std::min<ieDword>(actor->GetBase(IE_DCC_PARTYAI), ieDword(DCC::PartyAI::count))))));
+
 	const DCC::LevelRow* row = rules->classes.Row(cls, level);
 	DictInt(dict, "SpellsKnown", row ? row->spellsKnown : 0);
 	DictInt(dict, "MaxSpellLevel", row ? row->maxSpellLevel : 0);
@@ -7381,6 +7394,68 @@ static PyObject* GemRB_DCCSetLuckPolicy(PyObject* /*self*/, PyObject* args)
 	Py_RETURN_NONE;
 }
 
+PyDoc_STRVAR(GemRB_DCCSetPartyAI__doc,
+	     "===== DCCSetPartyAI =====\n\
+\n\
+**Prototype:** GemRB.DCCSetPartyAI (globalID, mode)\n\
+\n\
+**Description:** Sets what a DCC party member does on its own (the DCCPARTY script, while the \n\
+party AI is on): 0 defend (fights back against an attacker within its weapon's reach and an enemy \n\
+that comes within reach, holds its place, never chases), 1 flee (as defend, but runs from enemies \n\
+when under half its hit points), 2 passive (nothing), 3 engage (also goes for enemies close by). \n\
+ie_stats.py: DCC_AI_*. In co-op the host runs it again, for the character's owner only.\n\
+\n\
+**Parameters:**\n\
+  * globalID - party ID or global ID of the actor to use\n\
+  * mode - see above\n\
+\n\
+**Return value:** N/A\n\
+\n\
+**See also:** [GetDCCStats](GetDCCStats.md), [GameSetScreenFlags](GameSetScreenFlags.md)");
+
+static PyObject* GemRB_DCCSetPartyAI(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int mode;
+	PARSE_ARGS(args, "ii", &globalID, &mode);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	if (mode < 0 || mode >= int(DCC::PartyAI::count)) return RuntimeError("Bad party AI mode!");
+	if (!NetForward(NetGuiOp::DCCSetPartyAI, { globalID, mode })) Py_RETURN_NONE;
+	actor->SetBase(IE_DCC_PARTYAI, ieDword(mode));
+	Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(GemRB_DCCSetBodyWeight__doc,
+	     "===== DCCSetBodyWeight =====\n\
+\n\
+**Prototype:** GemRB.DCCSetBodyWeight (globalID[, pounds])\n\
+\n\
+**Description:** Sets a DCC character's body weight, which sets its load limits (equipment.md): \n\
+more than a share of it carried is half speed, more than half of it and the character can't move \n\
+(dccbody.2da). Without pounds (or 0) it is rolled anew for the character's race, with the actor's \n\
+dice (DCCForceDice). The host's (or single player's) call: the funnel's rolling screen and tests.\n\
+\n\
+**Return value:** the body weight in pounds, 0 if refused (a co-op client)\n\
+\n\
+**See also:** [GetDCCStats](GetDCCStats.md)");
+
+static PyObject* GemRB_DCCSetBodyWeight(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int pounds = 0;
+	PARSE_ARGS(args, "i|i", &globalID, &pounds);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	const NetSession* net = core->GetNetSession();
+	if (net && !net->IsHost()) return PyLong_FromLong(0);
+	if (pounds > 0) {
+		actor->SetBase(IE_DCC_WEIGHT, ieDword(std::min(pounds, 0xffff)));
+		return PyLong_FromLong(pounds);
+	}
+	return PyLong_FromLong(actor->DCCRollBodyWeight());
+}
+
 PyDoc_STRVAR(GemRB_DCCSetDeeds__doc,
 	     "===== DCCSetDeeds =====\n\
 \n\
@@ -7785,8 +7860,8 @@ PyDoc_STRVAR(GemRB_GameControlTravel__doc,
 **Prototype:** GemRB.GameControlTravel (region)\n\
 \n\
 **Description:** What a click on a travel region does: the selected characters head for it and \n\
-may use it (the whole party goes when everyone is near enough). In co-op a client's click goes \n\
-to the host. For scripts and tests.\n\
+may use it (the whole party goes when everyone is near enough; in DCC games the rest of the party \n\
+comes along to a party exit). In co-op a client's click goes to the host. For scripts and tests.\n\
 \n\
 **Return value:** bool, False if the current area has no such travel region");
 
@@ -7809,6 +7884,10 @@ static PyObject* GemRB_GameControlTravel(PyObject* /*self*/, PyObject* args)
 		}
 	}
 	gc->CommandSelectedMovement(exit->Pos, false);
+	// DCC (M2.10): as a click, the rest of the party comes along to a party exit (on the host)
+	if (core->HasFeature(GFFlags::RULES_DCC) && (exit->Flags & TRAVEL_PARTY) && !(net && net->IsReplica())) {
+		game->GetCurrentArea()->DCCGatherAtExit(exit, exit->Pos, false);
+	}
 	Py_RETURN_TRUE;
 }
 
@@ -7820,7 +7899,8 @@ PyDoc_STRVAR(GemRB_GetActorPosition__doc,
 **Description:** Where an actor is: its area, position, destination and whether it walks. \n\
 For scripts and tests.\n\
 \n\
-**Return value:** dict: Area, X, Y, DestX, DestY, Moving");
+**Return value:** dict: Area, X, Y, DestX, DestY, Moving, Busy (has an action), Attacking (the \n\
+global ID of the actor its current attack swings at, 0 none)");
 
 static PyObject* GemRB_GetActorPosition(PyObject* /*self*/, PyObject* args)
 {
@@ -7836,6 +7916,10 @@ static PyObject* GemRB_GetActorPosition(PyObject* /*self*/, PyObject* args)
 	DictInt(dict, "DestX", actor->Destination.x);
 	DictInt(dict, "DestY", actor->Destination.y);
 	DictInt(dict, "Moving", actor->InMove());
+	// M2.10: whether it has an action, and whom it is attacking now (0 none), for the party AI checks
+	bool busy = actor->GetCurrentAction() != nullptr || actor->GetNextAction() != nullptr;
+	DictInt(dict, "Busy", busy);
+	DictInt(dict, "Attacking", busy ? int(actor->objects.LastTarget) : 0);
 	return dict;
 }
 
@@ -8396,7 +8480,8 @@ static PyObject* GemRB_FillPlayerInfo(PyObject* /*self*/, PyObject* args)
 
 	//what about multiplayer?
 	if ((globalID == 1) && core->HasFeature(GFFlags::HAS_DPLAYER)) {
-		actor->SetScript("DPLAYER3", SCR_DEFAULT, false);
+		// DCC (M2.10): the protagonist gets the funnel's party AI like everyone else
+		actor->SetScript(core->HasFeature(GFFlags::RULES_DCC) ? ResRef(DCC::PARTY_AI_SCRIPT) : ResRef("DPLAYER3"), SCR_DEFAULT, false);
 	}
 	Py_RETURN_NONE;
 }
@@ -14980,6 +15065,8 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(DCCRecoverBody, METH_VARARGS),
 	METHOD(DCCFindActor, METH_VARARGS),
 	METHOD(DCCSetLuckPolicy, METH_VARARGS),
+	METHOD(DCCSetPartyAI, METH_VARARGS),
+	METHOD(DCCSetBodyWeight, METH_VARARGS),
 	METHOD(DCCSetDeeds, METH_VARARGS),
 	METHOD(DCCSetCombat, METH_VARARGS),
 	METHOD(DCCGrapple, METH_VARARGS),

@@ -3117,7 +3117,8 @@ void GameScript::JoinParty(Scriptable* Sender, Holder<Action> parameters)
 		act->SetScript("DEFAULT", AI_SCRIPT_LEVEL, true);
 		act->SetScript(ResRef(), SCR_RACE, true);
 		act->SetScript(ResRef(), SCR_GENERAL, true);
-		act->SetScript("DPLAYER2", SCR_DEFAULT, false);
+		// DCC (M2.10): the funnel's party AI (what it does is each character's IE_DCC_PARTYAI)
+		act->SetScript(core->HasFeature(GFFlags::RULES_DCC) ? ResRef(DCC::PARTY_AI_SCRIPT) : ResRef("DPLAYER2"), SCR_DEFAULT, false);
 	}
 	AutoTable pdtable = gamedata->LoadTable("pdialog");
 	if (pdtable) {

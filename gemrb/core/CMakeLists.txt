@@ -25,6 +25,7 @@ FILE(GLOB gemrb_core_LIB_SRCS
 	DCC/CombatTables.cpp
 	DCC/Deeds.cpp
 	DCC/DiceChain.cpp
+	DCC/Body.cpp
 	DCC/Extension.cpp
 	DCC/Learning.cpp
 	DCC/Luck.cpp

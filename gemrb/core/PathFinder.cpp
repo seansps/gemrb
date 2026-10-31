@@ -146,7 +146,14 @@ bool PathFinder::CalculateRunAwayPoint(const TileProps& tileProps, const Point& 
 	if (std::abs(dx) <= 0.333 && std::abs(dy) <= 0.333) return false;
 	while (SquaredDistance(p, s) < unsigned(maxPathLength * maxPathLength * SEARCHMAP_TILE_DIAGONAL * SEARCHMAP_TILE_DIAGONAL)) {
 		Point rad(std::lround(p.x + 3 * xSign * dx), std::lround(p.y + 3 * ySign * dy));
-		if (!(GetBlockedInRadiusTile(tileProps, SearchmapPoint(rad), actorCircleSize) & PathMapFlags::PASSABLE)) {
+		// ethren fix: actors don't make a direction a dead end (the path to the point walks around
+		// them); counting them, the runner's own circle blocked its first steps every way, so it
+		// always seemed backed into a corner and stood still
+		PathMapFlags ahead = GetBlockedInRadiusTile(tileProps, SearchmapPoint(rad), actorCircleSize);
+		PathMapFlags ground = tileProps.QuerySearchMap(SearchmapPoint(rad)) & PathMapFlags::NOTACTOR;
+		bool open = bool(ahead & PathMapFlags::PASSABLE) ||
+			(bool(ahead & PathMapFlags::ACTOR) && bool(ground & (PathMapFlags::PASSABLE | PathMapFlags::TRAVEL)) && !bool(ground & (PathMapFlags::DOOR_IMPASSABLE | PathMapFlags::SIDEWALL)));
+		if (!open) {
 			tries++;
 			// Give up if backed into a corner
 			// should we return nullptr instead, so we don't accidentally get closer to d?

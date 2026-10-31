@@ -22,7 +22,15 @@
 #      line, one window at a time; the party settings panel sets every character's policy
 #   7. travel: the whole party of 16 to the cave (FNT02) and back
 #   8. save and load: 16 party members with their OCCU/FUNL records (a death's time and place
-#      included), spells and lucky spell
+#      included), spells and lucky spell; the protagonist's name
+# M2.10 (funnel risks), after 4:
+#   a. the DCC party AI (DCCPARTY): sixteen near two marauders: those in reach fight, nobody chases
+#      or runs across the map; fighting back against an attacker; flee, passive and engage modes;
+#      with the party AI off nobody moves on their own
+#   b. encumbrance by body weight: everyone's weight rolled by race; light, heavy (half speed) and
+#      over the cap (can't move); the record sheet's line
+#   c. travel with 16 strung out in a single file (wider than MAX_TRAVELING_DISTANCE): one click
+#      takes everyone to the cave; back with only one selected
 # Every check logs "[FNT] ok ..." or "[FNT] FAIL ...", the end "[FNT] autotest done: N checks,
 # F failed"; FNT_AT_DONE becomes 1 if all passed, 2 if not.
 
@@ -199,6 +207,237 @@ def _Withdrawal ():
 	_Check ("corbin alive", _Dead (corb), False)
 	_Check ("level 0: the last weapon it fought with", GemRB.GetDCCFunnel (corb)["Occupation"]["LastWeapon"], "fntlswd")
 	GemRB.GameSelectPC (0, 1)
+
+def _Fighting (pc):
+	"""whom it is attacking now (an attack action in reach), 0 none"""
+	return GemRB.GetActorPosition (pc)["Attacking"]
+
+def _Watch (pcs, ticks):
+	"""watches for a while: {pc: whom it attacked meanwhile}"""
+	seen = dict ((pc, set ()) for pc in pcs)
+	for i in range (ticks):
+		yield
+		for pc in pcs:
+			target = _Fighting (pc)
+			if target:
+				seen[pc].add (target)
+	return seen
+
+def _Moved (start, pcs):
+	"""how far each one got from where it was"""
+	where = _Positions (pcs)
+	return dict ((pc, int (((p["X"] - start[pc][0]) ** 2 + (p["Y"] - start[pc][1]) ** 2) ** 0.5)) for pc, p in zip (pcs, where))
+
+BLOCK = (1400, 850) # the AI checks' block of 16, well away from the rat
+
+def _Block (pcs):
+	"""everyone back to a 4 x 4 block, no orders; returns the spots"""
+	spots = {}
+	for i, pc in enumerate (pcs):
+		column, row = i % 4, i // 4
+		spots[pc] = (BLOCK[0] + column * 48, BLOCK[1] + row * 40)
+		GemRB.ClearActions (pc)
+		GemRB.ExecuteString ("JumpToPoint([%d.%d])" % spots[pc], pc)
+	return spots
+
+def _Put (actor, x, y):
+	GemRB.ClearActions (actor)
+	GemRB.ExecuteString ("JumpToPoint([%d.%d])" % (x, y), actor)
+
+def _PartyAI ():
+	"""a: the DCC party AI with sixteen near two marauders"""
+	pcs = list (range (1, 17))
+	_Check ("party AI script for everyone", sorted (set ((GemRB.GetPlayerScript (pc, 7) or "").lower () for pc in pcs)), ["dccparty"])
+	_Check ("party AI: everyone defends by default", sorted (set (GemRB.GetDCCStats (pc)["PartyAI"] for pc in pcs)), [DCC_AI_DEFEND])
+	wasOn = GemRB.GetGUIFlags () & GS_PARTYAI
+	hitPoints = [GemRB.GetPlayerStat (pc, IE_HITPOINTS) for pc in pcs]
+	GemRB.GameSetScreenFlags (GS_PARTYAI, OP_OR)
+	# the peasants roll 10s (no fumbles to hurt them, no crits), the marauders 2s (misses)
+	for pc in pcs:
+		GemRB.DCCForceDice (pc, [10] * 80)
+	spots = _Block (pcs)
+	near = GemRB.CreateCreature (1, "FNTGOB", BLOCK[0] + 3 * 48 + 56, BLOCK[1] + 40)
+	far = GemRB.CreateCreature (1, "FNTGOB", BLOCK[0] - 300, BLOCK[1])
+	for gob in (near, far):
+		GemRB.DCCForceDice (gob, [2] * 200)
+	_Put (near, BLOCK[0] + 3 * 48 + 56, BLOCK[1] + 40)
+	_Put (far, BLOCK[0] - 300, BLOCK[1])
+	reach = [4, 8, 12] # the east column's top three: the near marauder is a body's width away
+	seen = yield from _Watch (pcs, 8)
+	moved = _Moved (spots, pcs)
+	fought = sorted (pc for pc in pcs if near in seen[pc])
+	_Log ("AI: fought the near marauder: %s; moved %s" % (fought, moved))
+	_Check ("AI: some in reach fight the near marauder", len (fought) > 0, True)
+	_Check ("AI: only those in reach", [pc for pc in fought if pc not in reach], [])
+	_Check ("AI: nobody goes for the far one", [pc for pc in pcs if far in seen[pc]], [])
+	_Check ("AI: nobody leaves its place", [pc for pc in pcs if moved[pc] > 100], [])
+
+	# fighting back: the far marauder comes and attacks Jora (slot 1), then is gone in a blink
+	jora = 1
+	GemRB.ExecuteString ("Attack(Player1)", far)
+	yield from _Wait (lambda: _Fighting (jora) == far, 24)
+	_Check ("AI: Jora fights back", _Fighting (jora), far)
+	_Put (far, BLOCK[0] - 300, BLOCK[1])
+	spots = _Block (pcs)
+	seen = yield from _Watch (pcs, 6)
+	moved = _Moved (spots, pcs)
+	_Check ("AI: nobody chases the attacker across the map", [pc for pc in pcs if moved[pc] > 100 or far in seen[pc]], [])
+
+	# passive: Odo (slot 8, in reach) leaves the marauder alone; flee: Rolf (slot 12) at 1 hp runs
+	odo, rolf = 8, 12
+	GemRB.DCCSetPartyAI (odo, DCC_AI_PASSIVE)
+	GemRB.DCCSetPartyAI (rolf, DCC_AI_FLEE)
+	spots = _Block (pcs)
+	yield # ExecuteString puts its action in front: Rolf's own jump comes after the block's
+	# Rolf below the block, where he has room to run, a marauder of his own next to him; then hurt
+	spots[rolf] = (1430, 1060)
+	hp = GemRB.GetPlayerStat (rolf, IE_HITPOINTS)
+	GemRB.SetPlayerStat (rolf, IE_HITPOINTS, 1)
+	_Put (rolf, spots[rolf][0], spots[rolf][1])
+	_Put (far, 1478, 1026)
+	yield
+	gob = GemRB.GetActorPosition (far)
+	_Log ("AI: Rolf at %s, the marauder at %d,%d" % (GemRB.GetActorPosition (rolf), gob["X"], gob["Y"]))
+	seen = yield from _Watch (pcs, 6)
+	_Check ("AI: passive Odo stays out of it", sorted (seen[odo]), [])
+	rolfAt = GemRB.GetActorPosition (rolf)
+	before = ((spots[rolf][0] - gob["X"]) ** 2 + (spots[rolf][1] - gob["Y"]) ** 2) ** 0.5
+	after = ((rolfAt["X"] - gob["X"]) ** 2 + (rolfAt["Y"] - gob["Y"]) ** 2) ** 0.5
+	_Log ("AI: Rolf fled from %d to %d px" % (before, after))
+	_Check ("AI: hurt Rolf flees", after > before + 60, True)
+	_Check ("AI: Rolf didn't fight", far in seen[rolf], False)
+	GemRB.SetPlayerStat (rolf, IE_HITPOINTS, hp)
+	GemRB.ClearActions (rolf)
+
+	# engage: Jora goes for an enemy close by (inside the leash), but not one further off
+	GemRB.DCCSetPartyAI (jora, DCC_AI_ENGAGE)
+	spots = _Block (pcs)
+	_Put (far, BLOCK[0] - 170, BLOCK[1])
+	seen = yield from _Watch ([jora], 8)
+	_Check ("AI: engaging Jora goes for the one close by", far in seen[jora], True)
+	_Check ("AI: on a short leash", _Moved (spots, [jora])[jora] < 220, True)
+	GemRB.ClearActions (jora)
+	spots = _Block (pcs)
+	_Put (far, BLOCK[0] - 420, BLOCK[1])
+	seen = yield from _Watch ([jora], 6)
+	_Check ("AI: but not one further off", far in seen[jora], False)
+	for pc in pcs:
+		GemRB.DCCSetPartyAI (pc, DCC_AI_DEFEND)
+
+	# the party AI off: nobody moves or fights on their own, even with a marauder in reach
+	GemRB.GameSetScreenFlags (GS_PARTYAI, OP_NAND)
+	spots = _Block (pcs)
+	_Put (near, BLOCK[0] + 3 * 48 + 56, BLOCK[1] + 40)
+	seen = yield from _Watch (pcs, 6)
+	moved = _Moved (spots, pcs)
+	_Check ("AI off: nobody fights", [pc for pc in pcs if seen[pc]], [])
+	_Check ("AI off: nobody moves", [pc for pc in pcs if moved[pc] > 10], [])
+
+	# clean up: the marauders go, the dice are random again, the party AI as it was
+	for gob in (near, far):
+		GemRB.DCCForceDice (gob, [])
+		GemRB.ExecuteString ("DestroySelf()", gob)
+	for pc in pcs:
+		GemRB.DCCForceDice (pc, [])
+		GemRB.ClearActions (pc)
+	GemRB.GameSetScreenFlags (GS_PARTYAI, OP_OR if wasOn else OP_NAND)
+	_Check ("AI: nobody hurt", [pc for pc, hp in zip (pcs, hitPoints) if GemRB.GetPlayerStat (pc, IE_HITPOINTS) < hp], [])
+	yield
+
+def _Encumbrance ():
+	"""b: encumbrance by body weight"""
+	ranges = {1: (115, 160), 2: (84, 120), 4: (124, 160), 5: (43, 70)}
+	brin = _Slot ("fntbrin")
+	stats = GemRB.GetDCCStats (brin)
+	_Check ("brin's body weight from his CRE", [stats["BodyWeight"], stats["BodyRolled"]], [120, 1])
+	_Check ("brin's limits: a third and a half", [stats["LoadHalf"], stats["LoadCap"]], [39, 60])
+	bad = []
+	for pc in range (1, 17):
+		if pc == brin:
+			continue
+		s = GemRB.GetDCCStats (pc)
+		low, high = ranges[GemRB.GetPlayerStat (pc, IE_RACE)]
+		if not s["BodyRolled"] or not low <= s["BodyWeight"] <= high:
+			bad.append ((pc, s["BodyWeight"]))
+	_Check ("everyone else's body weight rolled for the race", bad, [])
+	GemRB.DCCForceDice (16, [1, 2, 3, 4, 5])
+	_Check ("a forced roll: 110 + 5d10", GemRB.DCCSetBodyWeight (16), 125)
+	GemRB.DCCForceDice (16, [])
+	_Check ("the max encumbrance is the cap", GemRB.GetMaxEncumbrance (brin), 60)
+
+	start, goal = (1250, 900), (1450, 1050)
+	def walk ():
+		_Put (brin, start[0], start[1])
+		yield
+		GemRB.DCCWalk (brin, goal[0], goal[1])
+		yield
+		yield
+		yield
+		where = GemRB.GetActorPosition (brin)
+		GemRB.ClearActions (brin)
+		return int (((where["X"] - start[0]) ** 2 + (where["Y"] - start[1]) ** 2) ** 0.5)
+
+	carried = GemRB.GetDCCStats (brin)["Carried"]
+	_Check ("light: Str 15 and a light load walk (no strmod.2da gap)", GemRB.GetDCCStats (brin)["LoadName"], "light")
+	light = yield from walk ()
+	speed = GemRB.GetDCCStats (brin)["WalkSpeed"]
+	# stones up to just past a third of 120 lb: half speed
+	stones = 0
+	while carried + 20 * stones <= 39:
+		GemRB.CreateItem (brin, "FNTSTONE")
+		stones += 1
+	stats = GemRB.GetDCCStats (brin)
+	_Check ("heavy: past a third", [stats["Carried"], stats["LoadName"]], [carried + 20 * stones, "heavy" if carried + 20 * stones <= 60 else "over"])
+	_Check ("heavy: half speed", stats["WalkSpeed"] >= 2 * speed - 1, True)
+	heavy = yield from walk ()
+	_Log ("encumbrance: %d px light, %d px heavy (carrying %d lb)" % (light, heavy, stats["Carried"]))
+	_Check ("heavy: about half as far", light > 20 and 0.3 * light <= heavy <= 0.7 * light, True)
+	sheet = __import__ ("DCCSheet").Lines (brin)
+	_Check ("the record sheet shows the load", "Weight 120 lb   Load %d lb: half speed (half speed past 39, can't move past 60)" % stats["Carried"] in sheet, True)
+	while GemRB.GetDCCStats (brin)["Carried"] <= 60:
+		GemRB.CreateItem (brin, "FNTSTONE")
+		stones += 1
+	stats = GemRB.GetDCCStats (brin)
+	_Check ("over the cap: can't move", [stats["LoadName"], stats["WalkSpeed"]], ["over", 0])
+	over = yield from walk ()
+	_Check ("over the cap: stays put", over <= 2, True)
+	_Check ("the record sheet says so", any ("Load %d lb: can't move" % stats["Carried"] in line for line in __import__ ("DCCSheet").Lines (brin)), True)
+	for i in range (stones):
+		GemRB.ExecuteString ('DestroyItem("FNTSTONE")', brin)
+	yield
+	_Check ("unloaded: light again", [GemRB.GetDCCStats (brin)["Carried"], GemRB.GetDCCStats (brin)["LoadName"]], [carried, "light"])
+
+def _LineTravel ():
+	"""c: sixteen in a single file far longer than the gather distance travel at one click"""
+	pcs = list (range (1, 17))
+	for i, pc in enumerate (pcs):
+		GemRB.ClearActions (pc)
+		GemRB.ExecuteString ("JumpToPoint([%d.%d])" % (760 + i * 44, 520 + i * 30), pc)
+	for i in range (3):
+		yield
+	where = _Positions (pcs)
+	span = int (((where[0]["X"] - where[-1]["X"]) ** 2 + (where[0]["Y"] - where[-1]["Y"]) ** 2) ** 0.5)
+	_Check ("line: wider than the gather distance (400)", span > 600, True)
+	GemRB.GameSetFormation (2, GemRB.GameGetFormation ())
+	GemRB.GameSelectPC (0, 1)
+	GemRB.GameSelectPC (1, 1, SELECT_REPLACE)
+	for pc in pcs:
+		GemRB.GameSelectPC (pc, 1)
+	_Check ("line: a click on ToCave", GemRB.GameControlTravel ("ToCave"), True)
+	yield from _Wait (lambda: all (p["Area"].lower () == "fnt02" for p in _Positions (pcs)), 60)
+	_Check ("line: all 16 in the cave", sorted (set (p["Area"].lower () for p in _Positions (pcs))), ["fnt02"])
+	for i in range (4):
+		yield
+	# back with only Pip selected: the click brings everyone
+	GemRB.GameSelectPC (0, 1)
+	GemRB.GameSelectPC (16, 1, SELECT_REPLACE)
+	_Check ("line: back, a click with one selected", GemRB.GameControlTravel ("ToGlade"), True)
+	yield from _Wait (lambda: all (p["Area"].lower () == "fnt01" for p in _Positions (pcs)), 60)
+	_Check ("line: all 16 back in the glade", sorted (set (p["Area"].lower () for p in _Positions (pcs))), ["fnt01"])
+	GemRB.GameSetFormation (0, GemRB.GameGetFormation ())
+	GemRB.GameSelectPC (0, 1)
+	for i in range (2):
+		yield
 
 def _ClassPicks ():
 	"""5: the level-1 class picks: spells by class and level, substitutes, open slots, choices"""
@@ -390,6 +629,8 @@ def _Save ():
 	last = _Slot ("fntpip")
 	_Check ("pip to the reserve, dealt to player 2", GemRB.DCCSetFunnel (last, 4, -1, 2), True)
 	Saved["funnel"] = [GemRB.GetDCCFunnel (pc) for pc in range (1, 17)]
+	Saved["names"] = [GemRB.GetPlayerName (1, which) for which in (0, 1, 2)]
+	_Log ("the protagonist's names: %s" % Saved["names"])
 	for game in _SaveGames ():
 		GemRB.DeleteSaveGame (game)
 	_Check ("game saved", GemRB.SaveGame (None, SaveName), 0)
@@ -422,6 +663,8 @@ def _StepLoaded ():
 	lael = GemRB.GetDCCMagic (_Slot ("fntlael"))
 	_Check ("loaded: the elf's lucky spell", [(s["Spell"], s["LuckyMod"]) for s in lael["Spells"] if s["Lucky"]], [(Saved.get ("lucky"), 2)])
 	_Check ("loaded: in the cave", GemRB.GetActorPosition (1)["Area"].lower (), "fnt02")
+	_Check ("loaded: the protagonist's name as set (not the CRE's)", [GemRB.GetPlayerName (1, which) for which in (0, 1, 2)], Saved.get ("names"))
+	_Check ("loaded: brin's body weight", GemRB.GetDCCStats (_Slot ("fntbrin"))["BodyWeight"], 120)
 	import Roster
 	Roster.UpdateRoster ()
 	_Check ("loaded: the roster", len (Roster.Shown), 16)
@@ -430,6 +673,9 @@ def _StepLoaded ():
 def _Run ():
 	yield from _Party ()
 	yield from _Withdrawal ()
+	yield from _PartyAI ()
+	yield from _Encumbrance ()
+	yield from _LineTravel ()
 	yield from _ClassPicks ()
 	yield from _Prompts ()
 	yield from _Travel ()

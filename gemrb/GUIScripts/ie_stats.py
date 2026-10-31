@@ -427,6 +427,17 @@ IE_DCC_MAXSPELL                 = 316 # highest castable spell level
 IE_DCC_NOCAST                   = 317 # DCC_BLOCK_* bits
 IE_DCC_LOHMOD                   = 318 # lay on hands check modifier
 IE_DCC_MUTATION                 = 319 # mutation bits
+IE_DCC_WEIGHT                   = 320 # body weight in pounds (0: the race's average)
+IE_DCC_PARTYAI                  = 321 # the party AI mode (DCC_AI_*)
+
+# the DCC party AI modes (IE_DCC_PARTYAI, the DCCPARTY script) and loads (GetDCCStats "Load"), M2.10
+DCC_AI_DEFEND = 0
+DCC_AI_FLEE = 1
+DCC_AI_PASSIVE = 2
+DCC_AI_ENGAGE = 3
+DCC_LOAD_LIGHT = 0
+DCC_LOAD_HEAVY = 1
+DCC_LOAD_OVER = 2
 
 # DCC states at 0 (IE_DCC_STATE bits)
 DCC_STATE_IMMOBILE = 1

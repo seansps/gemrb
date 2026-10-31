@@ -1,0 +1,11 @@
+2DA V1.0
+0
+# ethren (M2.10): body weight and encumbrance, docs/rules/equipment.md "Encumbrance" (an Ethren
+# decision). Per race (race.ids number): the body weight is BASE + DICE d SIDES pounds; carrying more
+# than HALF percent of it is half speed, more than CAP percent and the character can't move (the book:
+# nobody carries more than half its body weight). The first row stands in for any other race.
+         RACE BASE DICE SIDES HALF CAP
+HUMAN    1    110  5    10    33   50
+ELF      2    80   4    10    33   50
+DWARF    4    120  4    10    33   50
+HALFLING 5    40   3    10    33   50

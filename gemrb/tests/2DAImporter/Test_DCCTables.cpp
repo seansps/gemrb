@@ -1032,6 +1032,25 @@ TEST(DCC_Tables, SpellListsAndClericSpellsKnown)
 	}
 }
 
+// M2.10: body weight by race and the load limits (dccbody.2da)
+TEST(DCC_Tables, BodyWeight)
+{
+	auto table = Open2DA("dccbody");
+	ASSERT_TRUE(table);
+	BodyTable body;
+	ASSERT_TRUE(body.Load(*table));
+	EXPECT_EQ(body.Average(1), 137);
+	EXPECT_EQ(body.Average(2), 102);
+	EXPECT_EQ(body.Average(4), 142);
+	EXPECT_EQ(body.Average(5), 56);
+	// the book: no halfling over 70 lb, nobody carries more than half the body weight
+	EXPECT_EQ(body.Roll(5, [](int sides) { return sides; }), 70);
+	for (int race : { 1, 2, 4, 5 }) {
+		EXPECT_EQ(body.Row(race).capPercent, 50) << race;
+		EXPECT_EQ(body.Row(race).halfPercent, 33) << race;
+	}
+}
+
 // Phase 3: the formations for parties of 16 (formatio.2da): 20 places each, none shared
 TEST(DCC_Tables, Formations)
 {

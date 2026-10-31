@@ -974,7 +974,10 @@ int GAMImporter::PutActor(DataStream* stream, const Actor* ac, ieDword CRESize, 
 		}
 	}
 
-	if (ac->LongStrRef == ieStrRef::INVALID) {
+	// a name set as text (SetPlayerName: the player's choice, eg. the demo's "Jora the Seeker") is
+	// saved even when the CRE has a strref of its own; otherwise loading the save (and a co-op
+	// client's copy of the host's game) brought back the CRE's name
+	if (ac->LongStrRef == ieStrRef::INVALID || ac->GetLongName() != core->GetString(ac->LongStrRef)) {
 		std::string tmpstr = TLKStringFromString(ac->GetLongName());
 		stream->WriteVariable(ieVariable(tmpstr));
 	} else if (newVersion != GAMVersion::IWD && newVersion != GAMVersion::IWD2) {
