@@ -126,43 +126,111 @@ uint32_t PromptQueue::Ask(PromptQuestion question, std::vector<uint8_t> asked, u
 	}
 	Pending pending { nextID++, std::move(question), std::move(asked) };
 	uint32_t id = pending.id;
-	if (!active.id && queue.empty()) {
-		Open(std::move(pending), now);
-	} else {
-		queue.push_back(std::move(pending));
-	}
+	queue.push_back(std::move(pending));
+	Pump(now);
 	return id;
 }
 
 const PromptActive* PromptQueue::Active() const
 {
-	return active.id ? &active : nullptr;
+	return open.empty() ? nullptr : &open.front();
+}
+
+const PromptActive* PromptQueue::Find(uint32_t id) const
+{
+	for (const auto& prompt : open) {
+		if (prompt.id == id) return &prompt;
+	}
+	return nullptr;
+}
+
+std::vector<uint8_t> PromptQueue::Lane(const PromptActive& prompt)
+{
+	std::vector<uint8_t> lane;
+	for (const auto& voter : prompt.voters) {
+		lane.push_back(voter.slot);
+	}
+	return lane;
+}
+
+static bool Meets(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b)
+{
+	for (uint8_t slot : a) {
+		if (std::find(b.begin(), b.end(), slot) != b.end()) return true;
+	}
+	return false;
+}
+
+size_t PromptQueue::QueuedBehind(uint32_t id) const
+{
+	const PromptActive* prompt = Find(id);
+	if (!prompt) return 0;
+	std::vector<uint8_t> lane = Lane(*prompt);
+	size_t count = 0;
+	for (const auto& pending : queue) {
+		if (Meets(pending.asked, lane)) ++count;
+	}
+	return count;
+}
+
+size_t PromptQueue::QueuedFor(uint8_t slot) const
+{
+	size_t count = 0;
+	for (const auto& pending : queue) {
+		if (std::find(pending.asked.begin(), pending.asked.end(), slot) != pending.asked.end()) ++count;
+	}
+	return count;
+}
+
+// opens, in order, every waiting prompt whose lane is free: not taken by an open prompt, nor
+// by one waiting ahead of it (so each lane keeps its order)
+void PromptQueue::Pump(uint64_t now)
+{
+	std::vector<uint8_t> taken;
+	for (const auto& prompt : open) {
+		for (uint8_t slot : Lane(prompt)) {
+			taken.push_back(slot);
+		}
+	}
+	for (auto it = queue.begin(); it != queue.end();) {
+		// a vote nobody is in has no lane: it is decided as soon as it opens
+		if (!Meets(it->asked, taken)) {
+			Pending next = std::move(*it);
+			it = queue.erase(it);
+			taken.insert(taken.end(), next.asked.begin(), next.asked.end());
+			Open(std::move(next), now);
+			continue;
+		}
+		taken.insert(taken.end(), it->asked.begin(), it->asked.end());
+		++it;
+	}
 }
 
 void PromptQueue::Open(Pending pending, uint64_t now)
 {
-	active = PromptActive();
-	active.id = pending.id;
-	active.question = std::move(pending.question);
-	uint32_t timeout = active.question.timeout ? active.question.timeout : PROMPT_DEFAULT_TIMEOUT;
-	active.deadline = now + timeout;
+	PromptActive prompt;
+	prompt.id = pending.id;
+	prompt.question = std::move(pending.question);
+	uint32_t timeout = prompt.question.timeout ? prompt.question.timeout : PROMPT_DEFAULT_TIMEOUT;
+	prompt.deadline = now + timeout;
 	for (uint8_t slot : pending.asked) {
 		PromptVoter voter;
 		voter.slot = slot;
-		active.voters.push_back(voter);
+		prompt.voters.push_back(voter);
 	}
-	Retarget();
+	Retarget(prompt);
+	open.push_back(std::move(prompt));
 	revision++;
 	// a vote nobody else is in (or everyone is away) is decided at once
-	if (Decided()) Finish(PromptOutcome::Answered);
+	if (Decided(open.back())) Finish(open.size() - 1, PromptOutcome::Answered);
 }
 
 // who answers for whom: single prompts go to the host while their owner is away, voters
 // who are away are just marked so (they don't hold the vote up)
-void PromptQueue::Retarget()
+void PromptQueue::Retarget(PromptActive& prompt)
 {
-	bool vote = active.question.flags & PromptQuestion::VOTE;
-	for (auto& voter : active.voters) {
+	bool vote = prompt.question.flags & PromptQuestion::VOTE;
+	for (auto& voter : prompt.voters) {
 		if (voter.state != PromptVoter::State::Waiting) continue;
 		bool away = !Present(voter.slot);
 		voter.away = away;
@@ -170,15 +238,14 @@ void PromptQueue::Retarget()
 	}
 }
 
-bool PromptQueue::Decided() const
+bool PromptQueue::Decided(const PromptActive& prompt) const
 {
-	if (!active.id) return false;
-	bool vote = active.question.flags & PromptQuestion::VOTE;
-	bool stopOnNo = active.question.flags & PromptQuestion::STOP_ON_NO;
-	for (const auto& voter : active.voters) {
+	bool vote = prompt.question.flags & PromptQuestion::VOTE;
+	bool stopOnNo = prompt.question.flags & PromptQuestion::STOP_ON_NO;
+	for (const auto& voter : prompt.voters) {
 		if (vote && stopOnNo && voter.state == PromptVoter::State::Answered && voter.values == std::vector<int32_t> { 0 }) return true;
 	}
-	for (const auto& voter : active.voters) {
+	for (const auto& voter : prompt.voters) {
 		if (voter.state != PromptVoter::State::Waiting) continue;
 		if (vote && voter.away) continue;
 		return false;
@@ -186,8 +253,9 @@ bool PromptQueue::Decided() const
 	return true;
 }
 
-void PromptQueue::Finish(PromptOutcome outcome)
+void PromptQueue::Finish(size_t index, PromptOutcome outcome)
 {
+	PromptActive& active = open[index];
 	PromptResult result;
 	result.id = active.id;
 	result.question = active.question;
@@ -219,18 +287,21 @@ void PromptQueue::Finish(PromptOutcome outcome)
 		result.values = fallback;
 	}
 	finished.push_back(std::move(result));
-	active = PromptActive();
+	open.erase(open.begin() + std::ptrdiff_t(index));
 	revision++;
 }
 
 PromptQueue::Status PromptQueue::Answer(uint32_t id, uint8_t slot, const std::vector<int32_t>& values, uint64_t now)
 {
-	if (!active.id || id != active.id) return Status::Closed;
-	if (now >= active.deadline) {
+	size_t index = 0;
+	while (index < open.size() && open[index].id != id) ++index;
+	if (index == open.size()) return Status::Closed;
+	if (now >= open[index].deadline) {
 		// too late, even if Update hasn't noticed yet
 		Update(now);
 		return Status::Closed;
 	}
+	PromptActive& active = open[index];
 	PromptVoter* mine = nullptr;
 	bool answered = false;
 	for (auto& voter : active.voters) {
@@ -247,7 +318,7 @@ PromptQueue::Status PromptQueue::Answer(uint32_t id, uint8_t slot, const std::ve
 	mine->values = values;
 	mine->away = false;
 	revision++;
-	if (Decided()) Finish(PromptOutcome::Answered);
+	if (Decided(active)) Finish(index, PromptOutcome::Answered);
 	return Status::Accepted;
 }
 
@@ -260,8 +331,10 @@ void PromptQueue::SetPresent(uint8_t slot, bool present)
 	} else {
 		absent.insert(slot);
 	}
-	if (was == present || !active.id) return;
-	Retarget();
+	if (was == present || open.empty()) return;
+	for (auto& prompt : open) {
+		Retarget(prompt);
+	}
 	revision++;
 }
 
@@ -272,22 +345,23 @@ bool PromptQueue::Present(uint8_t slot) const
 
 void PromptQueue::Update(uint64_t now)
 {
-	if (active.id && Decided()) {
-		Finish(PromptOutcome::Answered);
-	} else if (active.id && now >= active.deadline) {
-		Finish(PromptOutcome::TimedOut);
+	for (size_t i = 0; i < open.size();) {
+		if (Decided(open[i])) {
+			Finish(i, PromptOutcome::Answered);
+		} else if (now >= open[i].deadline) {
+			Finish(i, PromptOutcome::TimedOut);
+		} else {
+			++i;
+		}
 	}
-	while (!active.id && !queue.empty()) {
-		Pending next = std::move(queue.front());
-		queue.pop_front();
-		Open(std::move(next), now);
-	}
+	Pump(now);
 }
 
 bool PromptQueue::Cancel(uint32_t id)
 {
-	if (active.id && active.id == id) {
-		Finish(PromptOutcome::Cancelled);
+	for (size_t i = 0; i < open.size(); ++i) {
+		if (open[i].id != id) continue;
+		Finish(i, PromptOutcome::Cancelled);
 		return true;
 	}
 	for (auto it = queue.begin(); it != queue.end(); ++it) {
@@ -306,8 +380,8 @@ bool PromptQueue::Cancel(uint32_t id)
 
 void PromptQueue::Clear()
 {
-	if (active.id) revision++;
-	active = PromptActive();
+	if (!open.empty()) revision++;
+	open.clear();
 	queue.clear();
 	finished.clear();
 }
@@ -321,8 +395,14 @@ std::vector<PromptResult> PromptQueue::TakeFinished()
 
 uint32_t PromptQueue::Remaining(uint64_t now) const
 {
-	if (!active.id || now >= active.deadline) return 0;
-	return uint32_t(active.deadline - now);
+	return open.empty() ? 0 : Remaining(open.front().id, now);
+}
+
+uint32_t PromptQueue::Remaining(uint32_t id, uint64_t now) const
+{
+	const PromptActive* prompt = Find(id);
+	if (!prompt || now >= prompt->deadline) return 0;
+	return uint32_t(prompt->deadline - now);
 }
 
 }

@@ -31,7 +31,7 @@
 namespace GemRB {
 
 constexpr uint8_t NET_MAGIC = 0xE7;
-constexpr uint8_t NET_PROTOCOL_VERSION = 12;
+constexpr uint8_t NET_PROTOCOL_VERSION = 13;
 constexpr uint16_t NET_DEFAULT_PORT = 27015;
 constexpr size_t NET_HEADER_SIZE = 3;
 constexpr size_t NET_MAX_STRING = 1024;
@@ -863,8 +863,9 @@ struct NetPromptVoter {
 	std::string byName;
 };
 
-// the open prompt, the same for everyone: the asked player gets the window to answer it,
-// the others "Waiting for X to decide"; CLOSED carries how it ended, for everyone's message window
+// an open prompt, the same for everyone: the asked player gets the window to answer it,
+// the others "Waiting for X to decide"; CLOSED carries how it ended, for everyone's message window.
+// v13 (M2.10): several may be open at once, one per player (lane); each comes and goes by its id
 struct GEM_EXPORT NetPrompt {
 	static constexpr NetMsgType Type = NetMsgType::Prompt;
 	enum State : uint8_t {
@@ -874,7 +875,7 @@ struct GEM_EXPORT NetPrompt {
 	uint32_t id = 0;
 	uint8_t state = OPEN;
 	uint32_t remaining = 0; // ms, as the host sent it
-	uint8_t queued = 0; // prompts waiting behind this one (v12)
+	uint8_t queued = 0; // prompts waiting behind this one (v12; v13: in its lane, its players' own)
 	PromptQuestion question; // actorID as a network ID
 	std::vector<NetPromptVoter> voters; // at most PROMPT_MAX_VOTERS
 	uint8_t outcome = 0; // CLOSED: PromptOutcome

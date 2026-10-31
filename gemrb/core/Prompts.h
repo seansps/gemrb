@@ -8,10 +8,11 @@
  * owns a party member a question and carries on with the answer on a later frame.
  *
  * The same in single player (the local player owns everyone, no network) and in co-op,
- * where the host asks and the owner's client answers. The game pauses while a prompt
- * is open; one is open at a time and the rest wait in order. Timeouts answer with the
- * default, and the host answers for an owner who is away (BG: a leaving player's
- * characters are the host's until they return).
+ * where the host asks and the owner's client answers. The game pauses while any prompt
+ * is open. Each player has one open at a time and the rest of theirs wait in order (M2.10:
+ * in co-op, different players' prompts are open at the same time, see PromptQueue). Timeouts
+ * answer with the default, and the host answers for an owner who is away (BG: a leaving
+ * player's characters are the host's until they return).
  *
  *     PromptQuestion q;
  *     q.kind = PromptKind::Integer;
@@ -30,10 +31,12 @@
 #include "exports.h"
 
 #include "Net/Prompt.h"
+#include "Net/Protocol.h"
 
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -49,16 +52,17 @@ class GEM_EXPORT PromptManager {
 public:
 	using Callback = std::function<void(const PromptResult&)>;
 
-	// the open prompt as our player sees it
+	// the prompt our player sees: the oldest open one it answers, else (read only) the oldest open one
 	struct View {
 		uint32_t id = 0;
 		PromptQuestion question; // actorID is a local global ID
 		bool mine = false; // we answer it: the prompt window; else read only, "Waiting for X to decide"
 		bool sent = false; // client: our answer is on its way to the host
-		std::string waitingFor; // who decides, eg. "client-one" or "client-one, client-two"
+		std::string waitingFor; // who decides, eg. "client-one" or "client-one, client-two" (read only: of every open prompt)
 		std::string askedName; // whose decision it is, when the host answers for someone who is away
 		uint64_t deadline = 0; // local clock (ms)
-		size_t queued = 0; // prompts waiting behind this one (Phase 3: one at a time, never stacked)
+		size_t queued = 0; // ours: our other prompts, open or waiting behind this one (one window at a time)
+		size_t open = 0; // prompts open in the game now (M2.10: one per player at most)
 	};
 
 	PromptManager() = default;
@@ -97,8 +101,8 @@ public:
 	void OnRemotePrompt(const NetPrompt& msg);
 	/** host: a player's answer */
 	void OnRemoteAnswer(uint8_t slot, const NetPromptAnswer& msg);
-	/** host: the open prompt as a message, for a player who just loaded the game */
-	bool OpenMessage(NetPrompt& msg) const;
+	/** host: the open prompts as messages, for a player who just loaded the game */
+	std::vector<NetPrompt> OpenMessages() const;
 	/** client: we left the game or the session */
 	void Reset();
 	/** the engine shuts down: everything is dropped, no callbacks run */
@@ -134,7 +138,8 @@ private:
 	void Finished(const PromptResult& result);
 	void Broadcast();
 	void BuildView();
-	NetPrompt Message() const;
+	void ViewFrom(const std::vector<NetPrompt>& prompts, const std::vector<uint64_t>& deadlines, uint8_t me);
+	NetPrompt Message(const PromptActive& active) const;
 	std::string OutcomeText(const PromptResult& result) const;
 	static std::string Name(uint8_t slot);
 	void ShowLine(const std::string& text) const;
@@ -148,6 +153,13 @@ private:
 	std::map<uint32_t, Asked> asked;
 	uint32_t sentRevision = 0;
 	size_t sentQueued = 0;
+	// client: the open prompts as the host sent them, with their local deadlines; ours answered
+	struct Remote {
+		NetPrompt msg;
+		uint64_t deadline = 0;
+	};
+	std::map<uint32_t, Remote> remote;
+	std::set<uint32_t> answered;
 	View view;
 	bool haveView = false;
 	bool guiDirty = false;

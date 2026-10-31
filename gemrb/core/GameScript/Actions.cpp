@@ -1332,6 +1332,15 @@ void GameScript::MoveToPoint(Scriptable* Sender, Holder<Action> parameters)
 
 	// give up if we can't move there (no path was found)
 	if (!actor->InMove()) {
+		// DCC (M2.10): in a party of 16 a bump can leave a walker a body or two short of its
+		// formation place; once the crowd has settled, it tries for the place again (twice at most)
+		const Point& goal = parameters->pointParameter;
+		int near = std::max(parameters->int0Parameter, 24);
+		if (core->HasFeature(GFFlags::RULES_DCC) && actor->InParty && Sender->CurrentActionState < 2 && SquaredDistance(actor->Pos, goal) > unsigned(near * near)) {
+			++Sender->CurrentActionState;
+			actor->WalkTo(goal, parameters->int0Parameter);
+			if (actor->InMove()) return;
+		}
 		// we should probably instead keep retrying until we reach dest
 		actor->ClearPath();
 		Sender->ReleaseCurrentAction();

@@ -10,7 +10,7 @@
 #      place in the funnel (FUNL); Player16 as a script object
 #   2. the roster: 16 slots shown, select one, toggle, select all
 #   3. a formation move of all 16 (GameControlMoveSelected): everyone arrives, none stuck, no two
-#      on the same spot; again in a column
+#      on the same spot, everyone near the place it was given (M2.10); again in a column
 #   4. withdrawal on a formation move and a scripted move (no action of its own): the giant rat's
 #      free attack
 #   5. the level-1 class picks with forced dice: a wizard (Table 5-8 rows without content
@@ -169,6 +169,7 @@ def _Party ():
 		GemRB.GameSetFormation (formation, GemRB.GameGetFormation ())
 		GemRB.GameControlMoveSelected (target[0], target[1])
 		yield
+		places = [(p["DestX"], p["DestY"]) for p in _Positions (range (1, 17))] # each one's formation place, before any bump
 		yield from _Wait (lambda: not any (p["Moving"] for p in _Positions (range (1, 17))), 60)
 		where = _Positions (range (1, 17))
 		_Check ("formation %d: all 16 stopped" % formation, sum (1 for p in where if not p["Moving"]), 16)
@@ -180,6 +181,11 @@ def _Party ():
 		_Check ("formation %d: all near the goal" % formation, far, [])
 		_Check ("formation %d: no two on one spot" % formation, _Spread (where) >= 8, True)
 		_Log ("formation %d positions: %s" % (formation, " ".join ("%d,%d" % (p["X"], p["Y"]) for p in where)))
+		offsets = sorted ((abs (p["X"] - place[0]) + abs (p["Y"] - place[1]) for p, place in zip (where, places)), reverse = True)
+		_Log ("formation %d: off their formation places by %s px" % (formation, offsets[:4]))
+		# M2.10: a walker a bump left short tries again once the crowd settles (DCC games), so
+		# everyone ends within a body or two of the place it was given (stock: up to ~350 px)
+		_Check ("formation %d: all within 80 px of the place given" % formation, offsets[0] <= 80, True)
 	GemRB.GameSetFormation (0, GemRB.GameGetFormation ())
 
 def _Withdrawal ():
@@ -298,11 +304,16 @@ def _PartyAI ():
 	yield
 	gob = GemRB.GetActorPosition (far)
 	_Log ("AI: Rolf at %s, the marauder at %d,%d" % (GemRB.GetActorPosition (rolf), gob["X"], gob["Y"]))
-	seen = yield from _Watch (pcs, 6)
-	_Check ("AI: passive Odo stays out of it", sorted (seen[odo]), [])
-	rolfAt = GemRB.GetActorPosition (rolf)
 	before = ((spots[rolf][0] - gob["X"]) ** 2 + (spots[rolf][1] - gob["Y"]) ** 2) ** 0.5
-	after = ((rolfAt["X"] - gob["X"]) ** 2 + (rolfAt["Y"] - gob["Y"]) ** 2) ** 0.5
+	after = before
+	seen = dict ((pc, set ()) for pc in pcs)
+	for i in range (10):
+		part = yield from _Watch (pcs, 1)
+		for pc in pcs:
+			seen[pc] |= part[pc]
+		rolfAt = GemRB.GetActorPosition (rolf)
+		after = max (after, ((rolfAt["X"] - gob["X"]) ** 2 + (rolfAt["Y"] - gob["Y"]) ** 2) ** 0.5)
+	_Check ("AI: passive Odo stays out of it", sorted (seen[odo]), [])
 	_Log ("AI: Rolf fled from %d to %d px" % (before, after))
 	_Check ("AI: hurt Rolf flees", after > before + 60, True)
 	_Check ("AI: Rolf didn't fight", far in seen[rolf], False)

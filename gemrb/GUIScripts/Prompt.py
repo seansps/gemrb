@@ -10,6 +10,9 @@
 # and the time left. Number keys pick a choice (they don't reach the dialog's replies), Up/Down
 # move the selection, +/- (or Left/Right) change a number, digits type one, Enter takes the
 # selection, Esc the default. Everyone else sees a read only "Waiting for X to decide" line.
+# In co-op each player can have a prompt of their own open at the same time (M2.10, protocol
+# v13): the window shows our oldest one, the rest of ours wait behind it; with none of ours the
+# line names everyone still deciding.
 # The outcome goes to everyone's message window (the engine writes it).
 #
 # Shared by all game types and single player alike; built from code, so no CHU is needed. The
@@ -110,6 +113,8 @@ def _WaitText (prompt):
 	extra = " for %s" % prompt["For"] if prompt["For"] else ""
 	if prompt.get ("Queued", 0):
 		extra += ", %d more waiting" % prompt["Queued"]
+	if prompt.get ("Open", 1) > 1:
+		what += " and %d other prompt%s" % (prompt["Open"] - 1, "s" if prompt["Open"] > 2 else "")
 	return "Waiting for %s to decide%s: %s (%d s)" % (who, extra, what, _Seconds ())
 
 def _OpenWaiting (prompt):
@@ -165,7 +170,7 @@ def _OpenPrompt (prompt):
 	win.AddAlias ("PROMPTWIN")
 	win.SetBackground (WindowColor)
 	title = prompt["Title"]
-	# several at once wait in line, one window at a time (the count of the ones behind this one)
+	# several of ours wait in line, one window at a time (the count of the ones behind this one)
 	if prompt.get ("Queued", 0):
 		title += " (%d more waiting)" % prompt["Queued"]
 	win.CreateLabel (0x10000000, 10, 4, width - 80, 20, Font, title, IE_FONT_ALIGN_LEFT | IE_FONT_ALIGN_MIDDLE)

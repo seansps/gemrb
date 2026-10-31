@@ -4054,6 +4054,7 @@ static PyObject* GemRB_GetPrompt(PyObject* /*self*/, PyObject* /*args*/)
 	PyDictSet(dict, "For", NetPyString(view->askedName));
 	PyDictSet(dict, "Remaining", PyLong_FromLong(long(prompts.Remaining())));
 	PyDictSet(dict, "Queued", PyLong_FromLong(long(view->queued)));
+	PyDictSet(dict, "Open", PyLong_FromLong(long(view->open)));
 	return dict;
 }
 

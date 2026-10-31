@@ -423,8 +423,9 @@ int Map::DCCGatherAtExit(const InfoPoint* ip, const Point& goal, bool onlySelect
 		if (Distance(goal, pc) <= MAX_TRAVELING_DISTANCE) continue;
 		// someone who can't move or isn't ours to move keeps the party here, as in the stock rule
 		if (pc->GetStat(IE_EA) > EA_GOODCUTOFF || (pc->GetStat(IE_STATE_ID) & STATE_CANTMOVE) || !pc->CalculateSpeed(false)) return 0;
-		// on its way already
-		if (pc->InMove() && Distance(pc->Destination, goal) <= MAX_TRAVELING_DISTANCE / 2) {
+		// on its way already: walking there, or sent here and its walk not started yet
+		bool sent = !pc->CannotPassEntrance(ip->GetGlobalID()) && (pc->GetCurrentAction() || pc->GetNextAction());
+		if ((pc->InMove() && Distance(pc->Destination, goal) <= MAX_TRAVELING_DISTANCE / 2) || (sent && !pc->InMove())) {
 			++coming;
 			continue;
 		}
