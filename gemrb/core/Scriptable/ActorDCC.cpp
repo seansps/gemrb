@@ -58,6 +58,19 @@ static int DCCModifier(int score)
 	return core->GetDCCAbilityBonus(STAT_DCC_MOD, score);
 }
 
+// looks (M2.11): the hair and beard overlays ------------------------------------------
+
+void Actor::DCCUpdateLooks()
+{
+	const RulesData* rules = Rules();
+	if (!anims || !rules) return;
+	bool helmet = anims->HasHelmet();
+	std::string hair = DCC::HairOverlay(rules->hair.Find(int(BaseStats[IE_DCC_HAIR]), false), helmet);
+	std::string beard = DCC::HairOverlay(rules->hair.Find(int(BaseStats[IE_DCC_BEARD]), true), helmet);
+	// cheap when nothing changed: SetHairRefs only drops the animations for a new code
+	anims->SetHairRefs(AnimRef(hair.c_str()), AnimRef(beard.c_str()));
+}
+
 // encumbrance by body weight (M2.10) ------------------------------------------------
 
 int Actor::DCCBodyWeight() const

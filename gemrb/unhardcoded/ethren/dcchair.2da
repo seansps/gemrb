@@ -1,0 +1,10 @@
+2DA V1.0
+*
+# ethren (M2.11): the hair and beard overlays (DCC/Looks.h, docs/architecture/art-pipeline.md "Sprites").
+# A character's IE_DCC_HAIR / IE_DCC_BEARD (the CRE extension's CHAR record) picks a row by ID and KIND
+# (0 none: a body with its hair baked in). CODE is the overlay's 2-letter animation code: its BAMs are
+# WQ<size><code><suffix>, drawn like a helmet's over the body and coloured by the hair range. HELMET is
+# what is drawn while a helmet is worn: a cropped style's code, or * for nothing.
+               ID   KIND   CODE  HELMET
+SIMPLE_PARTED  1    HAIR   HP    *
+FULL_BEARD     1    BEARD  BD    BD

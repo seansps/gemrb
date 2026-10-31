@@ -81,8 +81,8 @@ TEST(DCC_Body, CharacterRecord)
 	EXPECT_FALSE(ext.Empty());
 	ext.body.partyAI = PartyAI::Flee;
 	std::vector<uint8_t> bytes = WriteExtension(ext);
-	// header and CHAR (12 + 4)
-	EXPECT_EQ(bytes.size(), EXT_HEADER_SIZE + 16);
+	// header and CHAR (12 + 8, version 2)
+	EXPECT_EQ(bytes.size(), EXT_HEADER_SIZE + 20);
 	CharacterExt back;
 	ASSERT_TRUE(ReadExtension(bytes.data(), bytes.size(), back));
 	EXPECT_EQ(back.body.weight, 142);
@@ -98,6 +98,30 @@ TEST(DCC_Body, CharacterRecord)
 	EXPECT_EQ(back.body.partyAI, PartyAI::Engage);
 	EXPECT_EQ(back.body.weight, 0);
 	EXPECT_STREQ(PartyAIName(PartyAI::Defend), "defend");
+
+	// M2.11: the hair and beard overlays, alone worth a record
+	CharacterExt looks;
+	looks.body.hair = 3;
+	EXPECT_FALSE(looks.Empty());
+	looks.body.beard = 1;
+	bytes = WriteExtension(looks);
+	ASSERT_TRUE(ReadExtension(bytes.data(), bytes.size(), back));
+	EXPECT_EQ(back.body.hair, 3);
+	EXPECT_EQ(back.body.beard, 1);
+	EXPECT_EQ(back.body.weight, 0);
+	// a version 1 record (M2.10) reads without them
+	CharacterExt old;
+	old.body.weight = 120;
+	bytes = WriteExtension(old);
+	size_t record = EXT_HEADER_SIZE;
+	bytes[record + 4] = 1; // the record's version
+	bytes[record + 8] = 4; // its payload size
+	bytes.resize(bytes.size() - 4);
+	uint32_t total = uint32_t(bytes.size());
+	for (int i = 0; i < 4; ++i) bytes[8 + i] = uint8_t(total >> (8 * i));
+	ASSERT_TRUE(ReadExtension(bytes.data(), bytes.size(), back));
+	EXPECT_EQ(back.body.weight, 120);
+	EXPECT_EQ(back.body.hair, 0);
 	EXPECT_STREQ(PARTY_AI_SCRIPT, "DCCPARTY");
 }
 

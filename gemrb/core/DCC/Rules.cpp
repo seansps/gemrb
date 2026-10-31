@@ -132,6 +132,9 @@ bool RulesData::Load()
 	// encumbrance by body weight (M2.10)
 	table = gamedata->LoadTable("dccbody");
 	if (!table || !body.Load(*table)) fail("dccbody");
+	// the hair and beard overlays (M2.11)
+	table = gamedata->LoadTable("dcchair");
+	if (!table || !hair.Load(*table)) fail("dcchair");
 	return ok;
 }
 

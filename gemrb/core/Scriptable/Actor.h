@@ -818,6 +818,12 @@ public:
 	int DCCGrapple(Actor* target);
 	/** walking away from foes it's in melee with gives them a free attack each (DoStep) */
 	void DCCCheckWithdrawal(const Point& before);
+	/** DCC: in melee with a living foe that swung at it (or it at the foe) in the last two rounds */
+	bool DCCEngaged() const;
+	/** DCC (M2.11): the hair and beard overlays for IE_DCC_HAIR and IE_DCC_BEARD (and the helmet) */
+	void DCCUpdateLooks();
+	/** DCC (M2.11): ready (G1) while engaged or while the party fights, awake (G17) otherwise */
+	void DCCUpdateStance(const Animation& first);
 	/** DCC: a forced move (fling, push) ends its melee engagements without a withdrawal */
 	void DCCDisengage();
 	/** a monster's or NPC's morale check (combat.md, d20 + Will vs dc): false if it flees. Party

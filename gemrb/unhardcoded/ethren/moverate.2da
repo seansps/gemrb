@@ -1,0 +1,10 @@
+2DA V1.0
+9
+# ethren (M2.11): walk speeds by animation id (Actor::SetAnimationID; without a row the walk's frame
+# count is the rate). The engine moves an actor 2 x 566 x rate / 1500 px a tick across the screen; the
+# peasants' 10-frame walk (15 fps, a frame a tick) plants a foot that slides 7 px a frame, so rate 9
+# (6.8 px a tick) keeps the feet still. See docs/architecture/art-pipeline.md, "Walk speed".
+    ANIMID    SPEED  CREATURE
+1   0x6500    9      human_male_peasant
+2   0x6501    9      human_male_bald
+3   0x6510    9      human_female_peasant

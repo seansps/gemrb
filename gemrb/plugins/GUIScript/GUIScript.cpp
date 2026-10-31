@@ -6960,6 +6960,14 @@ static PyObject* GemRB_GetDCCStats(PyObject* /*self*/, PyObject* args)
 	DictInt(dict, "WalkSpeed", actor->CalculateSpeed(false));
 	DictInt(dict, "PartyAI", actor->GetBase(IE_DCC_PARTYAI));
 	PyDict_SetItemString(dict, "PartyAIName", DecRef(PyString_FromString, DCC::PartyAIName(DCC::PartyAI(std::min<ieDword>(actor->GetBase(IE_DCC_PARTYAI), ieDword(DCC::PartyAI::count))))));
+	// M2.11: looks, the overlays drawn now (the style's, or the one under a helmet), the stance
+	DictInt(dict, "Hair", actor->GetBase(IE_DCC_HAIR));
+	DictInt(dict, "Beard", actor->GetBase(IE_DCC_BEARD));
+	const CharAnimations* looks = actor->GetAnims();
+	PyDict_SetItemString(dict, "HairOverlay", DecRef(PyString_FromString, looks ? looks->GetHairRef().c_str() : ""));
+	PyDict_SetItemString(dict, "BeardOverlay", DecRef(PyString_FromString, looks ? looks->GetBeardRef().c_str() : ""));
+	DictInt(dict, "Stance", actor->GetStance());
+	DictInt(dict, "Engaged", actor->DCCEngaged());
 
 	const DCC::LevelRow* row = rules->classes.Row(cls, level);
 	DictInt(dict, "SpellsKnown", row ? row->spellsKnown : 0);
@@ -7489,6 +7497,35 @@ static PyObject* GemRB_DCCSetBodyWeight(PyObject* /*self*/, PyObject* args)
 		return PyLong_FromLong(pounds);
 	}
 	return PyLong_FromLong(actor->DCCRollBodyWeight());
+}
+
+PyDoc_STRVAR(GemRB_DCCSetLooks__doc,
+	     "===== DCCSetLooks =====\n\
+\n\
+**Prototype:** GemRB.DCCSetLooks (globalID, hair, beard)\n\
+\n\
+**Description:** Sets a DCC character's hair and beard overlays (style ids of dcchair.2da, 0 none; \n\
+-1 keeps the current one). The host's (or single player's) call: the funnel's rolling screen and \n\
+tests; co-op clients get the stats.\n\
+\n\
+**Return value:** True if set, False if refused (a co-op client)\n\
+\n\
+**See also:** [GetDCCStats](GetDCCStats.md)");
+
+static PyObject* GemRB_DCCSetLooks(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int hair = -1;
+	int beard = -1;
+	PARSE_ARGS(args, "iii", &globalID, &hair, &beard);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	const NetSession* net = core->GetNetSession();
+	if (net && !net->IsHost()) Py_RETURN_FALSE;
+	if (hair >= 0) actor->SetBase(IE_DCC_HAIR, ieDword(std::min(hair, 0xff)));
+	if (beard >= 0) actor->SetBase(IE_DCC_BEARD, ieDword(std::min(beard, 0xff)));
+	actor->DCCUpdateLooks();
+	Py_RETURN_TRUE;
 }
 
 PyDoc_STRVAR(GemRB_DCCSetDeeds__doc,
@@ -15095,6 +15132,7 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(DCCLevelUp, METH_VARARGS),
 	METHOD(DCCForceDice, METH_VARARGS),
 	METHOD(SaveScreenshot, METH_VARARGS),
+	METHOD(DCCSetLooks, METH_VARARGS),
 	METHOD(DCCAttack, METH_VARARGS),
 	METHOD(GetDCCLastAttack, METH_VARARGS),
 	METHOD(GetDCCCombatLog, METH_VARARGS),

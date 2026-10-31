@@ -8058,6 +8058,9 @@ void Actor::UpdateActorState()
 			}
 		}
 	} else {
+		if (core->HasFeature(GFFlags::RULES_DCC)) {
+			DCCUpdateStance(*first);
+		}
 		// check if walk sounds need to be played
 		// dialog, pause game
 		if (!(core->GetGameControl()->GetDialogueFlags() & (DF_IN_DIALOG | DF_FREEZE_SCRIPTS))) {
@@ -8504,6 +8507,9 @@ bool Actor::AdvanceAnimations()
 		return false;
 	}
 
+	if (core->HasFeature(GFFlags::RULES_DCC)) {
+		DCCUpdateLooks();
+	}
 	anims->PulseRGBModifiers();
 
 	ClearCurrentStanceAnims();

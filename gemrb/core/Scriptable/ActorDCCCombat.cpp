@@ -2238,6 +2238,38 @@ static bool InReachFrom(const Actor* foe, const Actor* mover, const Point& at, i
 	return std::max(0.0, distance) <= Feet2Pixels(reach, angle);
 }
 
+bool Actor::DCCEngaged() const
+{
+	if (dccEngaged.empty()) return false;
+	const Game* game = core->GetGame();
+	const Map* map = GetCurrentArea();
+	if (!game || !map) return false;
+	ieDword window = 2 * core->Time.attack_round_size;
+	for (const auto& entry : dccEngaged) {
+		const Actor* foe = map->GetActorByGlobalID(entry.first);
+		if (foe && game->GameTime <= entry.second + window && !OutOfFight(foe)) return true;
+	}
+	return false;
+}
+
+// M2.11: the IE games' stances, switched when the idle loop comes round (no pop mid-loop); an
+// actor with something to do (an attack, a spell) has the stances of its action
+void Actor::DCCUpdateStance(const Animation& first)
+{
+	unsigned char stance = GetStance();
+	if (stance != IE_ANI_AWAKE && stance != IE_ANI_READY) return;
+	if (first.GetCurrentFrameIndex() != 0 || CurrentAction || GetNextAction()) return;
+	if (OutOfFight(this) || (GetStat(IE_STATE_ID) & STATE_CANTMOVE)) return;
+	const Game* game = core->GetGame();
+	bool partyFight = InParty && game && game->CombatCounter;
+	bool ready = DCC::CombatStance(DCCEngaged(), partyFight);
+	if (ready && stance == IE_ANI_AWAKE) {
+		SetStance(IE_ANI_READY);
+	} else if (!ready && stance == IE_ANI_READY) {
+		SetStance(IE_ANI_AWAKE);
+	}
+}
+
 // a voluntary step (Actor::DoStep): before is where the step started
 void Actor::DCCCheckWithdrawal(const Point& before)
 {
