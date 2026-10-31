@@ -123,6 +123,14 @@ static String Widen(const std::string& text)
 	return String(text.begin(), text.end());
 }
 
+// "trip", "precision" (for the log)
+static String DeedName(Deed deed)
+{
+	std::string key = DeedKey(deed);
+	std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) { return std::tolower(c); });
+	return Widen(key);
+}
+
 // " +2", " -1", or nothing for 0
 static String Plus(int value)
 {
@@ -331,9 +339,11 @@ void Actor::DCCAttack(Actor* target, bool viaProjectile)
 		Feedback(fmt::format(u"{} can't attack", Name(this)), FT_COMBAT);
 		return;
 	}
-	if (!viaProjectile) {
-		int deedDie = GetStat(IE_DCC_DEEDDIE);
-		dccDeedRoll = deedDie ? DCCDie(deedDie) : 0;
+	// the deed die: scripted attacks roll their own; a real round rolled it in InitRoundDCC, unless
+	// the game was loaded in the middle of the round (it isn't saved), then the swing rolls it
+	int roundDeedDie = GetStat(IE_DCC_DEEDDIE);
+	if (!viaProjectile || (roundDeedDie && !dccDeedRoll)) {
+		dccDeedRoll = roundDeedDie ? DCCDie(roundDeedDie) : 0;
 	}
 
 	bool character = IsDCCCharacter();
@@ -848,7 +858,7 @@ static void ApplyTerm(const TableTerm& term, RowContext& ctx, const WeaponInfo& 
 		int value = argInt(0, 1);
 		int count = argInt(1, 0);
 		Duration duration = TermDuration(term, 2);
-		std::vector<Actor*> whom = NearAllies(attacker, key == "GUARD" ? 100 : 300, count);
+		std::vector<Actor*> whom = NearAllies(attacker, key == "GUARD" ? 15 : 60, count);
 		if (key == "GUARD") whom.insert(whom.begin(), attacker);
 		String names;
 		String how;
@@ -1112,6 +1122,10 @@ void Actor::DCCResolveSwing(DCCSwing& swing, Actor* target, int depth, DCCAttack
 			swing.damage += extra;
 			line += fmt::format(u" +{} = {}", Widen(DiceString(swing.extraOnHit)), extra);
 		}
+		// a deed die below 3 on a hit: the declared deed doesn't happen (DCCMightyDeed logs a success)
+		if (state && depth == 0 && swing.deed && state->deed != Deed::None && !state->deedTried && !DeedSucceeds(dccDeedRoll, true)) {
+			line += fmt::format(u" (deed {}: no {})", dccDeedRoll, DeedName(state->deed));
+		}
 	}
 	Feedback(std::move(line), FT_TOHIT);
 
@@ -1222,20 +1236,15 @@ void Actor::DCCResolveSwing(DCCSwing& swing, Actor* target, int depth, DCCAttack
 	}
 }
 
-// "Brak's deed d3 = 3: trip! Goblin 1 Ref save ...; prone for 1 round"
+// "Brak's deed d3 = 3: trip! tripped; Goblin 1 Ref save ...; prone for 1 round"
 void Actor::DCCMightyDeed(DCCSwing& swing, Actor* target, DCCAttackState* state)
 {
 	if (state->deedTried || state->deed == Deed::None) return;
 	state->deedTried = true;
 	AttackRecord& record = swing.record;
 	int die = GetStat(IE_DCC_DEEDDIE);
-	std::string key = DeedKey(state->deed);
-	std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) { return std::tolower(c); });
-	String deedName = Widen(key);
-	if (!DeedSucceeds(dccDeedRoll, record.hit)) {
-		Feedback(fmt::format(u"{}'s deed d{} = {}: no {}", Name(this), die, dccDeedRoll, deedName), FT_COMBAT);
-		return;
-	}
+	if (!DeedSucceeds(dccDeedRoll, record.hit)) return; // the attack line says so
+	String deedName = DeedName(state->deed);
 	const ResultRow* row = Rules()->deeds.Lookup(state->deed, dccDeedRoll);
 	if (!row) return;
 	RowContext ctx;
