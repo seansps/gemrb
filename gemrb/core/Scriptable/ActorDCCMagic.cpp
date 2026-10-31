@@ -706,6 +706,10 @@ ResRef Actor::DCCCastCheck(const ResRef& base, Scriptable* target, const Point& 
 	record.disapproval = result.disapproval;
 	record.cursed = result.cursed;
 	if (known->casts < 0xffff) ++known->casts;
+	// mercurial 72's streak ends when the caster casts something else
+	for (auto& other : dccExt.spells) {
+		if (&other != known && std::count(other.mercurial.begin(), other.mercurial.end(), uint8_t(MERC_STREAK))) other.streak = 0;
+	}
 	if (!std::count(known->mercurial.begin(), known->mercurial.end(), uint8_t(MERC_SWING))) {
 		known->streak = uint8_t(std::min(255, known->streak + 1));
 	}
