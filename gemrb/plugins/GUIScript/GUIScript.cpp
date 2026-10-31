@@ -43,6 +43,7 @@
 #include "GUI/TextEdit.h"
 #include "GUI/WindowManager.h"
 #include "GUI/WorldMapControl.h"
+#include "DCC/Luck.h"
 #include "DCC/Rules.h"
 #include "DCC/Stats.h"
 #include "GameScript/GSUtils.h" //checkvariable
@@ -6905,6 +6906,21 @@ static PyObject* GemRB_GetDCCStats(PyObject* /*self*/, PyObject* args)
 	DictInt(dict, "BleedRounds", actor->GetStat(IE_DCC_BLEED));
 	DictInt(dict, "Doomed", actor->GetStat(IE_DCC_DOOMED));
 
+	// Luck burn (M2.4): the policy, what a point is worth, the nightly recovery
+	DCC::LuckPolicy policy = actor->GetDCCLuckPolicy();
+	DCC::BurnValue burn = actor->GetDCCBurnValue();
+	DictInt(dict, "LuckPolicy", static_cast<int>(policy.policy));
+	DictInt(dict, "LuckThreshold", policy.threshold);
+	DictInt(dict, "LuckFlags", policy.flags);
+	DictInt(dict, "BurnPerPoint", burn.IsDie() ? 0 : burn.perPoint);
+	DictInt(dict, "BurnDie", burn.luckDie);
+	DictInt(dict, "LuckRecovery", DCC::NightlyLuckRecovery(cls, level));
+	DictInt(dict, "CancelsFumbles", DCC::CanCancelFumble(cls, level));
+	// Mighty Deeds: the signature deed and a one-off queued for the next attack
+	DictInt(dict, "Deed", static_cast<int>(actor->GetDCCSignatureDeed()));
+	DictInt(dict, "NextDeed", static_cast<int>(actor->GetDCCQueuedDeed()));
+	DictInt(dict, "AttackPending", actor->DCCAttackPending());
+
 	const DCC::LevelRow* row = rules->classes.Row(cls, level);
 	DictInt(dict, "SpellsKnown", row ? row->spellsKnown : 0);
 	DictInt(dict, "MaxSpellLevel", row ? row->maxSpellLevel : 0);
@@ -6940,7 +6956,7 @@ static PyObject* GemRB_GetDCCStats(PyObject* /*self*/, PyObject* args)
 PyDoc_STRVAR(GemRB_DCCRoll__doc,
 	     "===== DCCRoll =====\n\
 \n\
-**Prototype:** GemRB.DCCRoll (globalID, kind, which, target[, natural])\n\
+**Prototype:** GemRB.DCCRoll (globalID, kind, which, target[, natural[, burn]])\n\
 \n\
 **Description:** Makes a DCC roll for an actor through the engine's roll hook, so the \n\
 states at 0 apply (a Luck of 0 fails everything). \n\
@@ -6951,8 +6967,10 @@ states at 0 apply (a Luck of 0 fails everything). \n\
     0 Str, 1 Agi, 2 Sta, 3 Per, 4 Int, 5 Luck), 2: Luck check, d20 <= Luck (which unused)\n\
   * target - the DC (unused for Luck checks)\n\
   * natural - the die result to use instead of rolling (for tests)\n\
+  * burn - 0 no Luck burn (default), 1 the character's burn policy may burn on a failure, \n\
+    2 the same for a roll whose failure kills (a save vs death)\n\
 \n\
-**Return value:** dict with Natural, Total, Target, Success, Critical, Fumble and Cursed\n\
+**Return value:** dict with Natural, Total, Target, Success, Critical, Fumble, Cursed and LuckBurned\n\
 \n\
 **See also:** [GetDCCStats](GetDCCStats.md)");
 
@@ -6963,23 +6981,36 @@ static PyObject* GemRB_DCCRoll(PyObject* /*self*/, PyObject* args)
 	int which;
 	int target;
 	int natural = 0;
-	PARSE_ARGS(args, "iiii|i", &globalID, &kind, &which, &target, &natural);
+	int burn = 0;
+	PARSE_ARGS(args, "iiii|ii", &globalID, &kind, &which, &target, &natural, &burn);
 	GET_GAME();
 	GET_ACTOR_GLOBAL();
 	if (!core->GetDCCRules()) Py_RETURN_NONE;
 
+	DCC::RollResult result;
 	switch (kind) {
 		case 0:
 			if (which < 0 || which >= DCC::SAVE_COUNT) return RuntimeError("Bad save!");
-			return DCCRollDict(actor->DCCRollSave(static_cast<DCC::Save>(which), 0, target, natural));
+			result = actor->DCCRollSave(static_cast<DCC::Save>(which), 0, target, natural);
+			break;
 		case 1:
 			if (which < 0 || which >= DCC::ABILITY_COUNT) return RuntimeError("Bad ability!");
-			return DCCRollDict(actor->DCCRoll(DCC::RollKind::Check, actor->GetDCCAbilityMod(static_cast<DCC::Ability>(which)), target, natural));
+			result = actor->DCCRoll(DCC::RollKind::Check, actor->GetDCCAbilityMod(static_cast<DCC::Ability>(which)), target, natural);
+			break;
 		case 2:
+			// roll under the score: burning Luck doesn't help a Luck check
 			return DCCRollDict(actor->DCCRollLuckCheck(natural));
 		default:
 			return RuntimeError("Bad roll kind!");
 	}
+	int burned = 0;
+	if (burn) {
+		DCC::BurnReason reason = burn == 2 ? DCC::BurnReason::Death : DCC::BurnReason::Miss;
+		burned = actor->DCCPolicyRollBurn(result, reason, kind == 0 ? u"a save" : u"a check");
+	}
+	PyObject* dict = DCCRollDict(result);
+	DictInt(dict, "LuckBurned", burned);
+	return dict;
 }
 
 PyDoc_STRVAR(GemRB_DCCLevelUp__doc,
@@ -7074,6 +7105,13 @@ static PyObject* DCCAttackList(const Actor* actor)
 		DictInt(dict, "FumbleDie", record.fumbleDie);
 		DictInt(dict, "FumbleRoll", record.fumbleRoll);
 		PyDict_SetItemString(dict, "Result", DecRef(PyString_FromString, record.result.c_str()));
+		DictInt(dict, "LuckBurned", record.luckBurned);
+		DictInt(dict, "LuckBonus", record.luckBonus);
+		DictInt(dict, "LuckBy", record.luckBy);
+		DictInt(dict, "FumbleCancelled", record.fumbleCancelled);
+		DictInt(dict, "DeedKind", record.deedKind);
+		DictInt(dict, "DeedDone", record.deedDone);
+		PyDict_SetItemString(dict, "DeedResult", DecRef(PyString_FromString, record.deedResult.c_str()));
 		PyList_Append(list, dict);
 		Py_DecRef(dict);
 	}
@@ -7215,6 +7253,76 @@ static PyObject* GemRB_DCCFindActor(PyObject* /*self*/, PyObject* args)
 	const Map* map = game->GetCurrentArea();
 	const Actor* actor = map ? map->GetActorByScriptName(ieVariable(name)) : nullptr;
 	return PyLong_FromLong(actor ? long(actor->GetGlobalID()) : 0);
+}
+
+PyDoc_STRVAR(GemRB_DCCSetLuckPolicy__doc,
+	     "===== DCCSetLuckPolicy =====\n\
+\n\
+**Prototype:** GemRB.DCCSetLuckPolicy (globalID, policy, threshold, flags)\n\
+\n\
+**Description:** Sets when a DCC character burns Luck on its own: policy 0 never, 1 only to \n\
+avoid death (a failed save vs death) or, for warriors and dwarves, a fumble, 2 also to turn any \n\
+failed roll into a success while its Luck stays at threshold or above. flags: 1 pause and ask \n\
+on key rolls (saves vs death, rolls that decide a crit or a fumble), 2 halflings burn for allies \n\
+in sight with the same policy. In co-op the host runs it again, for the character's owner only.\n\
+\n\
+**Parameters:**\n\
+  * globalID - party ID or global ID of the actor to use\n\
+  * policy, threshold, flags - see above (ie_stats.py: DCC_BURN_*, DCC_LUCK_*)\n\
+\n\
+**Return value:** N/A\n\
+\n\
+**See also:** [DCCSetDeeds](DCCSetDeeds.md), [GetDCCStats](GetDCCStats.md)");
+
+static PyObject* GemRB_DCCSetLuckPolicy(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int policy;
+	int threshold;
+	int flags;
+	PARSE_ARGS(args, "iiii", &globalID, &policy, &threshold, &flags);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	if (policy < 0 || policy >= DCC::BURN_POLICY_COUNT) return RuntimeError("Bad Luck burn policy!");
+	if (!NetForward(NetGuiOp::DCCSetLuckPolicy, { globalID, policy, threshold, flags })) Py_RETURN_NONE;
+	actor->SetBase(IE_DCC_BURNPOLICY, policy);
+	actor->SetBase(IE_DCC_BURNMIN, Clamp(threshold, 0, 30));
+	actor->SetBase(IE_DCC_LUCKFLAGS, flags & (DCC::LUCK_PAUSE | DCC::LUCK_ALLIES));
+	Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(GemRB_DCCSetDeeds__doc,
+	     "===== DCCSetDeeds =====\n\
+\n\
+**Prototype:** GemRB.DCCSetDeeds (globalID, signature, nextDeed)\n\
+\n\
+**Description:** Sets a warrior's or dwarf's Mighty Deeds: the signature deed declared for \n\
+every attack, and a one-off deed for the next attack only (used up when that attack is \n\
+declared). 0 none, 1 blind, 2 disarm, 3 push, 4 trip, 5 precision shot, 6 rally, 7 defend \n\
+(ie_stats.py: DCC_DEED_*); -1 keeps the current one. In co-op the host runs it again, for \n\
+the character's owner only.\n\
+\n\
+**Parameters:**\n\
+  * globalID - party ID or global ID of the actor to use\n\
+  * signature, nextDeed - see above\n\
+\n\
+**Return value:** N/A\n\
+\n\
+**See also:** [DCCSetLuckPolicy](DCCSetLuckPolicy.md), [GetDCCStats](GetDCCStats.md)");
+
+static PyObject* GemRB_DCCSetDeeds(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int signature;
+	int nextDeed;
+	PARSE_ARGS(args, "iii", &globalID, &signature, &nextDeed);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	if (signature >= DCC::DEED_COUNT || nextDeed >= DCC::DEED_COUNT) return RuntimeError("Bad deed!");
+	if (!NetForward(NetGuiOp::DCCSetDeeds, { globalID, signature, nextDeed })) Py_RETURN_NONE;
+	if (signature >= 0) actor->SetBase(IE_DCC_DEED, signature);
+	if (nextDeed >= 0) actor->SetBase(IE_DCC_NEXTDEED, nextDeed);
+	Py_RETURN_NONE;
 }
 
 PyDoc_STRVAR(GemRB_SetPlayerStat__doc,
@@ -14028,6 +14136,8 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(GetDCCCombatLog, METH_VARARGS),
 	METHOD(DCCRecoverBody, METH_VARARGS),
 	METHOD(DCCFindActor, METH_VARARGS),
+	METHOD(DCCSetLuckPolicy, METH_VARARGS),
+	METHOD(DCCSetDeeds, METH_VARARGS),
 	METHOD(GetPlayerStates, METH_VARARGS),
 	METHOD(GetPlayerString, METH_VARARGS),
 	METHOD(GetPrompt, METH_NOARGS),

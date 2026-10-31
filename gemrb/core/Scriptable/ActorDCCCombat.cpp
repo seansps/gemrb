@@ -16,6 +16,17 @@
 // crit result's dice (extra damage, durations, a free attack's rolls); on a fumble
 // the fumble die and the result's dice. Saves against a result use the dice of the
 // creature saving.
+// M2.4 adds dice only on paths that opt in: a thief's Luck burn rolls its luck dice right
+// after the attack die it helps (before any damage), and a Mighty Deed (deed die 3+ on a hit)
+// rolls its result's dice after the crit's. A halfling's burn for an ally adds nothing, nor
+// does a warrior's or dwarf's burn to cancel a fumble (the fumble die isn't rolled then).
+//
+// Luck prompts: a key roll of a party member (a miss a burn would turn into a crit, a fumble
+// a warrior or dwarf can cancel) asks its owner how much Luck to burn (PromptManager, M1.8)
+// when the character pauses on key rolls. The attack action then waits in dccPendingAttack:
+// the swings are rolled, nothing is resolved or applied yet, and the game is paused. The
+// answer (or the policy's default on a timeout) re-finds attacker and target by global ID
+// and carries on from that swing; damage goes on the projectile only once every swing is done.
 
 #include "damages.h"
 #include "ie_stats.h"
@@ -27,10 +38,13 @@
 #include "Interface.h"
 #include "Item.h"
 #include "Map.h"
+#include "Prompts.h"
 #include "RNG.h"
 
 #include "DCC/Combat.h"
 #include "DCC/CombatTables.h"
+#include "DCC/Deeds.h"
+#include "DCC/Luck.h"
 #include "DCC/Rules.h"
 #include "DCC/Stats.h"
 #include "GUI/GameControl.h"
@@ -54,6 +68,9 @@ static EffectRef fx_dcc_sleep_ref = { "State:Sleep", -1 };
 static EffectRef fx_dcc_hold_ref = { "State:Hold", -1 };
 static EffectRef fx_dcc_movement_ref = { "MovementRateModifier", -1 };
 static EffectRef fx_dcc_death_ref = { "Death", -1 };
+static EffectRef fx_dcc_push_ref = { "WingBuffet", -1 };
+static EffectRef fx_dcc_morale_ref = { "MoraleModifier", -1 };
+static EffectRef fx_dcc_dmgmod_ref = { "DamageBonusModifier", -1 };
 
 // "until healed" crit injuries end with the next night's rest (DCCRestHeal), permanent ones never
 static const ResRef UntilHealedSource = "DCCHEAL";
@@ -74,6 +91,11 @@ static int Signed(ieDword value)
 static std::deque<String> combatLog;
 
 static void Feedback(String text, int type)
+{
+	Actor::DCCFeedback(std::move(text), type);
+}
+
+void Actor::DCCFeedback(String text, int type)
 {
 	Log(COMBAT, "DCC", "{}", fmt::WideToChar { text });
 	combatLog.push_back(text);
@@ -99,6 +121,14 @@ static String Name(const Actor* actor)
 static String Widen(const std::string& text)
 {
 	return String(text.begin(), text.end());
+}
+
+// "trip", "precision" (for the log)
+static String DeedName(Deed deed)
+{
+	std::string key = DeedKey(deed);
+	std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) { return std::tolower(c); });
+	return Widen(key);
 }
 
 // " +2", " -1", or nothing for 0
@@ -192,6 +222,12 @@ int Actor::DCCInitiativeDelay() const
 // the attack
 
 struct Actor::DCCSwing {
+	// the Luck burn on this roll, decided by the policy or a prompt before it resolves
+	bool decided = false;
+	int burnPoints = 0;
+	int burnBonus = 0;
+	ieDword burnBy = 0; // a halfling's global ID, 0: the attacker itself
+	bool fumbleCancelled = false;
 	int hand = 0;
 	const WeaponInfo* wi = nullptr;
 	AttackInput in;
@@ -263,10 +299,38 @@ static uint32_t AttackConditionsFor(const Actor* attacker, const Actor* target, 
 	return conditions;
 }
 
+// an attack action from its rolls to its damage; waits here while a Luck prompt is open
+struct Actor::DCCAttackState {
+	std::vector<DCCSwing> swings;
+	ieDword targetID = 0;
+	bool viaProjectile = false;
+	size_t next = 0; // the swing to resolve next
+	Deed deed = Deed::None; // declared for this attack action
+	bool deedTried = false; // one deed per attack action
+	uint32_t promptID = 0;
+};
+
+// the IE item type of a weapon (itemtype.ids), for weapon-specific deeds
+static int WeaponItemType(const Actor* actor, const WeaponInfo& wi)
+{
+	const CREItem* item = actor->inventory.GetSlotItem(wi.slot);
+	if (!item) return -1;
+	const Item* itm = gamedata->GetItem(item->ItemResRef, true);
+	if (!itm) return -1;
+	int type = itm->ItemType;
+	gamedata->FreeItem(itm, item->ItemResRef);
+	return type;
+}
+
 void Actor::DCCAttack(Actor* target, bool viaProjectile)
 {
 	const RulesData* rules = Rules();
 	if (!rules || !target) return;
+	// the last attack action still waits for a Luck prompt (the game is paused meanwhile)
+	if (dccPendingAttack) {
+		Log(COMBAT, "DCC", "{}'s attack waits for a Luck decision", fmt::WideToChar { GetName() });
+		return;
+	}
 	dccLastAttack.clear();
 	++dccAttackSerial;
 
@@ -275,9 +339,11 @@ void Actor::DCCAttack(Actor* target, bool viaProjectile)
 		Feedback(fmt::format(u"{} can't attack", Name(this)), FT_COMBAT);
 		return;
 	}
-	if (!viaProjectile) {
-		int deedDie = GetStat(IE_DCC_DEEDDIE);
-		dccDeedRoll = deedDie ? DCCDie(deedDie) : 0;
+	// the deed die: scripted attacks roll their own; a real round rolled it in InitRoundDCC, unless
+	// the game was loaded in the middle of the round (it isn't saved), then the swing rolls it
+	int roundDeedDie = GetStat(IE_DCC_DEEDDIE);
+	if (!viaProjectile || (roundDeedDie && !dccDeedRoll)) {
+		dccDeedRoll = roundDeedDie ? DCCDie(roundDeedDie) : 0;
 	}
 
 	bool character = IsDCCCharacter();
@@ -287,7 +353,11 @@ void Actor::DCCAttack(Actor* target, bool viaProjectile)
 	TwoWeaponDice twoDice;
 	if (twoWeapons) twoDice = rules->combat.twoWeapons.Lookup(Signed(GetStat(IE_DEX)), halfling);
 
-	std::vector<DCCSwing> swings(twoWeapons ? 2 : 1);
+	auto state = std::make_shared<DCCAttackState>();
+	state->targetID = target->GetGlobalID();
+	state->viaProjectile = viaProjectile;
+	std::vector<DCCSwing>& swings = state->swings;
+	swings.resize(twoWeapons ? 2 : 1);
 	for (int hand = 0; hand < int(swings.size()); ++hand) {
 		DCCSwing& swing = swings[hand];
 		swing.hand = hand;
@@ -333,6 +403,14 @@ void Actor::DCCAttack(Actor* target, bool viaProjectile)
 		swing.damageBonus = strMod + swing.deed + damageAugur + header->DamageBonus + swing.wi->launcherDmgBonus + Signed(GetStat(IE_DAMAGEBONUS));
 	}
 
+	// the Mighty Deed is declared before the roll: a queued one-off (used up now, whatever
+	// happens), else the signature deed, else the weapon's own
+	if (GetStat(IE_DCC_DEEDDIE)) {
+		Deed queued = GetDCCQueuedDeed();
+		if (queued != Deed::None) SetBase(IE_DCC_NEXTDEED, 0);
+		state->deed = ChooseDeed(queued, GetDCCSignatureDeed(), WeaponDeed(WeaponItemType(this, weaponInfo[0])));
+	}
+
 	// one-shot modifiers are in the totals now: the attacker's "next attack" ones and the
 	// target's "next attack against" ones end (a fumble below may add new ones)
 	fxqueue.RemoveAllEffectsWithParam(fx_dcc_combat_ref, static_cast<ieDword>(CombatEffect::NextAttack));
@@ -346,10 +424,31 @@ void Actor::DCCAttack(Actor* target, bool viaProjectile)
 		swings[0].in.fumbles = true; // one fumble roll for the pair
 	}
 
+	DCCContinueAttack(state);
+}
+
+bool Actor::DCCContinueAttack(const std::shared_ptr<DCCAttackState>& state)
+{
+	Game* game = core->GetGame();
+	Actor* target = game ? game->GetActorByGlobalID(state->targetID) : nullptr;
+	if (!target || target->GetCurrentArea() != GetCurrentArea()) {
+		// the target is gone (or moved on while we waited): the attack comes to nothing
+		dccPendingAttack.reset();
+		return true;
+	}
+	for (; state->next < state->swings.size(); ++state->next) {
+		DCCSwing& swing = state->swings[state->next];
+		if (!swing.decided && DCCAskAttackBurn(state, swing, target)) {
+			dccPendingAttack = state;
+			return false;
+		}
+		DCCResolveSwing(swing, target, 0, state.get());
+	}
+	dccPendingAttack.reset();
+
 	int totalDamage = 0;
 	int hitHand = -1;
-	for (auto& swing : swings) {
-		DCCResolveSwing(swing, target, 0);
+	for (const auto& swing : state->swings) {
 		if (swing.record.hit) {
 			totalDamage += swing.damage;
 			if (hitHand < 0) hitHand = swing.hand;
@@ -357,13 +456,13 @@ void Actor::DCCAttack(Actor* target, bool viaProjectile)
 	}
 
 	// the damage: on the weapon's projectile like a stock attack, or at once
-	if (viaProjectile) {
+	if (state->viaProjectile) {
 		const WeaponInfo& wi = weaponInfo[hitHand < 0 ? 0 : hitHand];
 		int header = wi.wflags & WEAPON_RANGED ? -2 : -1;
 		if (hitHand < 0) {
 			if (wi.wflags & WEAPON_RANGED) UseItem(wi.slot, -2, target, UI_MISS | UI_NOAURA);
 		} else {
-			bool crit = swings[hitHand].record.crit;
+			bool crit = state->swings[hitHand].record.crit;
 			UseItem(wi.slot, header, target, (crit ? UI_CRITICAL : 0) | UI_NOAURA, totalDamage);
 		}
 	} else if (hitHand >= 0) {
@@ -372,7 +471,135 @@ void Actor::DCCAttack(Actor* target, bool viaProjectile)
 		fx->Target = FX_TARGET_PRESET;
 		core->ApplyEffect(std::move(fx), target, this);
 	}
+	return true;
+}
 
+// what a burn would do for a swing: why, by how much it falls short, whether it would crit
+struct BurnNeed {
+	BurnReason reason = BurnReason::count; // count: nothing to burn for
+	int gap = 0;
+	bool wouldCrit = false;
+};
+
+static BurnNeed SwingBurnNeed(const Actor* attacker, const AttackInput& in, const RollResult& roll)
+{
+	BurnNeed need;
+	if (roll.cursed && !roll.fumble) return need;
+	if (roll.fumble) {
+		if (CanCancelFumble(attacker->GetBase(IE_CLASS), Signed(attacker->GetBase(IE_LEVEL)))) need.reason = BurnReason::Fumble;
+		return need;
+	}
+	// a natural 1 always misses; nothing to burn for a hit
+	if (roll.success || roll.natural <= 1) return need;
+	need.reason = BurnReason::Miss;
+	need.gap = roll.target - roll.total;
+	AttackInput burned = in;
+	burned.modifier += need.gap;
+	need.wouldCrit = ResolveAttack(burned, roll.natural).critical;
+	return need;
+}
+
+static String BurnValueText(const BurnValue& value)
+{
+	if (value.IsDie()) return fmt::format(u"a d{} each", value.luckDie);
+	return fmt::format(u"+{} each", value.perPoint);
+}
+
+bool Actor::DCCAskAttackBurn(const std::shared_ptr<DCCAttackState>& state, DCCSwing& swing, const Actor* target)
+{
+	// only party members are asked, if they pause on key rolls and can burn at all
+	LuckPolicy policy = GetDCCLuckPolicy();
+	if (!InParty || !IsDCCCharacter() || !(policy.flags & LUCK_PAUSE)) return false;
+	int luck = GetDCCLuck();
+	if (luck <= 0) return false;
+
+	RollResult roll = ResolveAttack(swing.in, swing.record.natural);
+	BurnNeed need = SwingBurnNeed(this, swing.in, roll);
+	if (need.reason == BurnReason::count || !IsKeyRoll(need.reason, need.wouldCrit)) return false;
+	BurnValue value = GetDCCBurnValue();
+	// nothing Luck can do: even all of it doesn't reach
+	if (need.reason == BurnReason::Miss && MaxBurnBonus(value, luck) < need.gap) return false;
+
+	int suggested = PolicyBurn(policy, need.reason, need.gap, luck, value);
+	PromptQuestion q;
+	q.kind = PromptKind::Integer;
+	q.tag = "luckburn";
+	q.title = "Burn Luck?";
+	std::string name = fmt::format("{}", fmt::WideToChar { GetShortName() });
+	std::string other = fmt::format("{}", fmt::WideToChar { target->GetShortName() });
+	if (need.reason == BurnReason::Fumble) {
+		q.text = fmt::format("{} fumbles against {}. Burn 1 Luck (of {}) to shrug it off?", name, other, luck);
+		q.fields = { { "Luck", 0, FUMBLE_CANCEL_COST, suggested } };
+	} else {
+		q.text = fmt::format("{} misses {} by {} with a natural {}, which would crit. Burn Luck ({}, {} left)?", name, other, need.gap,
+				     swing.record.natural, fmt::WideToChar { BurnValueText(value) }, luck);
+		q.fields = { { "Luck", 0, luck, suggested } };
+	}
+	// a short wait: the timeout falls back to the policy (the default)
+	q.timeout = uint32_t(Clamp<int>(core->config.PromptTimeout, 1000, LUCK_PROMPT_TIMEOUT));
+
+	ieDword selfID = GetGlobalID();
+	size_t index = state->next;
+	std::weak_ptr<DCCAttackState> weak = state;
+	uint32_t id = core->GetPrompts().Ask(this, std::move(q), [selfID, index, weak, reason = need.reason](const PromptResult& r) {
+		auto pending = weak.lock();
+		Game* game = core->GetGame();
+		Actor* self = game ? game->GetActorByGlobalID(selfID) : nullptr;
+		// the attacker may be gone, or the attack called off
+		if (!pending || !self || self->dccPendingAttack != pending || pending->next != index) return;
+		DCCSwing& swing = pending->swings[index];
+		swing.decided = true;
+		int points = Clamp<int>(r.Value(), 0, self->GetDCCLuck());
+		if (reason == BurnReason::Fumble) points = std::min(points, FUMBLE_CANCEL_COST);
+		if (points > 0) {
+			swing.burnPoints = points;
+			if (reason == BurnReason::Fumble) {
+				self->DCCBurnLuck(points, BurnValue());
+				swing.fumbleCancelled = true;
+			} else {
+				swing.burnBonus = self->DCCBurnLuck(points, self->GetDCCBurnValue());
+			}
+		}
+		Log(COMBAT, "DCC", "Luck prompt #{}: {} burns {} ({})", r.id, fmt::WideToChar { self->GetName() }, points, PromptOutcomeName(r.outcome));
+		self->DCCContinueAttack(pending);
+	});
+	if (!id) return false;
+	state->promptID = id;
+	return true;
+}
+
+void Actor::DCCPolicyAttackBurn(DCCSwing& swing, const RollResult& roll)
+{
+	swing.decided = true;
+	if (!IsDCCCharacter()) return; // monsters don't burn Luck
+	BurnNeed need = SwingBurnNeed(this, swing.in, roll);
+	if (need.reason == BurnReason::count) return;
+	LuckPolicy policy = GetDCCLuckPolicy();
+	BurnValue value = GetDCCBurnValue();
+	int points = PolicyBurn(policy, need.reason, need.gap, GetDCCLuck(), value);
+	if (need.reason == BurnReason::Fumble) {
+		if (points <= 0) return;
+		DCCBurnLuck(points, BurnValue());
+		swing.burnPoints = points;
+		swing.fumbleCancelled = true;
+		return;
+	}
+	if (points > 0) {
+		swing.burnPoints = points;
+		swing.burnBonus = DCCBurnLuck(points, value);
+		return;
+	}
+	// the party's good luck charm may burn for us, by its own policy, at +2 a point
+	Actor* charm = DCCLuckCharm();
+	if (!charm) return;
+	LuckPolicy charmPolicy = charm->GetDCCLuckPolicy();
+	if (!(charmPolicy.flags & LUCK_ALLIES)) return;
+	BurnValue charmValue = charm->GetDCCBurnValue();
+	points = PolicyBurn(charmPolicy, need.reason, need.gap, charm->GetDCCLuck(), charmValue);
+	if (points <= 0) return;
+	swing.burnPoints = points;
+	swing.burnBonus = charm->DCCBurnLuck(points, charmValue);
+	swing.burnBy = charm->GetGlobalID();
 }
 
 // ---------------------------------------------------------------------------
@@ -389,6 +616,8 @@ struct RowContext {
 	const SaveSpec* save = nullptr;
 	int saved = -1; // -1 not rolled yet, 0 failed, 1 passed
 	int extraDamage = 0; // added to this hit (crits)
+	int attackTotal = 0; // the attack roll's total, for saves against it (deeds)
+	Duration lastDuration; // the duration a term rolled last, for a later term's SAME
 	std::vector<String> notes;
 	std::vector<std::pair<std::string, std::vector<std::string>>> extraAttacks; // EXTRA terms, run after the row
 };
@@ -443,9 +672,11 @@ static bool RowApplies(const ResultRow& row, const RowContext& ctx)
 	return !any;
 }
 
-static Duration TermDuration(const TableTerm& term, size_t arg)
+static Duration TermDuration(const TableTerm& term, size_t arg, const Duration* same = nullptr)
 {
 	Duration duration;
+	// SAME: what the term before rolled (a deed's blindness and its attack penalty last as long)
+	if (same && arg < term.args.size() && term.args[arg] == "SAME") return *same;
 	if (!ParseDuration(arg < term.args.size() ? term.args[arg] : std::string(), duration)) {
 		duration = Duration();
 		duration.dice.add = 1;
@@ -454,10 +685,12 @@ static Duration TermDuration(const TableTerm& term, size_t arg)
 }
 
 // applies a stock or DCC:Combat effect for a table duration; returns the rolled amount for the log
-static String ApplyFor(EffectRef& ref, ieDword p1, ieDword p2, const Duration& duration, Actor* who, Actor* caster, ieDword p3 = 0)
+// (rolled: the duration as rolled, for a later term's SAME)
+static String ApplyFor(EffectRef& ref, ieDword p1, ieDword p2, const Duration& duration, Actor* who, Actor* caster, ieDword p3 = 0, Duration* rolled = nullptr)
 {
 	std::unique_ptr<Effect> fx;
 	String what;
+	if (rolled) *rolled = duration;
 	if (duration.kind == Duration::Kind::Permanent || duration.kind == Duration::Kind::UntilHealed) {
 		fx = EffectQueue::CreateEffect(ref, p1, p2, FX_DURATION_INSTANT_PERMANENT_AFTER_BONUSES);
 		fx->SourceRef = duration.kind == Duration::Kind::Permanent ? PermanentSource : UntilHealedSource;
@@ -465,6 +698,10 @@ static String ApplyFor(EffectRef& ref, ieDword p1, ieDword p2, const Duration& d
 	} else {
 		int amount = RollDice(duration.dice, [caster](int sides) { return caster->DCCDie(sides); });
 		amount = std::max(1, amount);
+		if (rolled) {
+			rolled->dice = DiceExpr();
+			rolled->dice.add = amount;
+		}
 		fx = EffectQueue::CreateEffect(ref, p1, p2, FX_DURATION_INSTANT_LIMITED);
 		fx->Duration = DurationSeconds(duration.kind, amount, core->Time.round_sec);
 		static const char16_t* units[] = { u"round", u"turn", u"hour", u"day", u"week" };
@@ -477,9 +714,28 @@ static String ApplyFor(EffectRef& ref, ieDword p1, ieDword p2, const Duration& d
 	return what;
 }
 
-static String ApplyCombat(CombatEffect kind, int value, const Duration& duration, Actor* who, Actor* caster)
+static String ApplyCombat(CombatEffect kind, int value, const Duration& duration, Actor* who, Actor* caster, Duration* rolled = nullptr)
 {
-	return ApplyFor(fx_dcc_combat_ref, static_cast<ieDword>(value), static_cast<ieDword>(kind), duration, who, caster);
+	return ApplyFor(fx_dcc_combat_ref, static_cast<ieDword>(value), static_cast<ieDword>(kind), duration, who, caster, 0, rolled);
+}
+
+// up to count creatures on the attacker's side near it, nearest first (deeds that help allies)
+static std::vector<Actor*> NearAllies(const Actor* attacker, unsigned int radius, int count)
+{
+	std::vector<Actor*> allies;
+	const Map* map = attacker->GetCurrentArea();
+	if (!map || count <= 0) return allies;
+	bool good = attacker->GetStat(IE_EA) <= EA_GOODCUTOFF;
+	for (Actor* other : map->GetAllActorsInRadius(attacker->Pos, GA_NO_DEAD | GA_NO_UNSCHEDULED, radius)) {
+		if (other == attacker || (other->GetStat(IE_EA) <= EA_GOODCUTOFF) != good) continue;
+		if (other->GetDCCStates() & STATE_DYING) continue;
+		allies.push_back(other);
+	}
+	std::sort(allies.begin(), allies.end(), [attacker](const Actor* a, const Actor* b) {
+		return SquaredDistance(a->Pos, attacker->Pos) < SquaredDistance(b->Pos, attacker->Pos);
+	});
+	if (int(allies.size()) > count) allies.resize(count);
+	return allies;
 }
 
 static void DirectDamage(Actor* who, int damage, Actor* hitter)
@@ -524,7 +780,7 @@ static bool FailedSave(RowContext& ctx)
 {
 	if (!ctx.save || ctx.save->IsNone()) return true;
 	if (ctx.saved < 0) {
-		int dc = ctx.save->dc + (ctx.save->plusLevel ? ctx.level : 0);
+		int dc = ctx.save->vsAttack ? ctx.attackTotal : ctx.save->dc + (ctx.save->plusLevel ? ctx.level : 0);
 		RollResult roll = ctx.subject->DCCRollSave(ctx.save->save, 0, dc, ctx.subject->DCCDie(20));
 		ctx.saved = roll.success ? 1 : 0;
 		static const char16_t* names[] = { u"Fort", u"Ref", u"Will" };
@@ -571,7 +827,7 @@ static void ApplyTerm(const TableTerm& term, RowContext& ctx, const WeaponInfo& 
 	} else if (key == "STUN") {
 		note = u"stunned " + ApplyFor(fx_dcc_stun_ref, 0, 0, TermDuration(term, 0), who, attacker);
 	} else if (key == "BLIND") {
-		note = u"blinded " + ApplyFor(fx_dcc_blind_ref, 0, 0, TermDuration(term, 0), who, attacker);
+		note = u"blinded " + ApplyFor(fx_dcc_blind_ref, 0, 0, TermDuration(term, 0, &ctx.lastDuration), who, attacker, 0, &ctx.lastDuration);
 	} else if (key == "DEAF") {
 		note = u"deafened " + ApplyFor(fx_dcc_deaf_ref, 0, 0, TermDuration(term, 0), who, attacker);
 	} else if (key == "MUTE") {
@@ -593,7 +849,38 @@ static void ApplyTerm(const TableTerm& term, RowContext& ctx, const WeaponInfo& 
 		note = fmt::format(u"speed {}% ", percent) + ApplyFor(fx_dcc_movement_ref, percent, 2, TermDuration(term, 1), who, attacker);
 	} else if (key == "ATK") {
 		int value = argInt(0, 0);
-		note = fmt::format(u"{:+} to attack ", value) + ApplyCombat(CombatEffect::AttackMod, value, TermDuration(term, 1), who, attacker);
+		note = fmt::format(u"{:+} to attack ", value) + ApplyCombat(CombatEffect::AttackMod, value, TermDuration(term, 1, &ctx.lastDuration), who, attacker, &ctx.lastDuration);
+	} else if (key == "DMGMOD") {
+		int value = argInt(0, 0);
+		note = fmt::format(u"{:+} damage ", value) + ApplyFor(fx_dcc_dmgmod_ref, static_cast<ieDword>(value), 0, TermDuration(term, 1), who, attacker);
+	} else if (key == "GUARD" || key == "ALLYATK" || key == "MORALE") {
+		// the attacker and up to N allies near it (GUARD), or N allies (ALLYATK, MORALE)
+		int value = argInt(0, 1);
+		int count = argInt(1, 0);
+		Duration duration = TermDuration(term, 2);
+		std::vector<Actor*> whom = NearAllies(attacker, key == "GUARD" ? 15 : 60, count);
+		if (key == "GUARD") whom.insert(whom.begin(), attacker);
+		String names;
+		String how;
+		for (Actor* ally : whom) {
+			if (key == "MORALE") {
+				how = ApplyFor(fx_dcc_morale_ref, static_cast<ieDword>(value), 0, duration, ally, attacker);
+			} else {
+				how = ApplyCombat(key == "GUARD" ? CombatEffect::ACMod : CombatEffect::AttackMod, value, duration, ally, attacker);
+			}
+			names += (names.empty() ? u"" : u", ") + Name(ally);
+		}
+		const char16_t* what = key == "GUARD" ? u"AC" : (key == "ALLYATK" ? u"to attack" : u"morale");
+		note = whom.empty() ? String(u"no allies near") : fmt::format(u"{} {:+} {} {}", names, value, what, how);
+	} else if (key == "PUSH") {
+		// knocked back, away from the attacker, for a second (the stock wing buffet)
+		int strength = std::max(1, argInt(0, 2));
+		auto fx = EffectQueue::CreateEffect(fx_dcc_push_ref, static_cast<ieDword>(strength), 2, FX_DURATION_INSTANT_LIMITED);
+		fx->Duration = 1;
+		fx->Source = attacker->Pos;
+		fx->Target = FX_TARGET_PRESET;
+		core->ApplyEffect(std::move(fx), who, attacker);
+		note = u"knocked back";
 	} else if (key == "AC") {
 		int value = argInt(0, 0);
 		note = fmt::format(u"{:+} AC ", value) + ApplyCombat(CombatEffect::ACMod, value, TermDuration(term, 1), who, attacker);
@@ -753,7 +1040,7 @@ static String Joined(const std::vector<String>& notes)
 	return text;
 }
 
-void Actor::DCCResolveSwing(DCCSwing& swing, Actor* target, int depth)
+void Actor::DCCResolveSwing(DCCSwing& swing, Actor* target, int depth, DCCAttackState* state)
 {
 	const RulesData* rules = Rules();
 	AttackRecord& record = swing.record;
@@ -763,9 +1050,21 @@ void Actor::DCCResolveSwing(DCCSwing& swing, Actor* target, int depth)
 	record.deed = GetStat(IE_DCC_DEEDDIE) ? dccDeedRoll : 0;
 	if (record.natural <= 0) record.natural = DCCDie(record.die);
 	RollResult roll = ResolveAttack(swing.in, record.natural);
-	// M2.4 seam: a Luck burn (per-character policy, or a prompt while paused) can raise roll.total
-	// here and turn a miss into a hit; the deed die's Mighty Deed (signature deed) also hooks in
-	// below, once the hit is known (deed die 3+ and a hit)
+	int before = roll.total;
+	bool wasHit = roll.success;
+
+	// Luck: the owner's answer to a prompt, or the policy (a thief rolls its luck dice here).
+	// The one-shot modifiers are in swing.in already, so the burn re-resolves the same roll
+	if (!swing.decided) DCCPolicyAttackBurn(swing, roll);
+	if (swing.burnBonus) {
+		AttackInput burned = swing.in;
+		burned.modifier += swing.burnBonus;
+		roll = ResolveAttack(burned, record.natural);
+	}
+	record.luckBurned = swing.burnPoints;
+	record.luckBonus = swing.burnBonus;
+	record.luckBy = swing.burnBy;
+	record.fumbleCancelled = swing.fumbleCancelled;
 	record.modifier = swing.in.modifier;
 	record.total = roll.total;
 	record.ac = roll.target;
@@ -773,6 +1072,24 @@ void Actor::DCCResolveSwing(DCCSwing& swing, Actor* target, int depth)
 	record.crit = roll.critical;
 	record.fumble = roll.fumble;
 	record.cursed = roll.cursed;
+	if (state && depth == 0) record.deedKind = static_cast<int>(state->deed);
+
+	// "Ilsa burns 3 Luck: 9 -> 12, hit" (before the attack line, which shows the burned total)
+	if (swing.burnPoints) {
+		const Game* game = core->GetGame();
+		const Actor* by = swing.burnBy && game ? game->GetActorByGlobalID(swing.burnBy) : this;
+		int left = by ? by->GetDCCLuck() : 0;
+		if (swing.fumbleCancelled) {
+			Feedback(fmt::format(u"{} burns {} Luck to shrug off the fumble (Luck {} left)", Name(this), swing.burnPoints, left), FT_COMBAT);
+		} else {
+			BurnValue value = by ? by->GetDCCBurnValue() : BurnValue();
+			String how = value.IsDie() ? fmt::format(u"{}d{} = +{}", swing.burnPoints, value.luckDie, swing.burnBonus) : fmt::format(u"+{}", swing.burnBonus);
+			String forWhom = by == this ? String() : fmt::format(u" for {}", Name(this));
+			String result = record.hit ? (record.crit && !wasHit ? u"hit and crit" : u"hit") : u"still a miss";
+			Feedback(fmt::format(u"{} burns {} Luck{} ({}): {} -> {}, {} (Luck {} left)", Name(by), swing.burnPoints, forWhom, how, before, record.total, result, left),
+				 FT_COMBAT);
+		}
+	}
 
 	// "Brak attacks Goblin: d20 14 + d3 2 +2 = 18 vs AC 12, hit: 1d8+3 = 7 damage"
 	String dieText = fmt::format(u"d{} {}", record.die, record.natural);
@@ -781,8 +1098,9 @@ void Actor::DCCResolveSwing(DCCSwing& swing, Actor* target, int depth)
 		dieText += fmt::format(u" + d{} {}", GetStat(IE_DCC_DEEDDIE), record.deed);
 		flat -= record.deed;
 	}
-	String line = fmt::format(u"{} {}{} {}: {}{} = {} vs AC {}, ", Name(this), depth ? u"free attack on" : u"attacks", swing.hand ? u" (off hand)" : u"",
-				  Name(target), dieText, Plus(flat), record.total, record.ac);
+	String luckText = swing.burnBonus ? fmt::format(u" +{} Luck", swing.burnBonus) : String();
+	String line = fmt::format(u"{} {}{} {}: {}{}{} = {} vs AC {}, ", Name(this), depth ? u"free attack on" : u"attacks", swing.hand ? u" (off hand)" : u"",
+				  Name(target), dieText, Plus(flat), luckText, record.total, record.ac);
 	if (record.hit) {
 		line += record.crit ? u"critical hit" : u"hit";
 	} else if (record.cursed) {
@@ -804,9 +1122,9 @@ void Actor::DCCResolveSwing(DCCSwing& swing, Actor* target, int depth)
 			swing.damage += extra;
 			line += fmt::format(u" +{} = {}", Widen(DiceString(swing.extraOnHit)), extra);
 		}
-		if (swing.deed && dccDeedRoll >= 3) {
-			// M2.4 seam: the Mighty Deed of Arms succeeds here (deed die 3+ on a hit)
-			line += u" (deed die 3+)";
+		// a deed die below 3 on a hit: the declared deed doesn't happen (DCCMightyDeed logs a success)
+		if (state && depth == 0 && swing.deed && state->deed != Deed::None && !state->deedTried && !DeedSucceeds(dccDeedRoll, true)) {
+			line += fmt::format(u" (deed {}: no {})", dccDeedRoll, DeedName(state->deed));
 		}
 	}
 	Feedback(std::move(line), FT_TOHIT);
@@ -850,6 +1168,8 @@ void Actor::DCCResolveSwing(DCCSwing& swing, Actor* target, int depth)
 			swing.damage += ctx.extraDamage;
 			swing.extraDamage = ctx.extraDamage;
 		}
+	} else if (record.fumble && swing.fumbleCancelled) {
+		// a warrior or dwarf burned 1 Luck: the natural 1 still misses, but no fumble roll (combat.md)
 	} else if (record.fumble) {
 		if (!IsDCCCharacter()) {
 			// Ethren decision: monsters' natural 1s miss without a fumble roll (the table is about gear)
@@ -871,7 +1191,6 @@ void Actor::DCCResolveSwing(DCCSwing& swing, Actor* target, int depth)
 			int rolled = DCCDie(record.fumbleDie);
 			int luck = GetDCCAbilityMod(Ability::Luck) + GetDCCAugurBonus(AugurRoll::Fumble);
 			record.fumbleRoll = FumbleRoll(rolled, luck);
-			// M2.4 seam: warriors and dwarves may burn 1 Luck here to skip the fumble table
 			ctx.subject = this;
 			ctx.crit = false;
 			const ResultRow* row = rules->combat.fumbles.Lookup(record.fumbleRoll);
@@ -884,6 +1203,9 @@ void Actor::DCCResolveSwing(DCCSwing& swing, Actor* target, int depth)
 				 FT_COMBAT);
 		}
 	}
+	// the Mighty Deed (deed die 3+ on a hit), once per attack action, after any crit (both apply)
+	if (state && depth == 0 && record.hit && swing.deed) DCCMightyDeed(swing, target, state);
+
 	record.damage = record.hit ? swing.damage : 0;
 	dccLastAttack.push_back(record);
 
@@ -900,7 +1222,11 @@ void Actor::DCCResolveSwing(DCCSwing& swing, Actor* target, int depth)
 		free.in.modifier += bonus;
 		free.extraOnHit = DiceExpr();
 		if (extra.second.size() > 1) ParseDice(extra.second[1], free.extraOnHit);
-		DCCResolveSwing(free, target, depth + 1);
+		free.decided = false;
+		free.burnPoints = free.burnBonus = 0;
+		free.burnBy = 0;
+		free.fumbleCancelled = false;
+		DCCResolveSwing(free, target, depth + 1, state);
 		if (free.record.hit) {
 			const ITMExtHeader* header = wi.extHeader;
 			auto fx = EffectQueue::CreateEffect(fx_dcc_damage_ref, free.damage, ConvertDamageType(header ? header->DamageType : 0) << 16, FX_DURATION_INSTANT_LIMITED);
@@ -908,6 +1234,32 @@ void Actor::DCCResolveSwing(DCCSwing& swing, Actor* target, int depth)
 			core->ApplyEffect(std::move(fx), target, this);
 		}
 	}
+}
+
+// "Brak's deed d3 = 3: trip! tripped; Goblin 1 Ref save ...; prone for 1 round"
+void Actor::DCCMightyDeed(DCCSwing& swing, Actor* target, DCCAttackState* state)
+{
+	if (state->deedTried || state->deed == Deed::None) return;
+	state->deedTried = true;
+	AttackRecord& record = swing.record;
+	int die = GetStat(IE_DCC_DEEDDIE);
+	if (!DeedSucceeds(dccDeedRoll, record.hit)) return; // the attack line says so
+	String deedName = DeedName(state->deed);
+	const ResultRow* row = Rules()->deeds.Lookup(state->deed, dccDeedRoll);
+	if (!row) return;
+	RowContext ctx;
+	ctx.attacker = this;
+	ctx.target = target;
+	ctx.subject = target;
+	ctx.level = GetDCCHitDice();
+	ctx.attackTotal = record.total;
+	ApplyRow(*row, ctx, *swing.wi);
+	// a precision shot's extra damage rides on this hit
+	swing.damage += ctx.extraDamage;
+	record.deedDone = true;
+	record.deedResult = row->text;
+	Feedback(fmt::format(u"{}'s deed d{} = {}: {}! {}{}{}", Name(this), die, dccDeedRoll, deedName, Widen(row->text), ctx.notes.empty() ? u"" : u"; ", Joined(ctx.notes)),
+		 FT_COMBAT);
 }
 
 // ---------------------------------------------------------------------------

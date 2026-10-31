@@ -612,7 +612,13 @@ namespace GemRB {
 // dying (kept in the CRE): the game time of death and whether the body was rolled over
 #define IE_DCC_DIEDAT     298 // game time in ticks, 0: not dead (or not a DCC death)
 #define IE_DCC_BODY       299 // 1: rolled over already
-#define IE_DCC_LAST       299
+// Luck burn and Mighty Deeds (M2.4, kept in the CRE; base): the player's choices
+#define IE_DCC_BURNPOLICY 300 // DCC::BurnPolicy: 0 never, 1 to avoid death or a fumble, 2 also misses
+#define IE_DCC_BURNMIN    301 // policy 2: Luck never goes below this
+#define IE_DCC_LUCKFLAGS  302 // DCC::LuckFlags: 1 pause and ask on key rolls, 2 halflings burn for allies
+#define IE_DCC_DEED       303 // the signature deed (DCC::Deed), warriors and dwarves
+#define IE_DCC_NEXTDEED   304 // a one-off deed for the next attack (DCC::Deed), cleared when declared
+#define IE_DCC_LAST       304
 
 }
 

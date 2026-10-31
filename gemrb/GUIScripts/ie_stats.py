@@ -406,6 +406,11 @@ IE_DCC_MACTDIE                  = 296
 IE_DCC_MINIT                    = 297
 IE_DCC_DIEDAT                   = 298 # game time of death (ticks)
 IE_DCC_BODY                     = 299 # 1: body rolled over already
+IE_DCC_BURNPOLICY               = 300 # Luck burn policy (DCC_BURN_*)
+IE_DCC_BURNMIN                  = 301 # policy 2: Luck never goes below this
+IE_DCC_LUCKFLAGS                = 302 # DCC_LUCK_* bits
+IE_DCC_DEED                     = 303 # the signature deed (DCC_DEED_*)
+IE_DCC_NEXTDEED                 = 304 # a one-off deed for the next attack (DCC_DEED_*)
 
 # DCC states at 0 (IE_DCC_STATE bits)
 DCC_STATE_IMMOBILE = 1
@@ -413,6 +418,23 @@ DCC_STATE_UNCONSCIOUS = 2
 DCC_STATE_WITLESS = 4
 DCC_STATE_CURSED = 8
 DCC_STATE_DYING = 16
+
+# Luck burn policies (IE_DCC_BURNPOLICY) and flags (IE_DCC_LUCKFLAGS)
+DCC_BURN_NEVER = 0
+DCC_BURN_AVOID_DISASTER = 1 # only to avoid death or (warriors, dwarves) a fumble
+DCC_BURN_MISS_TO_HIT = 2 # also failed rolls, while Luck stays at IE_DCC_BURNMIN or above
+DCC_LUCK_PAUSE = 1 # pause and ask on key rolls
+DCC_LUCK_ALLIES = 2 # halflings burn for allies in sight
+
+# Mighty Deeds (IE_DCC_DEED, IE_DCC_NEXTDEED)
+DCC_DEED_NONE = 0
+DCC_DEED_BLIND = 1
+DCC_DEED_DISARM = 2
+DCC_DEED_PUSH = 3
+DCC_DEED_TRIP = 4
+DCC_DEED_PRECISION = 5
+DCC_DEED_RALLY = 6
+DCC_DEED_DEFEND = 7
 
 #these stats exist only in PC's (but we access only PCs anyway)
 # make sure EXTRASETTINGS matches GUIScript.cpp

@@ -107,6 +107,11 @@ def Lines (pc):
 			if key in stats["Skills"]:
 				value = stats["Skills"][key]
 				lines.append ("%-23s %s" % (label, ("d%d" % value) if key == "SCROLL_DIE" else Signed (value)))
+	import DCCLuck
+	extra = DCCLuck.Lines (stats)
+	if extra:
+		lines.append ("")
+		lines.extend (extra)
 	lines.append ("")
 	lines.append ("States: " + StateNames (stats["States"]))
 	return lines

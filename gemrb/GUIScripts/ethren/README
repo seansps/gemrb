@@ -15,5 +15,8 @@ Modules here so far:
   the dcctest autotest hook.
 - GUIREC.py: the DCC record screen, plain text in a window built from code.
 - DCCSheet.py: formats GemRB.GetDCCStats for the record screen and logs.
+- DCCLuck.py: the record screen's Luck panel (burn policy, the Luck to keep,
+  pause on key rolls, halflings burning for allies) and Deeds panel (signature
+  deed, a one-off for the next attack), M2.4.
 - DCCAutotest.py: the DCC checks of testdata/dcctest's autotest; idle unless
   the DCC_AUTOTEST global is 1.

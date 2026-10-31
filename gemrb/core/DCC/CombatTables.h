@@ -95,9 +95,10 @@ struct SaveSpec {
 	Save save = Save::Fort;
 	int dc = 0;
 	bool plusLevel = false; // + the attacker's level
-	bool IsNone() const { return dc == 0; }
+	bool vsAttack = false; // the DC is the attack roll's total (Mighty Deeds)
+	bool IsNone() const { return dc == 0 && !vsAttack; }
 };
-/** FORT:15:L, REF:10, WILL:20, or * */
+/** FORT:15:L, REF:10, WILL:20, REF:A (vs the attack roll), or * */
 GEM_EXPORT bool ParseSaveSpec(const std::string& text, SaveSpec& save);
 /** parses the EFFECTS grammar above */
 GEM_EXPORT bool ParseEffects(const std::string& text, std::vector<TableAlternatives>& effects);

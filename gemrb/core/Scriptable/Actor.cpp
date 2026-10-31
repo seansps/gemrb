@@ -3259,6 +3259,7 @@ void Actor::RollSaves()
 		for (auto& save : lastSave.savingThrow) {
 			save = RAND<ieByte>(1, saveDiceSides);
 		}
+		dccSaveBurn.fill(0); // DCC: Luck burned on the old dice
 		InternalFlags &= ~IF_USEDSAVE;
 	}
 }

@@ -25,11 +25,14 @@
 #include "DCC/Augur.h"
 #include "DCC/Character.h"
 #include "DCC/Combat.h"
+#include "DCC/Deeds.h"
+#include "DCC/Luck.h"
 #include "Scriptable/Movable.h"
 #include "Scriptable/PCStatStruct.h"
 
 #include <array>
 #include <map>
+#include <memory>
 #include <set>
 #include <vector>
 
@@ -603,7 +606,25 @@ private:
 	void DCCOnDeath();
 	/* DCC: one roll of an attack action, see ActorDCCCombat.cpp */
 	struct DCCSwing;
-	void DCCResolveSwing(DCCSwing& swing, Actor* target, int depth);
+	struct DCCAttackState;
+	void DCCResolveSwing(DCCSwing& swing, Actor* target, int depth, DCCAttackState* state);
+	/* DCC: carries on with an attack action, swing by swing; false if it waits for a Luck prompt */
+	bool DCCContinueAttack(const std::shared_ptr<DCCAttackState>& state);
+	/* DCC: asks the owner how much Luck to burn on a key roll; true if the attack now waits */
+	bool DCCAskAttackBurn(const std::shared_ptr<DCCAttackState>& state, DCCSwing& swing, const Actor* target);
+	/* DCC: the policy's Luck burn on a swing (own, then the party's halfling for an ally) */
+	void DCCPolicyAttackBurn(DCCSwing& swing, const DCC::RollResult& roll);
+	/* DCC: the Mighty Deed of a hit with the deed die at 3+ */
+	void DCCMightyDeed(DCCSwing& swing, Actor* target, DCCAttackState* state);
+	// an attack action waiting for the answer to a Luck prompt (not saved: the prompt isn't either)
+	std::shared_ptr<DCCAttackState> dccPendingAttack;
+	// Luck burned on each pre-rolled IE save die, so all effects of a spell get it (RollSaves clears)
+	std::array<int, 5> dccSaveBurn {};
+	/* DCC: a failed save vs death of a party member who pauses on key rolls: the lethal effects
+	 * wait (as saved for now) until the owner says how much Luck to burn; true if they wait */
+	struct DCCHeldSave;
+	std::shared_ptr<DCCHeldSave> dccHeldSave;
+	bool DCCAskSaveBurn(const Effect& fx, ieDword type, const DCC::RollResult& roll);
 	/* Returns true if the dual class is backwards */
 	bool IsDualSwap() const;
 	int GetNonProficiencyPenalty(int stars) const;
@@ -727,6 +748,32 @@ public:
 	int DCCRecoverBody(const Actor* ally, int natural = 0);
 	/** the DCC combat log lines so far (the last few hundred); clear empties it */
 	static std::vector<String> DCCCombatLog(bool clear = false);
+	/** adds a line to the DCC combat log (shown with feedback of that type, replicated to co-op clients) */
+	static void DCCFeedback(String text, int feedbackType);
+	/** an attack action waits for a Luck prompt's answer */
+	bool DCCAttackPending() const { return dccPendingAttack != nullptr; }
+
+	// DCC Luck burn and Mighty Deeds (M2.4, ActorDCCLuck.cpp)
+	/** the character's burn policy, threshold and flags (IE_DCC_BURNPOLICY, BURNMIN, LUCKFLAGS) */
+	DCC::LuckPolicy GetDCCLuckPolicy() const;
+	/** what a point of this character's Luck adds to its own roll */
+	DCC::BurnValue GetDCCBurnValue() const;
+	/** the current Luck score (after loss and burns) */
+	int GetDCCLuck() const;
+	/** burns points of Luck (Luck loss goes up, never past the current score) and returns the
+	 * bonus they give with value (a thief rolls its luck dice with DCCDie) */
+	int DCCBurnLuck(int points, const DCC::BurnValue& value);
+	/** the halfling whose good luck charm can help this character now (the party's first level 1+
+	 * halfling for party members, else the nearest one on the same side), if in sight; nullptr if none */
+	Actor* DCCLuckCharm();
+	/** the policy's burn on a failed roll (own first; a halfling for an ally if the character
+	 * doesn't burn): adds the bonus to roll, logs it and returns the points burned */
+	int DCCPolicyRollBurn(DCC::RollResult& roll, DCC::BurnReason reason, const char16_t* what);
+	/** a night's rest: thieves and halflings get back their level in Luck, up to the natural maximum */
+	void DCCRecoverLuck();
+	/** the signature deed (IE_DCC_DEED) and the one-off deed queued for the next attack */
+	DCC::Deed GetDCCSignatureDeed() const;
+	DCC::Deed GetDCCQueuedDeed() const;
 	/* returns the weapon proficiency stat of the actor */
 	int GetProficiency(ieByte proftype) const;
 	/** Returns true if the actor is targetable */

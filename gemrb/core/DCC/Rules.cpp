@@ -103,6 +103,8 @@ bool RulesData::Load()
 		if (!table || !thiefSkills.Load(entry.first, *table)) fail(entry.second);
 	}
 	if (!combat.Load()) ok = false;
+	table = gamedata->LoadTable("dccdeeds");
+	if (!table || !deeds.Load(*table)) fail("dccdeeds");
 	return ok;
 }
 

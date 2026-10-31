@@ -20,6 +20,14 @@
 #      fallback, a monster's crit, fumbles by armor, two weapons for a thief and a halfling,
 #      cursed by fortune, a real Attack action with initiative, bleeding out (healed, and
 #      dead then recovered by rolling the body over) and a level 0 death
+#   9. Luck burn and Mighty Deeds (M2.4): burn policies on checks and saves (step 2), the
+#      settings and burned Luck through the save and load (step 4), a thief's nightly
+#      recovery and a warrior's lack of it (step 5); in the fight a policy burn that turns a
+#      miss into a hit, "never", a warrior cancelling a fumble, a thief's luck dice, a
+#      halfling burning for an ally at +2, a prompt answered with GemRB.AnswerPrompt and one
+#      left to time out (the policy's answer), a save vs death that waits for the answer
+#      (burn and survive; decline and die), and deeds: the deed die on attack and damage,
+#      a signature trip on 3+, nothing on 2, a queued one-off disarm used once, defend, precision
 # Every check logs "[DCC] ok ..." or "[DCC] FAIL ...", and the end "[DCC] autotest done:
 # N checks, F failed"; the DCT_AT_DCC global becomes 1 if all passed, 2 if not.
 import GemRB
@@ -114,6 +122,7 @@ def _StepCheck ():
 	_Check ("dctilsa Str check 17 vs DC 20 success", roll["Success"], 1)
 	roll = GemRB.DCCRoll (pc, 2, 0, 0, 18) # Luck check: 18 <= 18
 	_Check ("dctilsa Luck check 18 under 18", roll["Success"], 1)
+	_StepCheckLuck ()
 
 	# drains: Grub's Str to 0 (immobile), Brak's Sta past 0 (unconscious, floors at 0),
 	# Ilsa's Luck to 0 (cursed by fortune) and 2 points of her Int (no state)
@@ -142,6 +151,56 @@ def _CheckDrained (when):
 	_Check ("%s dctilsa cursed Fort save 20 vs DC 5" % when, [roll["Success"], roll["Cursed"]], [0, 1])
 	roll = GemRB.DCCRoll (pc, 2, 0, 0, 1)
 	_Check ("%s dctilsa cursed Luck check 1" % when, roll["Success"], 0)
+
+# --- M2.4 Luck burns on rolls --------------------------------------------------
+ALLFLAGS = DCC_LUCK_PAUSE | DCC_LUCK_ALLIES
+
+def _Luck (actor):
+	return GemRB.GetDCCStats (actor)["Luck"]
+
+def _StepCheckLuck ():
+	# Sly (thief 2, Luck 15) keeps a policy in his CRE: misses to hits while Luck stays at 5+.
+	# A Str check of 3 vs DC 10 is 7 short; his d4 luck die averages 2.5, so he burns 3: 4+4+2
+	pc, sly = _Stats ("dctsly")
+	_Check ("dctsly policy from the CRE", [sly["LuckPolicy"], sly["LuckThreshold"], sly["LuckFlags"]], [DCC_BURN_MISS_TO_HIT, 5, ALLFLAGS])
+	_Check ("dctsly burns a d4 a point, gets 2 back a night", [sly["BurnPerPoint"], sly["BurnDie"], sly["LuckRecovery"]], [0, 4, 2])
+	GemRB.DCCForceDice (pc, [4, 4, 2])
+	roll = GemRB.DCCRoll (pc, 1, 0, 10, 3, 1)
+	GemRB.DCCForceDice (pc, [])
+	_Check ("dctsly thief burn 3d4 on a Str check", [roll["Total"], roll["Success"], roll["LuckBurned"]], [13, 1, 3])
+	_Check ("dctsly Luck 15 -> 12", _Luck (pc), 12)
+
+	# Brak (warrior 1, Luck 14, Str +2): "never" doesn't burn on a Str check of 8 + 2 vs 12
+	pc, brak = _Stats ("dctbrak")
+	_Check ("dctbrak default policy", [brak["LuckPolicy"], brak["LuckFlags"], brak["Deed"], brak["CancelsFumbles"]], [DCC_BURN_AVOID_DISASTER, ALLFLAGS, DCC_DEED_TRIP, 1])
+	GemRB.DCCSetLuckPolicy (pc, DCC_BURN_NEVER, 10, ALLFLAGS)
+	roll = GemRB.DCCRoll (pc, 1, 0, 12, 8, 1)
+	_Check ("dctbrak never burns", [roll["Total"], roll["Success"], roll["LuckBurned"]], [10, 0, 0])
+	# misses to hits while Luck stays at 10+: burns 2 (14 -> 12); then 3 short would take him to 9: no
+	GemRB.DCCSetLuckPolicy (pc, DCC_BURN_MISS_TO_HIT, 10, ALLFLAGS)
+	roll = GemRB.DCCRoll (pc, 1, 0, 12, 8, 1)
+	_Check ("dctbrak burns 2 for a success", [roll["Total"], roll["Success"], roll["LuckBurned"]], [12, 1, 2])
+	roll = GemRB.DCCRoll (pc, 1, 0, 12, 7, 1)
+	_Check ("dctbrak keeps Luck 10+", [roll["Success"], roll["LuckBurned"]], [0, 0])
+	# only to avoid death: a plain failed Fort save (5 + 2 vs DC 8) no, a save vs death yes (1 point)
+	GemRB.DCCSetLuckPolicy (pc, DCC_BURN_AVOID_DISASTER, 10, ALLFLAGS)
+	roll = GemRB.DCCRoll (pc, 0, 0, 8, 5, 1)
+	_Check ("dctbrak no burn on a plain save", [roll["Success"], roll["LuckBurned"]], [0, 0])
+	roll = GemRB.DCCRoll (pc, 0, 0, 8, 5, 2)
+	_Check ("dctbrak burns 1 to survive", [roll["Total"], roll["Success"], roll["LuckBurned"]], [8, 1, 1])
+	_Check ("dctbrak Luck 14 -> 11", _Luck (pc), 11)
+	_Check ("log: brak's burn", _Logged ("Brak burns 1 Luck on a save (+1): 7 -> 8 vs 8, success (Luck 11 left)"), True)
+	# settings that must come back from the save: misses while Luck 8+, pause only, deeds push / blind next
+	GemRB.DCCSetLuckPolicy (pc, DCC_BURN_MISS_TO_HIT, 8, DCC_LUCK_PAUSE)
+	GemRB.DCCSetDeeds (pc, DCC_DEED_PUSH, DCC_DEED_BLIND)
+
+def _CheckLuckLoaded ():
+	pc, brak = _Stats ("dctbrak")
+	_Check ("loaded dctbrak Luck settings", [brak["LuckPolicy"], brak["LuckThreshold"], brak["LuckFlags"]], [DCC_BURN_MISS_TO_HIT, 8, DCC_LUCK_PAUSE])
+	_Check ("loaded dctbrak deeds", [brak["Deed"], brak["NextDeed"]], [DCC_DEED_PUSH, DCC_DEED_BLIND])
+	_Check ("loaded dctbrak burned Luck", [brak["Luck"], brak["LuckMax"], brak["Abilities"][5][2]], [11, 14, 3])
+	pc, sly = _Stats ("dctsly")
+	_Check ("loaded dctsly burned Luck", [sly["Luck"], sly["LuckMax"]], [12, 15])
 
 SaveName = "DCC autotest"
 
@@ -172,6 +231,7 @@ def _StepSave ():
 
 def _StepLoaded ():
 	_CheckDrained ("loaded")
+	_CheckLuckLoaded ()
 	# a night in the field heals 1 point of loss
 	info = GemRB.RestParty (1 | 16, -1, 1)
 	_Check ("field rest allowed", info["Error"], False)
@@ -187,6 +247,9 @@ def _StepRested ():
 	pc, ilsa = _Stats ("dctilsa")
 	_Check ("field rest dctilsa Luck loss", ilsa["Abilities"][5][2], 18)
 	_Check ("field rest dctilsa Int", ilsa["Abilities"][4][:3], [18, 17, 1])
+	# a thief gets his level (2) of burned Luck back a night; a warrior gets nothing back
+	_Check ("field rest dctsly Luck 12 -> 14", _Luck (_Party ()["dctsly"]), 14)
+	_Check ("field rest dctbrak Luck stays 11", _Luck (_Party ()["dctbrak"]), 11)
 	# bed rest (an inn): 2 points
 	info = GemRB.RestParty (16, -1, 1)
 	_Check ("bed rest allowed", info["Error"], False)
@@ -201,6 +264,9 @@ def _StepBedRested ():
 	pc, ilsa = _Stats ("dctilsa")
 	_Check ("bed rest dctilsa Luck (never heals)", [ilsa["Luck"], ilsa["Abilities"][5][2]], [0, 18])
 	_Check ("bed rest dctilsa Int", ilsa["Abilities"][4][:3], [18, 18, 0])
+	# up to the natural maximum only
+	_Check ("bed rest dctsly Luck 14 -> 15 (max)", _Luck (_Party ()["dctsly"]), 15)
+	_Check ("bed rest dctbrak Luck stays 11", _Luck (_Party ()["dctbrak"]), 11)
 
 	# level up: Ilsa is human, so no dwarf; with 10 XP she becomes a warrior
 	GemRB.SetPlayerStat (pc, IE_XP, 10)
@@ -250,6 +316,36 @@ def _StepLethal ():
 	_Check ("record window back on Sly", GUIREC.Shown, _Party ()["dctsly"])
 	GUIREC.CloseRecordsWindow ()
 	_Check ("record window closed", GUIREC.Window, None)
+
+	# the Luck and Deeds panels (M2.4): the same calls their buttons make
+	import DCCLuck
+	brak = _Party ()["dctbrak"]
+	GUIREC.OpenRecordsWindow (brak)
+	DCCLuck.OpenLuckWindow (brak)
+	_Check ("luck panel open", [DCCLuck.Window is not None, DCCLuck.Kind], [True, "luck"])
+	DCCLuck._SetPolicy (DCC_BURN_NEVER)
+	DCCLuck._SetPolicy (None, 12)
+	DCCLuck._SetPolicy (None, None, 0)
+	stats = GemRB.GetDCCStats (brak)
+	_Check ("luck panel: never, keep 12, no pause", [stats["LuckPolicy"], stats["LuckThreshold"], stats["LuckFlags"]], [DCC_BURN_NEVER, 12, 0])
+	DCCLuck.OpenDeedsWindow (brak)
+	_Check ("deeds panel open", DCCLuck.Kind, "deeds")
+	DCCLuck._SetDeeds (DCC_DEED_DISARM)
+	DCCLuck._SetDeeds (-1, DCC_DEED_RALLY)
+	stats = GemRB.GetDCCStats (brak)
+	_Check ("deeds panel: signature disarm, next rally", [stats["Deed"], stats["NextDeed"]], [DCC_DEED_DISARM, DCC_DEED_RALLY])
+	lines = DCCSheet.Lines (brak)
+	for line in lines[-4:]:
+		_Log ("record: " + line)
+	_Check ("record shows the deeds", "Deeds: signature disarm, next attack rally" in lines, True)
+	_Check ("record shows the Luck burn", "Luck burn: never; +1 each" in lines, True)
+	DCCLuck.OpenDeedsWindow (_Party ()["dctsly"])
+	_Check ("no deeds panel for a thief", DCCLuck.Window, None)
+	GUIREC.CloseRecordsWindow ()
+	_Check ("panels closed", [GUIREC.Window, DCCLuck.Window], [None, None])
+	# back to the settings of step 2
+	GemRB.DCCSetLuckPolicy (brak, DCC_BURN_MISS_TO_HIT, 8, DCC_LUCK_PAUSE)
+	GemRB.DCCSetDeeds (brak, DCC_DEED_PUSH, DCC_DEED_BLIND)
 	return "fight"
 
 # --- M2.3 combat -------------------------------------------------------------
@@ -278,11 +374,169 @@ def _Dead (actor):
 def _Logged (text):
 	return any (text in line for line in GemRB.GetDCCCombatLog ())
 
+def _Pending (actor):
+	return GemRB.GetDCCStats (actor)["AttackPending"]
+
+def _FightLuck ():
+	"""M2.4 in combat: Luck burns (policies, prompts) and Mighty Deeds, with forced dice"""
+	korg, pip, gob1, gob2 = _ID ("dctkorg"), _ID ("dctpip"), _ID ("dctgob1"), _ID ("dctgob2")
+	sly, brak = _Party ()["dctsly"], _Party ()["dctbrak"]
+
+	# the deed die adds to attack and damage; Korg's signature trip on a 3: d20 10 + d4 3 + Str 2 = 15,
+	# 1d8 4 + 2 + 3 = 9; goblin 1's Ref save (d20 2 + 1) against the attack's 15 fails: prone
+	_Check ("korg's signature deed", GemRB.GetDCCStats (korg)["Deed"], DCC_DEED_TRIP)
+	GemRB.DCCForceDice (gob1, [2])
+	r = _Attack (korg, gob1, [3, 10, 4])
+	GemRB.DCCForceDice (gob1, [])
+	_Check ("korg deed 3 on attack and damage, trip", _Pick (r[0], ["Deed", "Modifier", "Total", "AC", "Hit", "Damage", "DeedKind", "DeedDone", "DeedResult"]),
+		[3, 5, 15, 10, 1, 9, DCC_DEED_TRIP, 1, "tripped"])
+	yield
+	_Check ("goblin 1 tripped: prone", GemRB.GetPlayerStat (gob1, IE_DCC_PRONE), 1)
+	_Check ("log: korg's trip", _Logged ("Korg's deed d4 = 3: trip! tripped; Goblin 1 Ref save 2 +1 = 3 vs DC 15: failed; prone for 1 round"), True)
+	# a 2 on the deed die: a hit without a deed
+	r = _Attack (korg, gob2, [2, 12, 4])
+	_Check ("korg deed 2: no deed", _Pick (r[0], ["Total", "Hit", "Damage", "DeedKind", "DeedDone"]), [16, 1, 8, DCC_DEED_TRIP, 0])
+	_Check ("log: no trip", _Logged ("vs AC 10, hit: 1d8 +4 = 8 damage (deed 2: no trip)"), True)
+
+	# a one-off disarm for the next attack only: a 4 sends goblin 2's blade out of reach (no attack for a round)
+	GemRB.DCCSetDeeds (korg, -1, DCC_DEED_DISARM)
+	_Check ("korg one-off disarm queued", GemRB.GetDCCStats (korg)["NextDeed"], DCC_DEED_DISARM)
+	r = _Attack (korg, gob2, [4, 12, 4])
+	_Check ("korg one-off disarm 4", _Pick (r[0], ["Hit", "Damage", "DeedKind", "DeedDone", "DeedResult"]), [1, 10, DCC_DEED_DISARM, 1, "weapon flies out of reach"])
+	_Check ("one-off used up", [GemRB.GetDCCStats (korg)["NextDeed"], GemRB.GetDCCStats (korg)["Deed"]], [0, DCC_DEED_TRIP])
+	yield
+	_Check ("goblin 2 can't attack", GemRB.GetPlayerStat (gob2, IE_DCC_NOATTACK), 1)
+	_Check ("log: goblin 2 disarmed", _Logged ("Goblin 2 drops its weapon"), True)
+	r = _Attack (korg, gob2, [1, 12, 4])
+	_Check ("korg back to the signature deed", [r[0]["DeedKind"], r[0]["DeedDone"]], [DCC_DEED_TRIP, 0])
+
+	# defensive maneuvers on a 3: +1 AC for Korg; a precision shot on a 3: +1d4 damage (2)
+	ac = GemRB.GetDCCStats (korg)["AC"]
+	GemRB.DCCSetDeeds (korg, DCC_DEED_DEFEND, -1)
+	r = _Attack (korg, gob2, [3, 12, 4])
+	yield
+	_Check ("korg defend 3: +1 AC", [r[0]["DeedDone"], GemRB.GetDCCStats (korg)["AC"]], [1, ac + 1])
+	GemRB.DCCSetDeeds (korg, DCC_DEED_PRECISION, -1)
+	r = _Attack (korg, gob2, [3, 12, 4, 2])
+	_Check ("korg precision 3: +1d4", _Pick (r[0], ["DeedDone", "Damage"]), [1, 11])
+	GemRB.DCCSetDeeds (korg, DCC_DEED_TRIP, -1)
+
+	# Luck: misses to hits while Luck stays at 5+: 6 + 1 + 2 = 9 vs 10 burns 1 (10 -> 9); 4 + 2 + 1 = 7 damage
+	GemRB.DCCSetLuckPolicy (korg, DCC_BURN_MISS_TO_HIT, 5, ALLFLAGS)
+	r = _Attack (korg, gob2, [1, 6, 4])
+	_Check ("korg policy burn: miss to hit", _Pick (r[0], ["Total", "AC", "Hit", "LuckBurned", "LuckBonus", "LuckBy", "Damage"]), [10, 10, 1, 1, 1, 0, 7])
+	_Check ("korg Luck 10 -> 9", _Luck (korg), 9)
+	_Check ("log: korg burns", _Logged ("Korg burns 1 Luck (+1): 9 -> 10, hit (Luck 9 left)"), True)
+	# never: the same miss stays a miss (Pip only burns to avoid disaster)
+	GemRB.DCCSetLuckPolicy (korg, DCC_BURN_NEVER, 5, ALLFLAGS)
+	r = _Attack (korg, gob2, [1, 6])
+	_Check ("korg never burns", _Pick (r[0], ["Total", "Hit", "LuckBurned"]), [9, 0, 0])
+	_Check ("korg Luck stays 9", _Luck (korg), 9)
+	# Pip, the halflings' good luck charm, burns for Korg in sight at +2 a point: 5 + 1 + 2 = 8, 1 point is 10
+	GemRB.DCCSetLuckPolicy (pip, DCC_BURN_MISS_TO_HIT, 5, ALLFLAGS)
+	r = _Attack (korg, gob2, [1, 5, 4])
+	_Check ("pip burns for korg at +2", _Pick (r[0], ["Total", "Hit", "LuckBurned", "LuckBonus", "LuckBy"]), [10, 1, 1, 2, pip])
+	_Check ("pip's Luck 10 -> 9, korg's 9", [_Luck (pip), _Luck (korg)], [9, 9])
+	_Check ("log: pip burns for korg", _Logged ("Pip burns 1 Luck for Korg (+2): 8 -> 10, hit (Luck 9 left)"), True)
+	GemRB.DCCSetLuckPolicy (pip, DCC_BURN_AVOID_DISASTER, 10, ALLFLAGS)
+	# a warrior burns 1 Luck to cancel the fumble roll: the natural 1 misses, no fumble die
+	GemRB.DCCSetLuckPolicy (korg, DCC_BURN_AVOID_DISASTER, 10, ALLFLAGS)
+	r = _Attack (korg, gob2, [1, 1, 7])
+	_Check ("korg cancels a fumble", _Pick (r[0], ["Hit", "Fumble", "FumbleCancelled", "FumbleDie", "Result", "LuckBurned"]), [0, 1, 1, 0, "", 1])
+	_Check ("korg Luck 9 -> 8", _Luck (korg), 8)
+	_Check ("log: korg shrugs off the fumble", _Logged ("Korg burns 1 Luck to shrug off the fumble (Luck 8 left)"), True)
+
+	# a thief's luck dice in a fight: Sly (fists, +1) 4 + 1 = 5 vs 10 burns 2 (d4 3 + 3), Luck 15 -> 13
+	r = _Attack (sly, gob2, [4, 3, 3, 1, 1])
+	_Check ("sly burns 2d4 to hit", _Pick (r[0], ["Total", "Hit", "LuckBurned", "LuckBonus"]), [11, 1, 2, 6])
+	_Check ("sly Luck 15 -> 13", _Luck (sly), 13)
+
+	# a key roll asks Brak's player (he pauses on key rolls): goblin 2 at AC 25, d20 19 + d3 1 + 2 = 22
+	# would crit with 3 more. The prompt offers 0..11 (his Luck), the policy (misses while 8+) says 3;
+	# the player burns 4 (11 -> 7): 26, a crit, d12 2 - 1 (Luck 7) = 1 on Table III
+	GemRB.DCCSetDeeds (brak, DCC_DEED_TRIP, DCC_DEED_NONE)
+	GemRB.ApplyEffect (gob2, "DCC:Combat", 15, 5)
+	yield
+	GemRB.DCCForceDice (brak, [1, 19, 1, 2, 3])
+	r = GemRB.DCCAttack (brak, gob2)
+	_Check ("brak's attack waits for the prompt", [len (r), _Pending (brak)], [0, 1])
+	yield
+	prompt = GemRB.GetPrompt ()
+	_Check ("Luck prompt for brak", prompt and [prompt["Tag"], prompt["Mine"], prompt["Actor"], prompt["Fields"][0]["Max"], prompt["Fields"][0]["Value"]],
+		["luckburn", True, _ID ("dctbrak"), 11, 3])
+	if prompt:
+		_Log ("prompt: " + prompt["Text"])
+		_Check ("answered the prompt", GemRB.AnswerPrompt (prompt["ID"], [4]), True)
+	waited = 0
+	while _Pending (brak) and waited < 10:
+		waited += 1
+		yield
+	GemRB.DCCForceDice (brak, [])
+	last = GemRB.GetDCCLastAttack (brak)
+	_Check ("prompt burn 4: hit and crit", last and _Pick (last[0], ["Natural", "Total", "Hit", "Critical", "LuckBurned", "LuckBonus", "CritRoll"]), [19, 26, 1, 1, 4, 4, 1])
+	_Check ("brak Luck 11 -> 7", _Luck (brak), 7)
+
+	# a prompt nobody answers times out to the policy: misses while Luck 1+ burns the 3 (7 -> 4);
+	# d12 3 - 2 (Luck 4) = 1
+	GemRB.DCCSetLuckPolicy (brak, DCC_BURN_MISS_TO_HIT, 1, DCC_LUCK_PAUSE)
+	GemRB.DCCForceDice (brak, [1, 19, 1, 3, 3])
+	GemRB.DCCAttack (brak, gob2)
+	_Check ("brak's second attack waits", _Pending (brak), 1)
+	waited = 0
+	while _Pending (brak) and waited < 60:
+		waited += 1
+		yield
+	GemRB.DCCForceDice (brak, [])
+	last = GemRB.GetDCCLastAttack (brak)
+	_Check ("timeout: the policy's burn", last and _Pick (last[0], ["Total", "Hit", "Critical", "LuckBurned", "CritRoll"]), [25, 1, 1, 3, 1])
+	_Check ("brak Luck 7 -> 4", _Luck (brak), 4)
+	_Check ("log: brak's policy burn", _Logged ("Brak burns 3 Luck (+3): 22 -> 25, hit and crit (Luck 4 left)"), True)
+	GemRB.ApplyEffect (gob2, "DCC:Combat", -15, 5)
+
+	# a save vs death (DCTSLAY: Fort vs DC 11 or die) pauses and asks too; the death waits for the answer.
+	# Brak (Fort -2 with Sta 2, Luck 4) rolls 11: 9, 2 short; the policy (misses while 1+) would burn 2, he burns 2 (4 -> 2)
+	GemRB.DCCForceDice (brak, [11])
+	GemRB.ApplySpell (brak, "DCTSLAY")
+	GemRB.DCCForceDice (brak, [])
+	_Check ("log: brak's save vs death waits", _Logged ("Brak fails a Fortitude save against death: 9 vs DC 11; burn Luck?"), True)
+	yield
+	prompt = GemRB.GetPrompt ()
+	_Check ("death save prompt", prompt and [prompt["Tag"], prompt["Fields"][0]["Max"], prompt["Fields"][0]["Value"]], ["luckburn", 4, 2])
+	if prompt:
+		_Log ("prompt: " + prompt["Text"])
+		GemRB.AnswerPrompt (prompt["ID"], [2])
+	for i in range (4):
+		yield
+	_Check ("brak survives by burning 2", [_Dead (brak), _Luck (brak)], [False, 2])
+	_Check ("log: brak survives", _Logged ("Brak burns 2 Luck on a save vs death (+2): 9 -> 11 vs DC 11, survives (Luck 2 left)"), True)
+	# Sly (Fort +1) rolls 3: 4 vs 11; he could burn but his player says 0: the death happens then
+	GemRB.DCCForceDice (sly, [3])
+	GemRB.ApplySpell (sly, "DCTSLAY")
+	GemRB.DCCForceDice (sly, [])
+	yield
+	prompt = GemRB.GetPrompt ()
+	_Check ("sly's death save prompt", prompt and prompt["Tag"], "luckburn")
+	_Check ("sly alive while it waits", _Dead (sly), False)
+	if prompt:
+		GemRB.AnswerPrompt (prompt["ID"], [0])
+	waited = 0
+	while not _Dead (sly) and waited < 20:
+		waited += 1
+		yield
+	_Check ("sly declines: dead", [_Dead (sly), _Luck (sly)], [True, 13])
+
+	# back to the M2.3 setup for the last check: Korg's Luck 10 and no burns
+	GemRB.SetPlayerStat (korg, IE_DCC_LOSS_LCK, 0)
+	GemRB.DCCSetLuckPolicy (korg, DCC_BURN_NEVER, 10, ALLFLAGS)
+	yield
+
 def _Fight ():
 	GemRB.GetDCCCombatLog (1)
 	korg, vex, pip, eda, brun, peas = [_ID (n) for n in ("dctkorg", "dctvex", "dctpip", "dcteda", "dctbrun", "dctpeas")]
 	gob1, gob2 = _ID ("dctgob1"), _ID ("dctgob2")
 	_Check ("combatants in the area", all ([korg, vex, pip, eda, brun, peas, gob1, gob2]), True)
+	# the M2.3 checks run without Luck burns (Korg, a warrior, would cancel his fumble by default)
+	GemRB.DCCSetLuckPolicy (korg, DCC_BURN_NEVER, 10, DCC_LUCK_PAUSE | DCC_LUCK_ALLIES)
 
 	# a monster's numbers come from its CRE's DCC block and Table 9-10 (1 HD humanoid: III/d6)
 	gob = GemRB.GetDCCStats (gob1)
@@ -439,6 +693,8 @@ def _Fight ():
 	_Check ("log: initiative", _Logged ("Korg rolls initiative: d20 10 +3 = 13"), True)
 	for i in range (6):
 		yield
+
+	yield from _FightLuck ()
 
 	# Korg fumbles: leather's d8, 7 on Table 4-2 drops the weapon
 	r = _Attack (korg, gob2, [1, 1, 7])
