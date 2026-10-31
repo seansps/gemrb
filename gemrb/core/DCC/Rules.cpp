@@ -124,6 +124,11 @@ bool RulesData::Load()
 	if (!table || !magic.spellburn.Load(*table)) fail("dccburn");
 	table = gamedata->LoadTable("dccturn");
 	if (!table || !magic.LoadTurn(*table)) fail("dccturn");
+	// learning spells (Phase 3, the level-1 class pick)
+	table = gamedata->LoadTable("dccspls");
+	if (!table || !spellLists.Load(*table)) fail("dccspls");
+	table = gamedata->LoadTable("dccclesp");
+	if (!table || !clericSpells.Load(*table)) fail("dccclesp");
 	return ok;
 }
 

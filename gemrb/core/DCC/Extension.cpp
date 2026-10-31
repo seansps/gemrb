@@ -18,6 +18,14 @@ constexpr char TAG_SPELLS[4] = { 'S', 'P', 'E', 'L' };
 constexpr char TAG_CORRUPTION[4] = { 'C', 'O', 'R', 'R' };
 constexpr char TAG_SPELLBURN[4] = { 'B', 'U', 'R', 'N' };
 constexpr char TAG_DISAPPROVAL[4] = { 'D', 'I', 'S', 'A' };
+constexpr char TAG_OCCUPATION[4] = { 'O', 'C', 'C', 'U' };
+constexpr char TAG_FUNNEL[4] = { 'F', 'U', 'N', 'L' };
+
+const char* const SKILL_NAMES[OCCUPATION_SKILL_COUNT] = {
+	"ANIMALS", "FARMING", "HERBALISM", "MEDICINE", "ALCHEMY", "SMITHING", "MASONRY", "CARPENTRY", "MINING", "CRAFT_FINE",
+	"APPRAISAL", "HAGGLE", "LOCKS", "STEALTH_STREET", "DECEPTION", "PERFORMANCE", "LORE_RELIGION", "LORE_ARCANE", "LORE_STARS",
+	"LETTERS", "NOBILITY", "MILITARY", "OUTDOORS", "SEA", "CLIMB", "DIGGING", "FILTH", "BUTCHERY", "ROPE", "COOKING"
+};
 constexpr size_t RESREF_SIZE = 8;
 
 class Out {
@@ -173,10 +181,46 @@ bool ReadCorruptions(In& in, std::vector<Corruption>& list)
 
 }
 
+const char* OccupationSkillName(int bit)
+{
+	return bit >= 0 && bit < OCCUPATION_SKILL_COUNT ? SKILL_NAMES[bit] : nullptr;
+}
+
+uint32_t OccupationSkillBit(const std::string& name)
+{
+	for (int bit = 0; bit < OCCUPATION_SKILL_COUNT; ++bit) {
+		const char* tag = SKILL_NAMES[bit];
+		if (name.size() == std::strlen(tag) && std::equal(name.begin(), name.end(), tag, [](char a, char b) {
+			    return std::toupper(static_cast<unsigned char>(a)) == b;
+		    })) {
+			return 1u << bit;
+		}
+	}
+	return 0;
+}
+
+const char* FunnelStatusName(FunnelStatus status)
+{
+	switch (status) {
+		case FunnelStatus::None:
+			return "none";
+		case FunnelStatus::Alive:
+			return "alive";
+		case FunnelStatus::Dead:
+			return "dead";
+		case FunnelStatus::Chosen:
+			return "chosen";
+		case FunnelStatus::Reserve:
+			return "reserve";
+		default:
+			return "?";
+	}
+}
+
 bool CharacterExt::Empty() const
 {
 	return spells.empty() && corruptions.empty() && burn.IsDefault() &&
-		disapproval.range <= 1 && disapproval.flags == 0 && other.empty();
+		disapproval.range <= 1 && disapproval.flags == 0 && occupation.Empty() && funnel.Empty() && other.empty();
 }
 
 KnownSpell* CharacterExt::FindSpell(const std::string& resref)
@@ -241,6 +285,31 @@ std::vector<uint8_t> WriteExtension(const CharacterExt& ext)
 		out.U8(ext.disapproval.range);
 		out.U8(ext.disapproval.flags);
 		out.U16(0);
+		EndRecord(out, at);
+		++records;
+	}
+	if (!ext.occupation.Empty()) {
+		size_t at = BeginRecord(out, TAG_OCCUPATION, 1);
+		const Occupation& occ = ext.occupation;
+		out.U8(occ.id);
+		out.U8(occ.sub);
+		out.U16(0);
+		out.ResRef(occ.tradeGood);
+		out.ResRef(occ.weapon);
+		out.ResRef(occ.lastWeapon);
+		out.U32(occ.skills);
+		EndRecord(out, at);
+		++records;
+	}
+	if (!ext.funnel.Empty()) {
+		size_t at = BeginRecord(out, TAG_FUNNEL, 1);
+		const Funnel& funnel = ext.funnel;
+		out.U8(uint8_t(funnel.status));
+		out.U8(funnel.order);
+		out.U8(funnel.player);
+		out.U8(funnel.flags);
+		out.U32(funnel.diedAt);
+		out.ResRef(funnel.diedIn);
 		EndRecord(out, at);
 		++records;
 	}
@@ -310,6 +379,27 @@ bool ReadExtension(const uint8_t* data, size_t size, CharacterExt& out)
 		} else if (std::memcmp(tag.data(), TAG_DISAPPROVAL, 4) == 0 && recordVersion >= 1) {
 			ext.disapproval.range = std::max<uint8_t>(1, body.U8());
 			ext.disapproval.flags = body.U8();
+			if (!body.Ok()) return false;
+		} else if (std::memcmp(tag.data(), TAG_OCCUPATION, 4) == 0 && recordVersion >= 1) {
+			Occupation& occ = ext.occupation;
+			occ.id = body.U8();
+			occ.sub = body.U8();
+			body.U16();
+			occ.tradeGood = body.ResRef();
+			occ.weapon = body.ResRef();
+			occ.lastWeapon = body.ResRef();
+			occ.skills = body.U32();
+			if (!body.Ok()) return false;
+		} else if (std::memcmp(tag.data(), TAG_FUNNEL, 4) == 0 && recordVersion >= 1) {
+			Funnel& funnel = ext.funnel;
+			uint8_t status = body.U8();
+			if (status >= uint8_t(FunnelStatus::count)) return false;
+			funnel.status = FunnelStatus(status);
+			funnel.order = body.U8();
+			funnel.player = body.U8();
+			funnel.flags = body.U8();
+			funnel.diedAt = body.U32();
+			funnel.diedIn = body.ResRef();
 			if (!body.Ok()) return false;
 		} else {
 			RawRecord raw;

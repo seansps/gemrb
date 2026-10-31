@@ -414,6 +414,9 @@ def _Dead (actor):
 def _Logged (text):
 	return any (text in line for line in GemRB.GetDCCCombatLog ())
 
+def _LogCount (text):
+	return sum (1 for line in GemRB.GetDCCCombatLog () if text in line)
+
 def _Pending (actor):
 	return GemRB.GetDCCStats (actor)["AttackPending"]
 
@@ -695,6 +698,38 @@ def _FightCompletion ():
 	for i in range (3):
 		yield
 
+	# Phase 3: a scripted move without an action of its own (a formation follow, a move after its
+	# action was released) is voluntary too: walking out of reach gives thug 3 its free attack
+	GemRB.ClearActions (tank)
+	GemRB.ExecuteString ("JumpToPoint([1180.1000])", tank)
+	for i in range (3):
+		yield
+	_Attack (tank, thug3, [1, 2])
+	freeAttacks = _LogCount ("Thug 3 gets a free attack: Tank withdraws")
+	GemRB.DCCForceDice (thug3, [15, 3])
+	GemRB.DCCWalk (tank, 1180, 800)
+	yield from _Wait (lambda: _LogCount ("Thug 3 gets a free attack: Tank withdraws") > freeAttacks, 30)
+	GemRB.DCCForceDice (thug3, [])
+	_Check ("scripted move without an action: withdrawal", _LogCount ("Thug 3 gets a free attack: Tank withdraws"), freeAttacks + 1)
+	# displaced out of reach (a teleport here, a push or fling alike) and walking on: no free attack
+	GemRB.ClearActions (tank)
+	GemRB.ExecuteString ("JumpToPoint([1180.1000])", tank)
+	for i in range (3):
+		yield
+	_Attack (tank, thug3, [1, 2])
+	GemRB.ExecuteString ("JumpToPoint([1180.880])", tank)
+	yield
+	where = GemRB.GetActorPosition (tank)
+	_Check ("tank displaced out of reach", [where["X"], where["Y"]], [1180, 880])
+	GemRB.DCCWalk (tank, 1180, 760)
+	for i in range (12):
+		yield
+	_Check ("displaced, then walking on: no withdrawal", _LogCount ("Thug 3 gets a free attack: Tank withdraws"), freeAttacks + 1)
+	GemRB.ClearActions (tank)
+	GemRB.ExecuteString ("JumpToPoint([1180.1000])", tank)
+	for i in range (3):
+		yield
+
 	# battle rage (Crit Table III, row 0, Tank's Luck 3): he spends 2 (1 Per, 1 Int): +2d12; an ally is caught for 1d4
 	GemRB.DCCSetCombat (tank, 0, 2)
 	r = _Attack (tank, thug3, [1, 20, 3, 1, 4, 2, 5, 6])
@@ -806,6 +841,27 @@ def _FightCompletion ():
 	_Check ("record shows the combat options", "Combat: charge next, battle rage 3" in DCCSheet.Lines (brak), True)
 	GUIREC.CloseRecordsWindow ()
 	GemRB.DCCSetCombat (brak, 0, 0)
+	yield
+
+def _FightDemons ():
+	"""Funnel prep (M2.9): Crit Table DN's CORRUPT from real crits, with forced dice"""
+	demon1, demon2, mord = _ID ("dctdemn1"), _ID ("dctdemn2"), _ID ("dctmord")
+	_Check ("demons and their target", all ([demon1, demon2, mord]), True)
+	d1, d2 = GemRB.GetDCCStats (demon1), GemRB.GetDCCStats (demon2)
+	# Table 9-10: a 5 HD demon crits on DN with a d6, a 9 HD one with a d10
+	_Check ("demon crit dice", [d1["CritTable"], d1["CritDie"], d2["CritTable"], d2["CritDie"]], [8, 6, 8, 10])
+	before = len (GemRB.GetDCCMagic (mord)["Corruptions"])
+	# a natural 20 crits; d6 5 on Crit Table DN: corruption; 1d10 4 + Luck 0 on the minor table (up to 5 HD)
+	r = _Attack (demon1, mord, [20, 2, 5, 4])
+	_Check ("demon crit DN-5", _Pick (r[0], ["Critical", "CritRoll", "Result"]), [1, 5, "corruption"])
+	corruptions = GemRB.GetDCCMagic (mord)["Corruptions"]
+	_Check ("a minor corruption, row 4", [(c["Table"], c["Row"]) for c in corruptions[before:]], [(1, 4)])
+	# d10 10: double corruption, on the major table (6-10 HD): rows 3 and 7
+	r = _Attack (demon2, mord, [20, 2, 10, 3, 7])
+	_Check ("demon crit DN-10", _Pick (r[0], ["Critical", "CritRoll", "Result"]), [1, 10, "double corruption"])
+	corruptions = GemRB.GetDCCMagic (mord)["Corruptions"]
+	_Check ("two major corruptions, rows 3 and 7", [(c["Table"], c["Row"]) for c in corruptions[before + 1:]], [(2, 3), (2, 7)])
+	_Check ("log: the demon's corruption", _Logged ("Mord is corrupted"), True)
 	yield
 
 def _Fight ():
@@ -974,6 +1030,7 @@ def _Fight ():
 
 	yield from _FightLuck ()
 	yield from _FightCompletion ()
+	yield from _FightDemons ()
 
 	# Korg fumbles: leather's d8, 7 on Table 4-2 drops the weapon
 	r = _Attack (korg, gob2, [1, 1, 7])
@@ -1362,8 +1419,11 @@ def _Tick (token):
 			return
 		Step = Steps[Step] ()
 	except Exception as error:
+		import traceback
 		Failures += 1
 		_Log ("FAIL step %s raised %s: %s" % (Step, type (error).__name__, error))
+		for line in traceback.format_exc ().splitlines ():
+			_Log ("  " + line)
 		Step = "done"
 
 def OnGameStart ():

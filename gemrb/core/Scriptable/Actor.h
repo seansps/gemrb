@@ -27,6 +27,7 @@
 #include "DCC/Combat.h"
 #include "DCC/Deeds.h"
 #include "DCC/Extension.h"
+#include "DCC/Learning.h"
 #include "DCC/Luck.h"
 #include "DCC/Magic.h"
 #include "Scriptable/Movable.h"
@@ -807,7 +808,7 @@ public:
 	 * Returns 1 pinned, 0 failed, -1 not possible */
 	int DCCGrapple(Actor* target);
 	/** walking away from foes it's in melee with gives them a free attack each (DoStep) */
-	void DCCCheckWithdrawal();
+	void DCCCheckWithdrawal(const Point& before);
 	/** DCC: a forced move (fling, push) ends its melee engagements without a withdrawal */
 	void DCCDisengage();
 	/** a monster's or NPC's morale check (combat.md, d20 + Will vs dc): false if it flees. Party
@@ -831,6 +832,9 @@ public:
 	// DCC Luck burn and Mighty Deeds (M2.4, ActorDCCLuck.cpp)
 	/** the character's burn policy, threshold and flags (IE_DCC_BURNPOLICY, BURNMIN, LUCKFLAGS) */
 	DCC::LuckPolicy GetDCCLuckPolicy() const;
+	/** whether its owner is asked on key rolls (LUCK_PAUSE): never for level-0 characters unless
+	 * the game says so (DCC_PROMPT_LOUD0; Phase 3: a funnel of 16 doesn't stall on prompts) */
+	bool DCCPausesOnKeyRolls() const;
 	/** what a point of this character's Luck adds to its own roll */
 	DCC::BurnValue GetDCCBurnValue() const;
 	/** the current Luck score (after loss and burns) */
@@ -871,7 +875,27 @@ public:
 	/** learns a DCC spell (a base spell of dccspell.2da): the spellbook and the extension; wizards
 	 * and elves roll mercurial magic (d% + Luck mod x 10), everyone the manifestation. Returns the
 	 * first mercurial result (0 for none), -1 if it isn't a DCC spell or is known already */
-	int DCCLearnSpell(const ResRef& base, bool rolls = true);
+	int DCCLearnSpell(const ResRef& base, bool rolls = true, bool force = false);
+	// learning by level (Phase 3: the level-1 class pick, and every level after; DCC/Learning.h)
+	/** spells the caster may know: wizards and elves in all (spellLevel ignored: Table 1-12/1-16
+	 * + Int, Table 1-1), clerics of spellLevel (Table 1-5, up to the Personality's max spell level) */
+	int DCCSpellsAllowed(int spellLevel) const;
+	/** the spells counted against that: a wizard's or elf's arcane ones, a cleric's of spellLevel */
+	int DCCSpellsCounted(int spellLevel) const;
+	/** whether a DCC spell may be learned now: its class, level and the count (force skips them) */
+	bool DCCCanLearn(const DCC::SpellInfo& info, String* why = nullptr) const;
+	/** fills the open slots: random picks on Table 5-8 (wizards, elves; substituted from the spells
+	 * with content where a row has none) or the default choice from the god's list (clerics), with
+	 * mercurial magic; marks them fresh (SPELL_FRESH) for the learn window; the elf's lucky spell
+	 * defaults to the first. The notes (rolls, substitutes, open slots) are in dccLearnNotes */
+	std::vector<DCC::LearnPick> DCCLearnLevelSpells(const DCC::Roller* roller = nullptr);
+	/** the learn window: swap a fresh spell for another of that level (clerics choose freely,
+	 * wizards and elves up to half their fresh ones, the book's optional rule); false if refused */
+	bool DCCReplaceSpell(const std::string& oldSpell, const std::string& newSpell, String* why = nullptr);
+	/** the learn window's confirm: the fresh spells are kept, and an elf of level 1 names its lucky
+	 * spell (its Luck modifier now, frozen; "" keeps the default) */
+	bool DCCConfirmSpells(const std::string& lucky);
+	std::vector<std::string> dccLearnNotes; // the last DCCLearnLevelSpells (not saved)
 	/** the spellbook follows the extension: one memorized copy of each known DCC spell, depleted
 	 * while the spell is lost; the action bar shows what can be cast */
 	void DCCSyncSpellbook();

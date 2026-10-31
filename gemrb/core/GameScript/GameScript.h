@@ -1442,6 +1442,18 @@ public: //Script Functions
 	static Targets* PartySlot9(const Scriptable* Sender, Targets* parameters, int gaFlags);
 	static Targets* Player10(const Scriptable* Sender, Targets* parameters, int ga_flags);
 	static Targets* Player10Fill(const Scriptable* Sender, Targets* parameters, int ga_flags);
+	static Targets* Player11(const Scriptable* Sender, Targets* parameters, int ga_flags);
+	static Targets* Player11Fill(const Scriptable* Sender, Targets* parameters, int ga_flags);
+	static Targets* Player12(const Scriptable* Sender, Targets* parameters, int ga_flags);
+	static Targets* Player12Fill(const Scriptable* Sender, Targets* parameters, int ga_flags);
+	static Targets* Player13(const Scriptable* Sender, Targets* parameters, int ga_flags);
+	static Targets* Player13Fill(const Scriptable* Sender, Targets* parameters, int ga_flags);
+	static Targets* Player14(const Scriptable* Sender, Targets* parameters, int ga_flags);
+	static Targets* Player14Fill(const Scriptable* Sender, Targets* parameters, int ga_flags);
+	static Targets* Player15(const Scriptable* Sender, Targets* parameters, int ga_flags);
+	static Targets* Player15Fill(const Scriptable* Sender, Targets* parameters, int ga_flags);
+	static Targets* Player16(const Scriptable* Sender, Targets* parameters, int ga_flags);
+	static Targets* Player16Fill(const Scriptable* Sender, Targets* parameters, int ga_flags);
 	static Targets* PartySlot10(const Scriptable* Sender, Targets* parameters, int gaFlags);
 };
 

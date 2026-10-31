@@ -52,6 +52,7 @@
 #include "Logging/Logging.h"
 #include "Scriptable/Actor.h"
 
+#include <cmath>
 #include <deque>
 
 namespace GemRB {
@@ -433,6 +434,17 @@ bool Actor::DCCBuildSwing(DCCSwing& swing, int hand, const Actor* target, int in
 	if (!header) return false;
 	swing.bash = bash;
 	swing.missile = !bash && (swing.wi->wflags & WEAPON_RANGED);
+	// level 0: trained in the weapon it last fought with (funnel.md), kept in the occupation record
+	if (character && !bash && BaseStats[IE_LEVEL] == 0 && !dccExt.occupation.Empty()) {
+		int slot = 0;
+		const CREItem* used = inventory.GetUsedWeapon(hand == 1, slot);
+		std::string weapon = used ? std::string(used->ItemResRef.c_str()) : std::string();
+		std::transform(weapon.begin(), weapon.end(), weapon.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+		if (!weapon.empty() && weapon != dccExt.occupation.lastWeapon) {
+			dccExt.occupation.lastWeapon = weapon;
+			++dccExtRevision;
+		}
+	}
 	bool fists = !bash && inventory.FistsEquipped();
 
 	uint32_t augurFlags = swing.missile ? AF_MISSILE : AF_MELEE;
@@ -753,7 +765,7 @@ bool Actor::DCCAskAttackBurn(const std::shared_ptr<DCCAttackState>& state, DCCSw
 {
 	// only party members are asked, if they pause on key rolls and can burn at all
 	LuckPolicy policy = GetDCCLuckPolicy();
-	if (!InParty || !IsDCCCharacter() || !(policy.flags & LUCK_PAUSE)) return false;
+	if (!InParty || !IsDCCCharacter() || !DCCPausesOnKeyRolls()) return false;
 	int luck = GetDCCLuck();
 	if (luck <= 0) return false;
 
@@ -2084,6 +2096,15 @@ void Actor::DCCOnDeath()
 	if (!IsDCCCharacter()) return;
 	BaseStats[IE_DCC_DIEDAT] = game ? std::max<ieDword>(game->GameTime, 1) : 1;
 	BaseStats[IE_DCC_BODY] = 0;
+	// the funnel (Phase 3): a peasant in it is now one of its dead, with the time and place
+	if (dccExt.funnel.status == DCC::FunnelStatus::Alive) {
+		dccExt.funnel.status = DCC::FunnelStatus::Dead;
+		dccExt.funnel.diedAt = BaseStats[IE_DCC_DIEDAT];
+		const Map* map = GetCurrentArea();
+		std::string area = map ? std::string(map->GetScriptRef().c_str()) : std::string();
+		std::transform(area.begin(), area.end(), area.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+		dccExt.funnel.diedIn = area;
+	}
 }
 
 bool Actor::DCCBodyRecoverable() const
@@ -2122,6 +2143,12 @@ int Actor::DCCRecoverBody(const Actor* ally, int natural)
 	hour.dice.add = 1;
 	ApplyCombat(CombatEffect::RollMod, BODY_RECOVERY_PENALTY, hour, this, this);
 	BaseStats[IE_DCC_DIEDAT] = 0;
+	if (dccExt.funnel.status == DCC::FunnelStatus::Dead) {
+		dccExt.funnel.status = DCC::FunnelStatus::Alive;
+		dccExt.funnel.flags |= DCC::FUNNEL_RECOVERED;
+		dccExt.funnel.diedAt = 0;
+		dccExt.funnel.diedIn.clear();
+	}
 	Feedback(line + fmt::format(u"alive at 1 hp, -1 {} for good, {} to all rolls for an hour", names[which], BODY_RECOVERY_PENALTY), FT_COMBAT);
 	return 1;
 }
@@ -2200,7 +2227,19 @@ void Actor::DCCDisengage()
 	dccEngaged.clear();
 }
 
-void Actor::DCCCheckWithdrawal()
+// whether mover standing at a point would be within reach feet of foe (WithinPersonalRange from there)
+static bool InReachFrom(const Actor* foe, const Actor* mover, const Point& at, int reach)
+{
+	float_t angle = AngleFromPoints(foe->Pos, at);
+	long dx = at.x - foe->Pos.x;
+	long dy = at.y - foe->Pos.y;
+	// PersonalDistance's circle sizes (its DistanceFactor of 4)
+	double distance = std::hypot(dx, dy) - (foe->CircleSize2Radius() + mover->CircleSize2Radius()) * 4.0;
+	return std::max(0.0, distance) <= Feet2Pixels(reach, angle);
+}
+
+// a voluntary step (Actor::DoStep): before is where the step started
+void Actor::DCCCheckWithdrawal(const Point& before)
 {
 	if (dccEngaged.empty() || !Rules()) return;
 	const Game* game = core->GetGame();
@@ -2217,6 +2256,8 @@ void Actor::DCCCheckWithdrawal()
 		}
 		int reach = std::max<int>(foe->GetWeaponRange(false), MELEE_REACH);
 		bool inReach = WithinPersonalRange(foe, this, reach);
+		// displaced out of reach (a push, a fling, a teleport) before this step: not a withdrawal
+		bool wasInReach = inReach || InReachFrom(foe, this, before, reach);
 		bool canAttack = !(foe->weaponInfo[0].wflags & WEAPON_RANGED) && !foe->IsDCCHeld() && !foe->Immobile() && !foe->GetStat(IE_DCC_NOATTACK) &&
 				 !foe->GetStat(IE_DCC_PRONE) && !(foe->GetStat(IE_STATE_ID) & STATE_PANIC);
 		// still in reach, or walking towards the foe (around it, after it): no withdrawal yet
@@ -2228,7 +2269,7 @@ void Actor::DCCCheckWithdrawal()
 		// it left the foe's reach on its own feet: one free attack (combat.md "Withdrawal")
 		it = dccEngaged.erase(it);
 		foe->dccEngaged.erase(GetGlobalID());
-		if (WithdrawalProvokes(true, true, false, canAttack)) {
+		if (WithdrawalProvokes(true, wasInReach, false, canAttack)) {
 			foe->DCCFreeAttack(this, fmt::format(u"{} withdraws", Name(this)));
 		}
 	}

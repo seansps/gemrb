@@ -579,6 +579,67 @@ Targets* GameScript::Player10Fill(const Scriptable* /*Sender*/, Targets* paramet
 	return PlayerX(parameters, ga_flags, 9, 1);
 }
 
+// DCC games: parties of up to 16 (the level-0 funnel), see MaxPartySize
+Targets* GameScript::Player11(const Scriptable* /*Sender*/, Targets* parameters, int ga_flags)
+{
+	return PlayerX(parameters, ga_flags, 10);
+}
+
+Targets* GameScript::Player11Fill(const Scriptable* /*Sender*/, Targets* parameters, int ga_flags)
+{
+	return PlayerX(parameters, ga_flags, 10, 1);
+}
+
+Targets* GameScript::Player12(const Scriptable* /*Sender*/, Targets* parameters, int ga_flags)
+{
+	return PlayerX(parameters, ga_flags, 11);
+}
+
+Targets* GameScript::Player12Fill(const Scriptable* /*Sender*/, Targets* parameters, int ga_flags)
+{
+	return PlayerX(parameters, ga_flags, 11, 1);
+}
+
+Targets* GameScript::Player13(const Scriptable* /*Sender*/, Targets* parameters, int ga_flags)
+{
+	return PlayerX(parameters, ga_flags, 12);
+}
+
+Targets* GameScript::Player13Fill(const Scriptable* /*Sender*/, Targets* parameters, int ga_flags)
+{
+	return PlayerX(parameters, ga_flags, 12, 1);
+}
+
+Targets* GameScript::Player14(const Scriptable* /*Sender*/, Targets* parameters, int ga_flags)
+{
+	return PlayerX(parameters, ga_flags, 13);
+}
+
+Targets* GameScript::Player14Fill(const Scriptable* /*Sender*/, Targets* parameters, int ga_flags)
+{
+	return PlayerX(parameters, ga_flags, 13, 1);
+}
+
+Targets* GameScript::Player15(const Scriptable* /*Sender*/, Targets* parameters, int ga_flags)
+{
+	return PlayerX(parameters, ga_flags, 14);
+}
+
+Targets* GameScript::Player15Fill(const Scriptable* /*Sender*/, Targets* parameters, int ga_flags)
+{
+	return PlayerX(parameters, ga_flags, 14, 1);
+}
+
+Targets* GameScript::Player16(const Scriptable* /*Sender*/, Targets* parameters, int ga_flags)
+{
+	return PlayerX(parameters, ga_flags, 15);
+}
+
+Targets* GameScript::Player16Fill(const Scriptable* /*Sender*/, Targets* parameters, int ga_flags)
+{
+	return PlayerX(parameters, ga_flags, 15, 1);
+}
+
 Targets* GameScript::PartySlot1(const Scriptable* /*Sender*/, Targets* parameters, int gaFlags)
 {
 	return PlayerX(parameters, gaFlags, 0, 2);

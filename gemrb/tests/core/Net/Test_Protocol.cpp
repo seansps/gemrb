@@ -630,6 +630,41 @@ TEST(NetProtocolTest, StatsPartyAndSpellbookRoundTrip)
 	data = NetEncode(stats);
 	EXPECT_FALSE(NetDecode(data.data(), data.size(), stats2));
 
+	// v12: compact entries. Equal base and modified take the flag and one varint, small values one
+	// byte, negatives zigzag; the FULL flag travels; unknown flags are refused
+	NetActorStats compact;
+	compact.netID = 7;
+	compact.flags = NetActorStats::FULL;
+	compact.stats = { { 36, 12, 12 }, { 1, uint32_t(-3), uint32_t(-3) }, { 44, 150, 300 }, { 300, 0xffffffffU, 0x7fffffffU }, { 2, 0x80000000U, 0 } };
+	data = NetEncode(compact);
+	NetActorStats compact2;
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), compact2));
+	EXPECT_EQ(compact2.flags, NetActorStats::FULL);
+	ASSERT_EQ(compact2.stats.size(), compact.stats.size());
+	for (size_t i = 0; i < compact.stats.size(); ++i) {
+		EXPECT_EQ(compact2.stats[i].stat, compact.stats[i].stat);
+		EXPECT_EQ(compact2.stats[i].base, compact.stats[i].base);
+		EXPECT_EQ(compact2.stats[i].modified, compact.stats[i].modified);
+	}
+	ExpectStrict(compact);
+	NetActorStats small;
+	small.stats = { { 36, 12, 12 } };
+	// header 3, net id 4, flags 1, count 2, then 2 + 1 for the entry
+	EXPECT_EQ(NetEncode(small).size(), 13U);
+	small.stats[0].modified = 14;
+	EXPECT_EQ(NetEncode(small).size(), 14U);
+	auto badFlags = NetEncode(small);
+	badFlags[NET_HEADER_SIZE + 4] = 2;
+	EXPECT_FALSE(NetDecode(badFlags.data(), badFlags.size(), compact2));
+	// a varint longer than five bytes, or with bits past 32, is malformed
+	auto overlong = NetEncode(small);
+	overlong.resize(NET_HEADER_SIZE + 4 + 1 + 2 + 2);
+	for (uint8_t byte : { 0xff, 0xff, 0xff, 0xff, 0x7f }) {
+		overlong.push_back(byte);
+	}
+	overlong.push_back(0);
+	EXPECT_FALSE(NetDecode(overlong.data(), overlong.size(), compact2));
+
 	NetPartyState party;
 	party.gold = 120;
 	party.reputation = 100;
@@ -774,11 +809,25 @@ TEST(NetProtocolTest, LobbyAndIdentityRoundTrip)
 	EXPECT_EQ(lobby2.party[1].owner, 2);
 	EXPECT_EQ(lobby2.party[1].controller, 0);
 	EXPECT_EQ(lobby2.party[0].name, "Jora");
-	// party slots are 1-based and at most six
-	lobby.party[0].partySlot = 7;
+	// party slots are 1-based and at most 16 (v12: DCC parties of up to 16, the level-0 funnel)
+	lobby.party[0].partySlot = 16;
+	data = NetEncode(lobby);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), lobby2));
+	EXPECT_EQ(lobby2.party[0].partySlot, 16);
+	lobby.party[0].partySlot = 17;
 	data = NetEncode(lobby);
 	EXPECT_FALSE(NetDecode(data.data(), data.size(), lobby2));
 	lobby.party[0].partySlot = 1;
+	// a lobby of sixteen slots travels whole
+	NetLobbyState big = lobby;
+	big.party.clear();
+	for (uint8_t slot = 1; slot <= NET_PARTY_SLOTS; ++slot) {
+		big.party.push_back(NetLobbySlot { slot, uint8_t(slot % 4 == 0 ? 0 : slot % 4 > 2 ? 2 : 1), 0, "Peasant" });
+	}
+	data = NetEncode(big);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), lobby2));
+	ASSERT_EQ(lobby2.party.size(), 16U);
+	EXPECT_EQ(lobby2.party[15].partySlot, 16);
 	lobby.players[1].slot = NET_MAX_PEERS + 1;
 	data = NetEncode(lobby);
 	EXPECT_FALSE(NetDecode(data.data(), data.size(), lobby2));
@@ -965,8 +1014,15 @@ TEST(NetProtocolTest, PromptRoundTrip)
 	data = NetEncode(broken);
 	EXPECT_FALSE(NetDecode(data.data(), data.size(), out));
 	data = NetEncode(closed);
-	data[NET_HEADER_SIZE + 4 + 1 + 4] = uint8_t(PromptKind::count);
+	data[NET_HEADER_SIZE + 4 + 1 + 4 + 1] = uint8_t(PromptKind::count); // after id, state, ms left, queued (v12)
 	EXPECT_FALSE(NetDecode(data.data(), data.size(), out));
+	// v12: the count of prompts waiting behind this one travels
+	NetPrompt waiting = closed;
+	waiting.state = NetPrompt::OPEN;
+	waiting.queued = 3;
+	data = NetEncode(waiting);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), out));
+	EXPECT_EQ(out.queued, 3);
 	data = NetEncode(closed);
 	data[NET_HEADER_SIZE + 4] = 2; // state
 	EXPECT_FALSE(NetDecode(data.data(), data.size(), out));

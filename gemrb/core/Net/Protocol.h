@@ -31,7 +31,7 @@
 namespace GemRB {
 
 constexpr uint8_t NET_MAGIC = 0xE7;
-constexpr uint8_t NET_PROTOCOL_VERSION = 11;
+constexpr uint8_t NET_PROTOCOL_VERSION = 12;
 constexpr uint16_t NET_DEFAULT_PORT = 27015;
 constexpr size_t NET_HEADER_SIZE = 3;
 constexpr size_t NET_MAX_STRING = 1024;
@@ -56,8 +56,9 @@ constexpr size_t NET_OBJECT_FILTERS = 5;
 constexpr size_t NET_ACTION_OBJECTS = 3;
 // a GUI call carries at most this many integer arguments
 constexpr size_t NET_GUI_ARGS = 8;
-// BG style parties: six characters, each assigned to a player in the lobby
-constexpr uint8_t NET_PARTY_SLOTS = 6;
+// party slots the protocol carries, each assigned to a player in the lobby: BG style parties of
+// six in stock games (MaxPartySize), up to 16 in DCC games (the level-0 funnel, v12)
+constexpr uint8_t NET_PARTY_SLOTS = 16;
 // a lighter area change carries the area as an ARE file
 constexpr size_t NET_MAX_AREA_SIZE = 16 * 1024 * 1024;
 // chat lines a player keeps, and gets from the host on joining (lobby and game alike)
@@ -140,6 +141,9 @@ public:
 	void U32(uint32_t value);
 	void I32(int32_t value);
 	void U64(uint64_t value);
+	// v12: 7 bits a byte, low first (LEB128), 1-5 bytes; I32Var zigzags so small negatives stay short
+	void VarU32(uint32_t value);
+	void VarI32(int32_t value);
 	// truncates to NET_MAX_STRING bytes
 	void Str(const std::string& value);
 	// a u32 byte count and the raw bytes
@@ -165,6 +169,8 @@ public:
 	uint16_t U16();
 	uint32_t U32();
 	int32_t I32();
+	uint32_t VarU32();
+	int32_t VarI32();
 	uint64_t U64();
 	std::string Str();
 	// fails if the stored count is above maxSize
@@ -606,9 +612,17 @@ struct NetStatEntry {
 	uint32_t modified = 0;
 };
 
+// v12: an entry is u16 stat (bit 15 set: modified equals base), then base and, unless equal,
+// modified as zigzag varints; FULL lists only the stats that aren't 0 and means the rest are
 struct GEM_EXPORT NetActorStats {
 	static constexpr NetMsgType Type = NetMsgType::ActorStats;
+	enum Flags : uint8_t {
+		NONE = 0,
+		FULL = 1 // every stat of the actor: the ones left out are 0 (base and modified)
+	};
+	static constexpr uint16_t SAME = 0x8000;
 	uint32_t netID = 0;
+	uint8_t flags = NONE;
 	std::vector<NetStatEntry> stats;
 
 	void Write(NetWriter& w) const;
@@ -691,6 +705,9 @@ enum class NetGuiOp : uint8_t {
 	DCCAtone, // actor, gold (v11; host only)
 	DCCLayOnHands, // actor, target (party slot or global ID) (v11; host only)
 	DCCTurnUnholy, // actor (v11; host only)
+	DCCLevelUp, // actor, class (v12; host only: the hit die and the spells are the host's rolls)
+	DCCReplaceSpell, // actor (text: the fresh spell and its replacement) (v12)
+	DCCConfirmSpells, // actor (text: the elf's lucky spell, may be empty) (v12)
 	count
 };
 
@@ -856,6 +873,7 @@ struct GEM_EXPORT NetPrompt {
 	uint32_t id = 0;
 	uint8_t state = OPEN;
 	uint32_t remaining = 0; // ms, as the host sent it
+	uint8_t queued = 0; // prompts waiting behind this one (v12)
 	PromptQuestion question; // actorID as a network ID
 	std::vector<NetPromptVoter> voters; // at most PROMPT_MAX_VOTERS
 	uint8_t outcome = 0; // CLOSED: PromptOutcome

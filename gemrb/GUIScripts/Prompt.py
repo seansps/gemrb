@@ -108,6 +108,8 @@ def _WaitText (prompt):
 	if prompt["Sent"]:
 		return "Answer sent: %s (%d s)" % (what, _Seconds ())
 	extra = " for %s" % prompt["For"] if prompt["For"] else ""
+	if prompt.get ("Queued", 0):
+		extra += ", %d more waiting" % prompt["Queued"]
 	return "Waiting for %s to decide%s: %s (%d s)" % (who, extra, what, _Seconds ())
 
 def _OpenWaiting (prompt):
@@ -162,7 +164,11 @@ def _OpenPrompt (prompt):
 	win = GemRB.CreateView (94, 255, frame)
 	win.AddAlias ("PROMPTWIN")
 	win.SetBackground (WindowColor)
-	win.CreateLabel (0x10000000, 10, 4, width - 80, 20, Font, prompt["Title"], IE_FONT_ALIGN_LEFT | IE_FONT_ALIGN_MIDDLE)
+	title = prompt["Title"]
+	# several at once wait in line, one window at a time (the count of the ones behind this one)
+	if prompt.get ("Queued", 0):
+		title += " (%d more waiting)" % prompt["Queued"]
+	win.CreateLabel (0x10000000, 10, 4, width - 80, 20, Font, title, IE_FONT_ALIGN_LEFT | IE_FONT_ALIGN_MIDDLE)
 	win.CreateLabel (0x10000002, width - 70, 4, 60, 20, Font, "%d s" % _Seconds (), IE_FONT_ALIGN_RIGHT | IE_FONT_ALIGN_MIDDLE)
 	text = prompt["Text"]
 	if prompt["For"]:

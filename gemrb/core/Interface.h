@@ -610,6 +610,8 @@ public:
 	int GetDCCAbilityBonus(int column, int value) const;
 	/** the DCC class, XP, augur, save and thief skill tables (DCC/Rules.h); nullptr unless DCCRules is set */
 	const DCC::RulesData* GetDCCRules() const;
+	/** the most characters a party may have (MaxPartySize: 1-10, DCC games up to 16) */
+	int GetMaxPartySize() const { return config.MaxPartySize; }
 
 	/** applies the spell on the target */
 	void ApplySpell(const ResRef& spellRef, Actor* target, Scriptable* caster, int level) const;

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 # ethren: the demo's message window (GUIScripts/demo/MessageWindow.py) plus an "R"
-# button for the DCC record screen and the dcctest autotest hook.
+# button for the DCC record screen, the party roster (Roster.py) and the autotest hooks.
 
 import GemRB
 import Tests
@@ -14,6 +14,8 @@ import GUIINV
 import GUIMA
 import GUIREC
 import DCCAutotest
+import FunnelAutotest
+import Roster
 import NetChat
 from GUIDefines import *
 
@@ -66,8 +68,15 @@ def OnLoad():
 	# co-op: the recent chat (the lobby's too) goes back into the new message window
 	NetChat.OnMessageWindow ()
 
+	# the party roster (Phase 3): fits the funnel's 16, with select all, the formation and the
+	# party settings
+	Roster.RosterWindow = None
+	Roster.OpenRoster ()
+
 	# dcctest-auto: checks the DCC numbers once the area script asks for it
 	DCCAutotest.OnGameStart ()
+	# funneltest-auto: the funnel readiness checks (M2.9), likewise
+	FunnelAutotest.OnGameStart ()
 
 def UpdateControlStatus():
 	pass

@@ -5,6 +5,7 @@
 #include "../../../core/Net/Replication.h"
 #include "../../../core/Net/Resync.h"
 
+#include <array>
 #include <gtest/gtest.h>
 
 #include <map>
@@ -194,6 +195,14 @@ TEST(NetReplicationTest, DefaultOwner)
 	EXPECT_EQ(NetDefaultOwner(2, two), 1);
 	EXPECT_EQ(NetDefaultOwner(3, two), 0);
 	EXPECT_EQ(NetDefaultOwner(4, two), 1);
+	// a funnel of 16 among four players: four each, round robin
+	std::vector<uint8_t> four = { 0, 1, 2, 3 };
+	std::array<int, 4> dealt {};
+	for (uint8_t slot = 1; slot <= NET_PARTY_SLOTS; ++slot) {
+		++dealt[NetDefaultOwner(slot, four)];
+	}
+	EXPECT_EQ(dealt, (std::array<int, 4> { 4, 4, 4, 4 }));
+	EXPECT_EQ(NetDefaultOwner(16, four), 3);
 	std::vector<uint8_t> gap = { 0, 2, 3 }; // slot 1 left
 	EXPECT_EQ(NetDefaultOwner(2, gap), 2);
 	EXPECT_EQ(NetDefaultOwner(3, gap), 3);
@@ -393,6 +402,30 @@ TEST(NetReplicationTest, StatsDiff)
 	EXPECT_EQ(diff[1].modified, 6U);
 	// nothing known yet: everything is new
 	EXPECT_EQ(NetStatsDiff({}, now, {}).size(), now.size());
+}
+
+TEST(NetReplicationTest, StatsFull)
+{
+	// v12: a FULL message lists only the stats that aren't 0, and the client puts the zeros back
+	std::vector<NetStatEntry> now(8);
+	for (uint16_t i = 0; i < now.size(); ++i) {
+		now[i].stat = i;
+	}
+	now[1].base = now[1].modified = 5;
+	now[3].modified = 2; // base 0, modified not: listed
+	now[5].base = now[5].modified = 9; // a snapshot stat: left out
+	auto listed = NetStatsFull(now, { 5 });
+	ASSERT_EQ(listed.size(), 2U);
+	EXPECT_EQ(listed[0].stat, 1);
+	EXPECT_EQ(listed[1].stat, 3);
+	auto all = NetStatsExpand(listed, now.size(), { 5 });
+	// every stat but the skipped one, each with the host's value
+	ASSERT_EQ(all.size(), now.size() - 1);
+	for (const auto& entry : all) {
+		EXPECT_NE(entry.stat, 5);
+		EXPECT_EQ(entry.base, now[entry.stat].base);
+		EXPECT_EQ(entry.modified, now[entry.stat].modified);
+	}
 }
 
 TEST(NetReplicationTest, GuiOps)

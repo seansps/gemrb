@@ -124,6 +124,16 @@ def _CloseMenu ():
 ###################################################
 # the lobby
 
+# party slots the lobby can show: six in stock games, up to 16 in DCC games (MaxPartySize)
+MAX_SLOTS = 16
+
+def _SlotFrame (i, compact = False):
+	"""x, y, label width, button width, height of party slot i (0-based)"""
+	if not compact:
+		return 310, 76 + i * 24, 150, 145, 22
+	column, row = divmod (i, 8)
+	return 310 + column * 152, 76 + row * 18, 94, 52, 17
+
 def OpenLobby (startGame = None):
 	global LobbyWindow, LastRevision, Ready, StartGame
 	if startGame:
@@ -141,11 +151,13 @@ def OpenLobby (startGame = None):
 	for i in range (4):
 		_Label (win, 0x10000010 + i, 10, 76 + i * 22, 290, 20, "")
 
-	# party slots: whose character each one is; the host hands them out
+	# party slots: whose character each one is; the host hands them out. Six as in BG; DCC games
+	# have up to 16 (the level-0 funnel), shown in two compact columns of eight
 	_Label (win, 0x10000003, 310, 54, 300, 20, "Party")
-	for i in range (6):
-		_Label (win, 0x10000020 + i, 310, 76 + i * 24, 150, 22, "")
-		owner = _Button (win, 20 + i, 465, 76 + i * 24, 145, 22, "", lambda slot = i + 1: AssignPress (slot))
+	for i in range (MAX_SLOTS):
+		x, y, lw, bw, h = _SlotFrame (i)
+		_Label (win, 0x10000020 + i, x, y, lw, h, "")
+		owner = _Button (win, 20 + i, x + lw + 3, y, bw, h, "", lambda slot = i + 1: AssignPress (slot))
 		_Enable (owner, host)
 
 	_Button (win, 10, 10, 200, 140, 28, "Ready", ReadyPress)
@@ -226,20 +238,30 @@ def Refresh (force = False):
 			text += " %d ms" % player["Ping"]
 		label.SetText (text)
 
-	for i in range (6):
+	compact = len (lobby["Party"]) > 6
+	for i in range (MAX_SLOTS):
 		label = win.GetControl (0x10000020 + i)
 		button = win.GetControl (20 + i)
 		slot = lobby["Party"][i] if i < len (lobby["Party"]) else None
+		x, y, lw, bw, h = _SlotFrame (i, compact)
+		label.SetFrame ({"x": x, "y": y, "w": lw, "h": h})
+		button.SetFrame ({"x": x + lw + 3, "y": y, "w": bw, "h": h})
 		label.SetVisible (slot is not None)
 		button.SetVisible (slot is not None)
 		if not slot:
 			continue
-		label.SetText ("PC %d: %s" % (slot["Slot"], slot["Name"] or "(empty)"))
+		name = slot["Name"] or "(empty)"
 		owner = _Player (lobby, slot["Owner"])
 		text = "Player %d %s" % (slot["Owner"], owner["Name"] if owner else "")
 		if slot["Controller"] != slot["Owner"]:
 			text += " (host now)"
-		button.SetText (text)
+		if compact:
+			label.SetText ("%d %s" % (slot["Slot"], name[:9]))
+			button.SetText ("P%d%s" % (slot["Owner"], "*" if slot["Controller"] != slot["Owner"] else ""))
+			button.SetTooltip (text)
+		else:
+			label.SetText ("PC %d: %s" % (slot["Slot"], name))
+			button.SetText (text)
 		Shown["PC %d" % slot["Slot"]] = text
 
 	me = _Player (lobby, lobby["Slot"])

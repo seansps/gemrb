@@ -181,6 +181,10 @@ GEM_EXPORT uint8_t NetDialogOwner(int speakerOwner, int targetOwner, uint8_t fal
 // the stats that changed between two copies of an actor's base and modified stats,
 // leaving out the ones snapshots carry (skip)
 GEM_EXPORT std::vector<NetStatEntry> NetStatsDiff(const std::vector<NetStatEntry>& before, const std::vector<NetStatEntry>& now, const std::vector<uint16_t>& skip);
+// v12: a FULL stats message: only the stats that aren't 0 (base or modified), skip left out too
+GEM_EXPORT std::vector<NetStatEntry> NetStatsFull(const std::vector<NetStatEntry>& now, const std::vector<uint16_t>& skip);
+// a FULL message on arrival: the stats it lists, and 0 for every other one below count that isn't in skip
+GEM_EXPORT std::vector<NetStatEntry> NetStatsExpand(const std::vector<NetStatEntry>& listed, size_t count, const std::vector<uint16_t>& skip);
 
 // what each GUI call refers to and needs
 struct NetGuiOpInfo {

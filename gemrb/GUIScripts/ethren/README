@@ -11,8 +11,8 @@ use it to pick the demo's window layouts; use GameCheck.IsEthren () for
 anything that should differ from the demo.
 
 Modules here so far:
-- MessageWindow.py: the demo's, plus an "R" button for the record screen and
-  the dcctest autotest hook.
+- MessageWindow.py: the demo's, plus an "R" button for the record screen, the
+  party roster and the dcctest and funneltest autotest hooks.
 - GUIREC.py: the DCC record screen, plain text in a window built from code.
 - DCCSheet.py: formats GemRB.GetDCCStats for the record screen and logs.
 - DCCLuck.py: the record screen's Luck panel (burn policy, the Luck to keep,
@@ -26,3 +26,16 @@ Modules here so far:
   unholy; plus the record sheet's magic lines.
 - DCCAutotest.py: the DCC checks of testdata/dcctest's autotest; idle unless
   the DCC_AUTOTEST global is 1.
+- Roster.py (M2.9): the party roster for up to 16 (the funnel), since the demo
+  GUI has no portrait window: two columns of eight on the right edge, a click
+  selects one, a right click adds or removes one, plus everyone, the formation
+  and the party settings. Refreshes on a timer.
+- DCCParty.py (M2.9): the party settings: Luck policy, pause on key rolls,
+  spellburn and corruption Luck for every character this player controls, and
+  the host's prompt options (auto-resolve after N seconds, level-0 prompts).
+- DCCLearn.py (M2.9): the learn window after a level-up: the new spells, swaps
+  where the rules allow (clerics choose; wizards and elves up to half), the
+  elf's lucky spell, the notes on rows without content, confirm. Opened from
+  the spellbook's "New spells..." button.
+- FunnelAutotest.py (M2.9): the checks of testdata/funneltest's autotest; idle
+  unless the FNT_AUTOTEST global is 1.

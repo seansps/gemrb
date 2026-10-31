@@ -74,6 +74,60 @@ TEST(DCC_Extension, RoundTrip)
 	EXPECT_EQ(back.FindSpell("nope"), nullptr);
 }
 
+TEST(DCC_Extension, FunnelRecords)
+{
+	// Phase 3: the 0-level occupation (OCCU) and the funnel (FUNL)
+	CharacterExt ext;
+	ext.occupation.id = 39; // a farmer
+	ext.occupation.sub = 3; // turnips
+	ext.occupation.tradeGood = "fntturn";
+	ext.occupation.weapon = "fntpfork";
+	ext.occupation.skills = SKILL_FARMING | SKILL_ANIMALS | SKILL_OUTDOORS;
+	EXPECT_FALSE(ext.Empty());
+	ext.funnel.status = FunnelStatus::Alive;
+	ext.funnel.order = 12;
+	ext.funnel.player = 2;
+	ext.funnel.flags = FUNNEL_CLASS_PENDING;
+	std::vector<uint8_t> bytes = WriteExtension(ext);
+	// header, OCCU (12 + 32), FUNL (12 + 16)
+	EXPECT_EQ(bytes.size(), EXT_HEADER_SIZE + 44 + 28);
+	CharacterExt back;
+	ASSERT_TRUE(ReadExtension(bytes.data(), bytes.size(), back));
+	EXPECT_EQ(back, ext);
+	EXPECT_EQ(back.occupation.id, 39);
+	EXPECT_EQ(back.occupation.tradeGood, "fntturn");
+	EXPECT_EQ(back.occupation.skills, uint32_t(SKILL_FARMING | SKILL_ANIMALS | SKILL_OUTDOORS));
+	EXPECT_TRUE(back.occupation.lastWeapon.empty());
+	EXPECT_EQ(back.funnel.status, FunnelStatus::Alive);
+	EXPECT_EQ(back.funnel.order, 12);
+	EXPECT_EQ(back.funnel.player, 2);
+	EXPECT_TRUE(back.other.empty());
+	// a death keeps its time and place, and the rest of a full extension stays as it was
+	CharacterExt full = Sample();
+	full.funnel.status = FunnelStatus::Dead;
+	full.funnel.diedAt = 9000;
+	full.funnel.diedIn = "fnt01";
+	full.occupation = ext.occupation;
+	bytes = WriteExtension(full);
+	ASSERT_TRUE(ReadExtension(bytes.data(), bytes.size(), back));
+	EXPECT_EQ(back, full);
+	EXPECT_EQ(back.funnel.diedIn, "fnt01");
+	EXPECT_EQ(back.funnel.player, FUNNEL_NO_PLAYER);
+	EXPECT_EQ(back.spells.size(), 2u);
+	// a funnel status past the known ones is refused
+	CharacterExt dead;
+	dead.funnel.status = FunnelStatus::Reserve;
+	bytes = WriteExtension(dead);
+	bytes[EXT_HEADER_SIZE + EXT_RECORD_HEADER_SIZE] = uint8_t(FunnelStatus::count);
+	EXPECT_FALSE(ReadExtension(bytes.data(), bytes.size(), back));
+	// tag names, both ways
+	EXPECT_STREQ(OccupationSkillName(5), "SMITHING");
+	EXPECT_EQ(OccupationSkillName(OCCUPATION_SKILL_COUNT), nullptr);
+	EXPECT_EQ(OccupationSkillBit("cooking"), uint32_t(SKILL_COOKING));
+	EXPECT_EQ(OccupationSkillBit("JUGGLING"), 0u);
+	EXPECT_STREQ(FunnelStatusName(FunnelStatus::Reserve), "reserve");
+}
+
 TEST(DCC_Extension, EmptyAndDefaults)
 {
 	CharacterExt ext;

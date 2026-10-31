@@ -39,6 +39,15 @@ LuckPolicy Actor::GetDCCLuckPolicy() const
 	return policy;
 }
 
+bool Actor::DCCPausesOnKeyRolls() const
+{
+	if (!(BaseStats[IE_DCC_LUCKFLAGS] & LUCK_PAUSE)) return false;
+	if (BaseStats[IE_LEVEL] > 0 && BaseStats[IE_CLASS] != static_cast<ieDword>(ClassID::Level0)) return true;
+	// the funnel's peasants follow their policy without asking, unless the party settings say so
+	const Game* game = core->GetGame();
+	return game && game->GetGlobal("DCC_PROMPT_LOUD0", 0);
+}
+
 BurnValue Actor::GetDCCBurnValue() const
 {
 	return BurnValueFor(Signed(BaseStats[IE_CLASS]), Signed(BaseStats[IE_LEVEL]), Signed(GetStat(IE_DCC_LUCKDIE)));
