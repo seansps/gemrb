@@ -7,7 +7,7 @@
 3    1d3    INITBOTTOM:1               *         knocked_off_balance
 4    1d4    SPEED:-10:HEAL             *         leg_wound
 5    1d6    *                          *         hard_hit
-6    *      DISARM,TODO:FREE_ATTACK_IF_IT_STOOPS *  weapon_knocked_loose
+6    *      NOATTACK:1@HASWEAPON,EXTRA@HASWEAPON *  weapon_knocked_loose,_it_stoops_for_it
 7    2d3    *                          *         nasty_cut
 8    *      NOATTACK:1                 *         winded
 9    2d4    *                          *         deep_wound
@@ -16,7 +16,7 @@
 12   *      ?STUN:2                    FORT:15   gut_blow,_retching
 13   *      SPEED:HALF:HEAL            *         hamstrung
 14   *      BLIND:1d3                  *         blood_in_the_eyes
-15   *      DISARM                     *         weapon_sent_flying
+15   *      DISARM:1d10+5              *         weapon_sent_flying
 16   *      EXTRA:0:1d6                *         opening_for_another_strike
 17   *      MUTE:2,NOATTACK:2          *         throat_strike
 18   2d6    *                          *         savage_blow

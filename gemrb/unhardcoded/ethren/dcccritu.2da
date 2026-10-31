@@ -1,0 +1,33 @@
+2DA V1.0
+*
+     DICE   EFFECTS                                  SAVE        TEXT
+1    *      INJURY:BOILS:HEAL                        *           grave_boils
+2    1d4    INJURY:CHILLS:HEAL                       *           cold_touch_of_un-death
+3    1d4    NUMB                                     *           numbness_of_death
+4    *      ?HELD:1d4                                FORT:15     horrifying_visage
+5    *      ABIL:LCK:1,ROLLMOD:-1:PERM               *           cursed_from_beyond_the_grave
+6    *      ?ABIL:STA:1d4,INJURY:INFECTED:PERM       FORT:10     infection_from_beyond_the_grave
+7    1d8    TODO:COLD_VULNERABILITY                  *           supernatural_frost
+8    *      ABIL:STA:2d4                             *           necrotic_energies
+9    *      ABIL:PER:1d4,TODO:INSANITY               *           unhinged
+10   *      ?HELD:1d4                                FORT:16     horror_of_the_grave
+11   1d10   *                                        *           electrical_sparks
+12   *      ?SLEEP:1d7H                              FORT:16     un-dead_slumber
+13   1d8    ABIL:PER:1,INJURY:ROT:PERM               *           flesh_rots
+14   *      ABIL:STR:1d4,?ABIL:STR:1d4               FORT:12     energy_sapped
+15   *      NOATTACK:1d4,MUTE:SAME                   *           made_incorporeal
+16   2d6    ?ABIL:STA:1d4,INJURY:GRAVEROT:PERM       FORT:16     grave_rot
+17   *      INJURY:AMNESIA:HEAL                      *           brush_with_death
+18   *      PARALYZE:1d6                             *           glimpse_of_its_own_death
+19   *      ABIL:INT:1d6,ABIL:PER:1d6                *           dizzying_madness
+20   1d6    INJURY:MARKED:PERM                       *           unholy_mark
+21   *      ABIL:LCK:1:PERM                          *           soul_scarred
+22   2d6    WOUND:1d6                                *           maggots
+23   *      ABIL:PER:1d4,TODO:BLESSINGS_CANCELLED    *           unholy_aura
+24   1d12   ABIL:STR:1d6:PERM                        *           grave_rot
+25   1d6    ABIL:STA:1,WOUND:1d6:STA                 *           flesh_melts_away
+26   *      CHOKE:20                                 *           death_rattle
+27   1d20   DRAIN                                    *           life_force_drained
+28   *      TODO:AGING                               *           wizened
+29   2d12   INJURY:ARMUSELESS:PERM,WOUND:1d6         *           crumbling_to_dust
+30   *      ATTACKER:1d6,DIE,TODO:RISES_AS_UN-DEAD   *           un-death_seeks_un-death

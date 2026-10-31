@@ -165,9 +165,14 @@ bool ParseSaveSpec(const std::string& text, SaveSpec& save)
 	} else if (parts[0] == "WILL") {
 		save.save = Save::Will;
 	} else {
-		return false;
+		// an ability check instead of a save: STR:10:L (M2.3b, Crit Table DR)
+		static const char* const abilities[] = { "STR", "AGI", "STA", "PER", "INT", "LCK" };
+		for (int i = 0; i < ABILITY_COUNT; ++i) {
+			if (parts[0] == abilities[i]) save.ability = i;
+		}
+		if (save.ability < 0) return false;
 	}
-	if (parts[1] == "A" && parts.size() == 2) {
+	if (parts[1] == "A" && parts.size() == 2 && save.ability < 0) {
 		save.vsAttack = true;
 		return true;
 	}
@@ -432,6 +437,110 @@ TwoWeaponDice TwoWeaponTable::Lookup(int agility, bool halfling) const
 	return dice;
 }
 
+// ---------------------------------------------------------------------------
+// weapons (M2.3b)
+
+static const std::array<const char*, WEAPON_CLASS_COUNT> weaponClassKeys { "WIZARD", "WARRIOR", "THIEF", "DWARF", "ELF", "HALFLING", "CLERIC_L", "CLERIC_N", "CLERIC_C" };
+
+const char* WeaponClassKey(WeaponClass which)
+{
+	size_t i = static_cast<size_t>(which);
+	return i < weaponClassKeys.size() ? weaponClassKeys[i] : "";
+}
+
+WeaponClass WeaponClassFor(ClassID classID, Alignment alignment)
+{
+	switch (classID) {
+		case ClassID::Wizard:
+			return WeaponClass::Wizard;
+		case ClassID::Warrior:
+			return WeaponClass::Warrior;
+		case ClassID::Thief:
+			return WeaponClass::Thief;
+		case ClassID::Dwarf:
+			return WeaponClass::Dwarf;
+		case ClassID::Elf:
+			return WeaponClass::Elf;
+		case ClassID::Halfling:
+			return WeaponClass::Halfling;
+		case ClassID::Cleric:
+			if (alignment == Alignment::Lawful) return WeaponClass::ClericLaw;
+			return alignment == Alignment::Chaotic ? WeaponClass::ClericChaos : WeaponClass::ClericNeutral;
+		default:
+			return WeaponClass::count;
+	}
+}
+
+bool WeaponTable::SetRows(std::vector<WeaponRow> newRows)
+{
+	rows = std::move(newRows);
+	return !rows.empty();
+}
+
+bool WeaponTable::Load(const TableMgr& table)
+{
+	rows.clear();
+	auto typeCol = table.GetColumnIndex("ITEMTYPE");
+	auto handsCol = table.GetColumnIndex("HANDS");
+	auto subdualCol = table.GetColumnIndex("SUBDUAL");
+	auto backstabCol = table.GetColumnIndex("BACKSTAB");
+	if (typeCol == TableMgr::npos || handsCol == TableMgr::npos || subdualCol == TableMgr::npos || backstabCol == TableMgr::npos) return false;
+	std::array<TableMgr::index_t, WEAPON_CLASS_COUNT> classCols {};
+	for (int i = 0; i < WEAPON_CLASS_COUNT; ++i) {
+		classCols[i] = table.GetColumnIndex(std::string(weaponClassKeys[i]));
+		if (classCols[i] == TableMgr::npos) return false;
+	}
+	std::vector<WeaponRow> newRows;
+	for (TableMgr::index_t row = 0; row < table.GetRowCount(); ++row) {
+		WeaponRow entry;
+		entry.key = Upper(table.GetRowName(row));
+		std::string type = table.QueryField(row, typeCol);
+		if (type != "*" && type != "-") {
+			// a number, or a resref for items of their own (a blackjack)
+			if (!valid_signednumber(type.c_str(), entry.itemType)) entry.resref = Upper(type);
+		}
+		std::string hands = table.QueryField(row, handsCol);
+		if (hands == "1" || hands == "2") entry.hands = hands[0] - '0';
+		std::string subdual = Upper(table.QueryField(row, subdualCol));
+		if (subdual == "YES") {
+			entry.subdual = Subdual::Possible;
+		} else if (subdual == "ALWAYS") {
+			entry.subdual = Subdual::Always;
+		} else if (subdual != "NO") {
+			return false;
+		}
+		if (!ParseDice(table.QueryField(row, backstabCol), entry.backstab)) return false;
+		for (int i = 0; i < WEAPON_CLASS_COUNT; ++i) {
+			entry.trained[i] = table.QueryField(row, classCols[i]) == "1";
+		}
+		newRows.push_back(entry);
+	}
+	return SetRows(std::move(newRows));
+}
+
+const WeaponRow* WeaponTable::Lookup(const std::string& resref, int itemType, bool twoHanded) const
+{
+	std::string upper = Upper(resref);
+	for (const auto& row : rows) {
+		if (!row.resref.empty() && row.resref == upper) return &row;
+	}
+	for (const auto& row : rows) {
+		if (row.itemType < 0 || row.itemType != itemType) continue;
+		if (row.hands && row.hands != (twoHanded ? 2 : 1)) continue;
+		return &row;
+	}
+	return nullptr;
+}
+
+const WeaponRow* WeaponTable::Find(const std::string& key) const
+{
+	std::string upper = Upper(key);
+	for (const auto& row : rows) {
+		if (row.key == upper) return &row;
+	}
+	return nullptr;
+}
+
 const ResultTable* CombatTables::Crit(CritTableID id) const
 {
 	size_t i = static_cast<size_t>(id);
@@ -448,7 +557,7 @@ bool CombatTables::Load()
 		ok = false;
 	};
 
-	static const std::array<std::pair<CritTableID, const char*>, 6> critFiles { { { CritTableID::I, "dcccrit1" }, { CritTableID::II, "dcccrit2" }, { CritTableID::III, "dcccrit3" }, { CritTableID::IV, "dcccrit4" }, { CritTableID::V, "dcccrit5" }, { CritTableID::M, "dcccritm" } } };
+	static const std::array<std::pair<CritTableID, const char*>, 10> critFiles { { { CritTableID::I, "dcccrit1" }, { CritTableID::II, "dcccrit2" }, { CritTableID::III, "dcccrit3" }, { CritTableID::IV, "dcccrit4" }, { CritTableID::V, "dcccrit5" }, { CritTableID::M, "dcccritm" }, { CritTableID::DR, "dcccritd" }, { CritTableID::DN, "dcccritn" }, { CritTableID::G, "dcccritg" }, { CritTableID::U, "dcccritu" } } };
 	for (const auto& file : critFiles) {
 		AutoTable table = gamedata->LoadTable(ResRef(file.second));
 		if (!table || !crits[static_cast<size_t>(file.first)].Load(*table)) fail(file.second);
@@ -461,6 +570,8 @@ bool CombatTables::Load()
 	if (!table || !armorFumbles.Load(*table)) fail("dccfumdi");
 	table = gamedata->LoadTable("dcctwowp");
 	if (!table || !twoWeapons.Load(*table)) fail("dcctwowp");
+	table = gamedata->LoadTable("dccweap");
+	if (!table || !weapons.Load(*table)) fail("dccweap");
 	return ok;
 }
 

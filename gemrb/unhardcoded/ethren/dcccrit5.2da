@@ -1,19 +1,19 @@
 2DA V1.0
 *
      DICE   EFFECTS                                  SAVE        TEXT
-0    3d8    ALLY:1d4,TODO:BATTLE_RAGE                *           wild_frenzy_catches_an_ally
+0    3d8    ALLY:1d4,RAGE                            *           wild_frenzy_catches_an_ally
 1    *      SUNDER|DMG:3d12                          *           weapon_shattered
-2    *      TODO:HURLED_BACK                         *           hurled_back
+2    *      FLING:1d10:STRIKE                        *           hurled_back
 3    1d12   DEAF:PERM                                *           eardrums_burst
 4    *      ?STUN:2                                  FORT:20:L   gut_blow,_retching
 5    1d12   DISARM|NONE,EXTRA                        *           begs_for_mercy
 6    *      BLIND:HEAL                               *           blinded_by_blood
 7    *      AC:-6:1,EXTRA                            *           stuck_on_the_blade
-8    1d12   TODO:BATTLE_RAGE                         *           battle_rage
-9    1d12   TODO:BATTLE_RAGE                         *           battle_rage
-10   1d12   TODO:BATTLE_RAGE                         *           battle_rage
-11   1d12   TODO:BATTLE_RAGE                         *           battle_rage
-12   1d12   TODO:BATTLE_RAGE                         *           battle_rage
+8    1d12   RAGE                                     *           battle_rage
+9    1d12   RAGE                                     *           battle_rage
+10   1d12   RAGE                                     *           battle_rage
+11   1d12   RAGE                                     *           battle_rage
+12   1d12   RAGE                                     *           battle_rage
 13   *      WEAPONDMG:4,DISARM                       *           own_weapon_turned_on_it
 14   *      WEAPONDMG:4,DISARM                       *           own_weapon_turned_on_it
 15   2d12   SHIELD|?UNCON:1d6                        FORT:20:L   shield_smashed
@@ -21,12 +21,12 @@
 17   *      DIE                                      *           slain_outright
 18   *      BLIND:PERM,DEAF:PERM,MUTE:PERM           *           senses_destroyed
 19   *      DIEIN:3d3                                *           mortal_wound
-20   2d12   SHIELD|NONE,TODO:SEVERED_SHIELD_ARM      *           shield_arm_severed
-21   3d12   TODO:CLEAVE_ON_A_KILL                    *           cleaving_blow
+20   2d12   SHIELD|NONE,INJURY:SHIELDARM:PERM        *           shield_arm_severed
+21   3d12   CLEAVE                                   *           cleaving_blow
 22   2d12   SPEED:ZERO:HEAL,STUN:1d4                 *           legs_broken
 23   *      STUN:1d4+1,ABIL:INT:1d12:PERM,EXTRA      *           skull_cracked
-24   2d12   DISARM|NONE,TODO:SEVERED_WEAPON_ARM      *           weapon_arm_severed
+24   2d12   DISARM|NONE,INJURY:ARM:PERM              *           weapon_arm_severed
 25   *      HALFHP                                   *           terrible_wound
 26   *      DIEIN:1d4                                *           mortal_wound
 27   4d12   PARALYZE:PERM                            *           spine_shattered
-28   *      DIE,TODO:KEEP_ATTACKING_UNTIL_A_MISS     *           decapitated
+28   *      DIE,RAMPAGE:10:10                        *           decapitated

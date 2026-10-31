@@ -7,7 +7,7 @@
 3    2d6    *                          *           strike_to_a_weak_spot
 4    *      EXTRA                      *           opening_for_another_strike
 5    3d3    STUN:1                     *           stunning_jab
-6    *      SPEED:HALF:1d4,TODO:HALF_ACTIONS *     leg_slashed
+6    *      SPEED:HALF:1d4,HALFACT:SAME *          leg_slashed
 7    3d4    *                          *           deep_stab
 8    *      BLIND:1d4                  *           cut_above_the_eyes
 9    *      PRONE:1,EXTRA              *           tripped,_then_struck_again
@@ -17,8 +17,8 @@
 13   *      ATK:-4:1d4                 *           weapon_arm_slashed
 14   *      ?UNCON:1d6                 FORT:10:L   blow_to_the_temple
 15   2d6    PRONE:1                    *           knocked_flat
-16   *      STUN:1d3,TODO:BLIND_IN_ONE_EYE *       eye_put_out
-17   2d6    TODO:ONE_ACTION_NEXT_ROUND *           staggering_wound
+16   *      STUN:1d3,INJURY:EYE:PERM   *           eye_put_out
+17   2d6    ONEACTION:1                *           staggering_wound
 18   1d8    ?UNCON:1d6                 FORT:10:L   brutal_stab
 19   1d10   ?UNCON:1d6                 FORT:10:L   vital_organ_struck
 20   2d6    ?DIEIN:1d4                 FORT:13:L   mortal_wound

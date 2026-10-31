@@ -1,9 +1,9 @@
 2DA V1.0
 *
      DICE   EFFECTS                              SAVE        TEXT
-0    2d8    ALLY:1d4,TODO:BATTLE_RAGE            *           wild_frenzy_catches_an_ally
+0    2d8    ALLY:1d4,RAGE                        *           wild_frenzy_catches_an_ally
 1    2d12   *                                    *           mighty_blow
-2    1d12   DISARM|NONE,TODO:SEVERED_HAND        *           weapon_hand_severed
+2    1d12   DISARM|NONE,INJURY:HAND:PERM         *           weapon_hand_severed
 3    1d12   PRONE:1,EXTRA                        *           knocked_flat,_strike_again
 4    1d12   ABIL:INT:1d6                         *           head_wound
 5    *      SUNDER|DMG:2d12                      *           weapon_shattered
@@ -13,13 +13,13 @@
 9    2d12   MUTE:1d4W                            *           jaw_broken
 10   *      ?BLIND:1d4                           FORT:15:L   blinding_blow
 11   2d12   *                                    *           teeth_smashed
-12   1d12   TODO:BATTLE_RAGE                     *           battle_rage
+12   1d12   RAGE                                 *           battle_rage
 13   2d12   *                                    *           brutal_blow
 14   *      AC:-4:HEAL                           *           armor_torn_open
 15   *      PRONE:1d4,STUN:1d4                   *           cowering_on_the_ground
 16   2d12   SHIELD|STUN:1d4                      *           shield_smashed
 17   *      SPEED:ZERO:HEAL,EXTRA                *           legs_crippled,_strike_again
-18   1d12   STUN:1d4,?TODO:AMNESIA               FORT:15:L   head_blow
+18   1d12   STUN:1d4,?INJURY:AMNESIA:HEAL        FORT:15:L   head_blow
 19   *      WEAPONDMG:3,DISARM                   *           own_weapon_turned_on_it
 20   3d12   ?PARALYZE:PERM                       FORT:15:L   spine_broken
 21   *      DIEIN:1d8                            *           mortal_wound

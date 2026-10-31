@@ -625,6 +625,22 @@ private:
 	struct DCCHeldSave;
 	std::shared_ptr<DCCHeldSave> dccHeldSave;
 	bool DCCAskSaveBurn(const Effect& fx, ieDword type, const DCC::RollResult& roll);
+	/* DCC combat completion (M2.3b, ActorDCCCombat.cpp), not saved */
+	ieDword dccCombatTime = 0; // game time this actor last attacked or was attacked: it's in a fight
+	std::map<ieDword, ieDword> dccEngaged; // foes in melee with it: global ID -> game time of the last swing
+	uint32_t dccMoraleDone = 0; // the DCC::MoraleTrigger bits it checked already
+	ieDword dccDiedTime = 0; // game time of death, for the morale of its group
+	bool dccSubdualHit = false; // the damage being applied is subdual
+	Point dccChargeFrom; // where a charge was declared (the run-up starts there)
+	/* DCC: one swing of an attack action, built from the weapon in that hand (the attack die and its
+	 * modifiers, damage); false without a weapon header */
+	bool DCCBuildSwing(DCCSwing& swing, int hand, const Actor* target, int index, bool bash);
+	/* DCC: a free attack's or the shield bash's damage, at once */
+	void DCCApplySwingDamage(Actor* target, const DCCSwing& swing, int damage);
+	/* DCC: the morale of this creature's group after a death */
+	void DCCGroupMorale();
+	/* DCC: a night's rest for lasting injuries that get worse (infection, rot) */
+	void DCCNightlyInjuries();
 	/* Returns true if the dual class is backwards */
 	bool IsDualSwap() const;
 	int GetNonProficiencyPenalty(int stars) const;
@@ -746,12 +762,41 @@ public:
 	/** an ally rolls the body over: a Luck check brings a level 1+ character back at 1 hp;
 	 * returns -1 if not allowed, else 1 on a success and 0 on a failure */
 	int DCCRecoverBody(const Actor* ally, int natural = 0);
+	/** a dead level 1+ character whose body can still be rolled over (within the hour, once) */
+	bool DCCBodyRecoverable() const;
 	/** the DCC combat log lines so far (the last few hundred); clear empties it */
 	static std::vector<String> DCCCombatLog(bool clear = false);
 	/** adds a line to the DCC combat log (shown with feedback of that type, replicated to co-op clients) */
 	static void DCCFeedback(String text, int feedbackType);
 	/** an attack action waits for a Luck prompt's answer */
 	bool DCCAttackPending() const { return dccPendingAttack != nullptr; }
+
+	// DCC combat completion (M2.3b, ActorDCCCombat.cpp)
+	/** one free attack on target at once (withdrawal, a hurled foe, cleave, a stray shot): main hand,
+	 * no deed, never chained; the damage is applied directly. Returns the roll */
+	DCC::AttackRecord DCCFreeAttack(Actor* target, const String& why);
+	/** a grapple attempt: opposed rolls (each side's own dice), the target pinned (held) on a win.
+	 * Returns 1 pinned, 0 failed, -1 not possible */
+	int DCCGrapple(Actor* target);
+	/** walking away from foes it's in melee with gives them a free attack each (DoStep) */
+	void DCCCheckWithdrawal();
+	/** a monster's or NPC's morale check (combat.md, d20 + Will vs dc): false if it flees. Party
+	 * members only check with pcs (a dragon's terrible crit), and are stunned for a round on a failure */
+	bool DCCCheckMorale(const Scriptable* from, int dc, const String& why, bool pcs = false);
+	/** hp went down from old to now: a lone monster's morale at half hp */
+	void DCCHurt(int oldHP, int newHP);
+	/** the per-round work of a DCC:Combat effect (checks to get up, wounds, pins); false ends it */
+	bool DCCRoundEffect(Effect& fx);
+	/** the lasting injuries (DCC::Injury bits) */
+	uint32_t GetDCCInjuries() const;
+	/** lasting crit injuries and effects for the record screen ("weapon hand severed (for good)") */
+	std::vector<String> DCCInjuryList() const;
+	/** the combat options (DCC::CombatOption) and battle rage points */
+	uint32_t GetDCCCombatOptions() const;
+	/** sets the combat options; a charge starts its run-up here */
+	void SetDCCCombatOptions(uint32_t options, int rage);
+	/** whether this weapon slot is one the character is trained in (classes.md; level 0 always) */
+	bool DCCTrainedWith(const WeaponInfo& wi) const;
 
 	// DCC Luck burn and Mighty Deeds (M2.4, ActorDCCLuck.cpp)
 	/** the character's burn policy, threshold and flags (IE_DCC_BURNPOLICY, BURNMIN, LUCKFLAGS) */

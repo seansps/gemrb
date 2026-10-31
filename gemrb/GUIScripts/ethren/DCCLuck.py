@@ -9,9 +9,11 @@
 #   for allies in sight.
 # - Deeds (warriors and dwarves): the signature Mighty Deed declared for every attack,
 #   and a one-off deed for the next attack only (it can be queued while paused).
+# - Combat (M2.3b): a charge or a grapple for the next melee attack, subdual blows,
+#   and how much Personality or Intelligence a battle rage crit spends.
 # Plain controls in windows built from code, like GUIREC. The changes go through
-# GemRB.DCCSetLuckPolicy and GemRB.DCCSetDeeds, which a co-op client also sends to
-# the host (only the character's owner may change them).
+# GemRB.DCCSetLuckPolicy, DCCSetDeeds and DCCSetCombat, which a co-op client also sends
+# to the host (only the character's owner may change them).
 import GemRB
 import DCCSheet
 from GUIDefines import *
@@ -42,7 +44,7 @@ Deeds = (
 DeedNames = dict ((deed, name.lower ()) for deed, name, text in Deeds)
 
 Window = None
-Kind = None # "luck" or "deeds"
+Kind = None # "luck", "deeds" or "combat"
 Shown = 0 # party slot
 
 def _Stats ():
@@ -88,6 +90,8 @@ def _Refresh ():
 		OpenLuckWindow (Shown)
 	elif Kind == "deeds":
 		OpenDeedsWindow (Shown)
+	elif Kind == "combat":
+		OpenCombatWindow (Shown)
 	import GUIREC
 	GUIREC.UpdateRecordsWindow ()
 
@@ -207,6 +211,56 @@ def OpenDeedsWindow (pc = None):
 	win.Focus ()
 
 ###################################################
+# Combat options (M2.3b)
+
+def _SetCombat (options = None, rage = -1):
+	stats = _Stats ()
+	if not stats:
+		return
+	options = stats["CombatOptions"] if options is None else options
+	GemRB.DCCSetCombat (Shown, options, rage)
+	_Refresh ()
+
+def OpenCombatWindow (pc = None):
+	global Kind, Shown
+	Shown = pc or GemRB.GameGetSelectedPCSingle () or 1
+	stats = _Stats ()
+	if not stats or not stats["Character"]:
+		Close ()
+		return
+	height = 300
+	win = _Open (height)
+	Kind = "combat"
+	name = GemRB.GetPlayerName (Shown, 0)
+	options = stats["CombatOptions"]
+	_Label (win, 0x10000000, 12, 6, Width - 24, 22, "Combat: %s" % name)
+	y = 34
+	_Label (win, 0x10000001, 12, y, Width - 24, 20, "Next melee attack:")
+	y += 24
+	charge = options & DCC_OPT_CHARGE
+	_Button (win, 10, 20, y, Width - 40, 26, "Charge (+2 to hit, -2 AC; run half your speed first): %s" % ("on" if charge else "off"),
+		_Call (_SetCombat, options ^ DCC_OPT_CHARGE), charge)
+	y += 30
+	grapple = options & DCC_OPT_GRAPPLE
+	_Button (win, 11, 20, y, Width - 40, 26, "Grapple and pin instead of striking: %s" % ("on" if grapple else "off"),
+		_Call (_SetCombat, options ^ DCC_OPT_GRAPPLE), grapple)
+	y += 38
+	subdual = options & DCC_OPT_SUBDUAL
+	_Button (win, 12, 20, y, Width - 40, 26, "Subdual blows (flat of the blade, a die lower): %s" % ("on" if subdual else "off"),
+		_Call (_SetCombat, options ^ DCC_OPT_SUBDUAL), subdual)
+	y += 38
+	_Label (win, 0x10000002, 20, y, 260, 26, "Battle rage: Per/Int to spend:")
+	_Button (win, 20, 290, y, 30, 26, "-", _Call (_SetCombat, None, max (0, stats["Rage"] - 1)))
+	win.CreateLabel (0x10000003, 324, y, 40, 26, Font, str (stats["Rage"]), IE_FONT_ALIGN_CENTER | IE_FONT_ALIGN_MIDDLE)
+	_Button (win, 21, 368, y, 30, 26, "+", _Call (_SetCombat, None, min (10, stats["Rage"] + 1)))
+	y += 30
+	win.CreateLabel (0x10000004, 20, y, Width - 40, 40, Font, "A battle rage crit adds 1d12 per point (they come back with rest).",
+		IE_FONT_ALIGN_LEFT | IE_FONT_ALIGN_TOP)
+	close = _Button (win, 40, Width - 112, height - 36, 100, 28, "Close", Close)
+	close.MakeEscape ()
+	win.Focus ()
+
+###################################################
 # the record screen's lines
 
 def Lines (stats):
@@ -225,4 +279,20 @@ def Lines (stats):
 		if stats["NextDeed"]:
 			deed += ", next attack %s" % DeedNames.get (stats["NextDeed"], "?")
 		lines.append (deed)
+	options = stats["CombatOptions"]
+	combat = []
+	if options & DCC_OPT_CHARGE:
+		combat.append ("charge next")
+	if options & DCC_OPT_GRAPPLE:
+		combat.append ("grapple next")
+	if options & DCC_OPT_SUBDUAL:
+		combat.append ("subdual blows")
+	if stats["Rage"]:
+		combat.append ("battle rage %d" % stats["Rage"])
+	if not stats["Trained"]:
+		combat.append ("untrained weapon (-1d)")
+	if combat:
+		lines.append ("Combat: " + ", ".join (combat))
+	if stats["Injuries"]:
+		lines.append ("Injuries: " + "; ".join (stats["Injuries"]))
 	return lines

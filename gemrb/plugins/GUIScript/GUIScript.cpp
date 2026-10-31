@@ -6920,6 +6920,29 @@ static PyObject* GemRB_GetDCCStats(PyObject* /*self*/, PyObject* args)
 	DictInt(dict, "Deed", static_cast<int>(actor->GetDCCSignatureDeed()));
 	DictInt(dict, "NextDeed", static_cast<int>(actor->GetDCCQueuedDeed()));
 	DictInt(dict, "AttackPending", actor->DCCAttackPending());
+	// combat completion (M2.3b): lasting injuries, the combat options, battle rage, the states
+	PyObject* injuries = PyList_New(0);
+	for (const auto& line : actor->DCCInjuryList()) {
+		PyObject* text = PyString_FromStringObj(line);
+		PyList_Append(injuries, text);
+		Py_DecRef(text);
+	}
+	PyDict_SetItemString(dict, "Injuries", injuries);
+	Py_DecRef(injuries);
+	DictInt(dict, "InjuryBits", actor->GetDCCInjuries());
+	DictInt(dict, "CombatOptions", actor->GetDCCCombatOptions());
+	DictInt(dict, "Rage", actor->GetBase(IE_DCC_RAGE));
+	DictInt(dict, "Pinned", actor->GetStat(IE_DCC_PINNED) != 0);
+	DictInt(dict, "Subdued", actor->GetStat(IE_DCC_SUBDUED));
+	DictInt(dict, "StandDC", actor->GetStat(IE_DCC_STAND));
+	DictInt(dict, "ActionLimit", actor->GetStat(IE_DCC_ACTLIMIT));
+	DictInt(dict, "Fouled", actor->GetStat(IE_DCC_FOULED));
+	DictInt(dict, "BodyRecoverable", actor->DCCBodyRecoverable());
+	{
+		// whether the weapon in hand is one the character is trained in (untrained: -1d)
+		const WeaponInfo& wi = actor->weaponInfo[0];
+		DictInt(dict, "Trained", wi.extHeader ? actor->DCCTrainedWith(wi) : 1);
+	}
 
 	const DCC::LevelRow* row = rules->classes.Row(cls, level);
 	DictInt(dict, "SpellsKnown", row ? row->spellsKnown : 0);
@@ -7112,6 +7135,11 @@ static PyObject* DCCAttackList(const Actor* actor)
 		DictInt(dict, "DeedKind", record.deedKind);
 		DictInt(dict, "DeedDone", record.deedDone);
 		PyDict_SetItemString(dict, "DeedResult", DecRef(PyString_FromString, record.deedResult.c_str()));
+		DictInt(dict, "Target", record.target);
+		DictInt(dict, "Backstab", record.backstab);
+		DictInt(dict, "Subdual", record.subdual);
+		DictInt(dict, "Bash", record.bash);
+		DictInt(dict, "Free", record.free);
 		PyList_Append(list, dict);
 		Py_DecRef(dict);
 	}
@@ -7207,7 +7235,8 @@ PyDoc_STRVAR(GemRB_DCCRecoverBody__doc,
 **Description:** An ally rolls a dead DCC character's body over (combat.md): for a character of \n\
 level 1+, within an hour of death and once per death, a Luck check on the dead character's \n\
 Luck brings it back at 1 hp, with -1 Str, Agi or Sta for good and -4 to all rolls for an hour. \n\
-Host or single player only; the M2.8 GUI gets a button for it.\n\
+The record screen's \"Roll body over\" button calls it. In co-op a client sends it to the host, \n\
+which runs it for the ally's owner only (party slots, not global IDs, for both).\n\
 \n\
 **Parameters:**\n\
   * deadID, allyID - party IDs or global IDs\n\
@@ -7224,12 +7253,73 @@ static PyObject* GemRB_DCCRecoverBody(PyObject* /*self*/, PyObject* args)
 	GET_GAME();
 	GET_ACTOR_GLOBAL();
 	const Actor* ally = allyID > 1000 ? game->GetActorByGlobalID(allyID) : game->FindPC(allyID);
+	if (!ally) return RuntimeError("Ally not found!");
+	// co-op: the host rolls (it's the simulation), for the ally's owner; the result comes back
 	const NetSession* net = core->GetNetSession();
-	if (net && !net->IsHost()) {
-		Log(WARNING, "GUIScript", "DCCRecoverBody is not available to co-op clients yet.");
-		return PyLong_FromLong(-1);
-	}
+	if (net && !net->IsHost() && natural) return PyLong_FromLong(-1);
+	if (!NetForward(NetGuiOp::DCCRecoverBody, { globalID, allyID })) return PyLong_FromLong(-2);
 	return PyLong_FromLong(actor->DCCRecoverBody(ally, natural));
+}
+
+PyDoc_STRVAR(GemRB_DCCSetCombat__doc,
+	     "===== DCCSetCombat =====\n\
+\n\
+**Prototype:** GemRB.DCCSetCombat (globalID, options[, rage])\n\
+\n\
+**Description:** Sets a DCC character's combat options (ie_stats.py DCC_OPT_*): 1 the next melee \n\
+attack is a charge (+2 to hit, -2 AC for a round, with a run-up of half its speed from here), \n\
+2 the next melee attack is a grapple, 4 subdual blows where the weapon allows them; and the \n\
+Personality or Intelligence points it spends on a battle rage crit (0-10, -1 keeps it). In co-op \n\
+the host runs it again, for the character's owner only.\n\
+\n\
+**Parameters:**\n\
+  * globalID - party ID or global ID of the actor to use\n\
+  * options, rage - see above\n\
+\n\
+**Return value:** N/A\n\
+\n\
+**See also:** [DCCSetDeeds](DCCSetDeeds.md), [GetDCCStats](GetDCCStats.md)");
+
+static PyObject* GemRB_DCCSetCombat(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int options;
+	int rage = -1;
+	PARSE_ARGS(args, "ii|i", &globalID, &options, &rage);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	if (!core->GetDCCRules()) Py_RETURN_NONE;
+	if (!NetForward(NetGuiOp::DCCSetCombat, { globalID, options, rage })) Py_RETURN_NONE;
+	actor->SetDCCCombatOptions(ieDword(options), rage);
+	Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(GemRB_DCCGrapple__doc,
+	     "===== DCCGrapple =====\n\
+\n\
+**Prototype:** GemRB.DCCGrapple (attackerID, targetID)\n\
+\n\
+**Description:** A DCC grapple attempt at once (combat.md): opposed rolls, each side's own dice; \n\
+a win pins the target (held) until it wins one of its own. For tests and scripts; players \n\
+declare one with DCCSetCombat. Host or single player only.\n\
+\n\
+**Parameters:**\n\
+  * attackerID, targetID - party IDs or global IDs\n\
+\n\
+**Return value:** 1 pinned, 0 failed, -1 not possible");
+
+static PyObject* GemRB_DCCGrapple(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int targetID;
+	PARSE_ARGS(args, "ii", &globalID, &targetID);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	Actor* target = targetID > 1000 ? game->GetActorByGlobalID(targetID) : game->FindPC(targetID);
+	if (!target) return RuntimeError("Target not found!");
+	const NetSession* net = core->GetNetSession();
+	if (net && !net->IsHost()) return PyLong_FromLong(-1);
+	return PyLong_FromLong(actor->DCCGrapple(target));
 }
 
 PyDoc_STRVAR(GemRB_DCCFindActor__doc,
@@ -14138,6 +14228,8 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(DCCFindActor, METH_VARARGS),
 	METHOD(DCCSetLuckPolicy, METH_VARARGS),
 	METHOD(DCCSetDeeds, METH_VARARGS),
+	METHOD(DCCSetCombat, METH_VARARGS),
+	METHOD(DCCGrapple, METH_VARARGS),
 	METHOD(GetPlayerStates, METH_VARARGS),
 	METHOD(GetPlayerString, METH_VARARGS),
 	METHOD(GetPrompt, METH_NOARGS),

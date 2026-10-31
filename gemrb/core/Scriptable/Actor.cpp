@@ -1167,6 +1167,7 @@ static void pcf_hitpoint(Actor* actor, ieDword oldValue, ieDword hp)
 	} else {
 		if (core->HasFeature(GFFlags::RULES_DCC)) {
 			actor->DCCHealed(static_cast<int>(oldValue), static_cast<int>(hp));
+			actor->DCCHurt(static_cast<int>(oldValue), static_cast<int>(hp));
 		}
 		// in testing it popped up somewhere between 39% and 25.3% (single run) -> 1/3
 		if (signed(3 * oldValue) > maxhp && signed(3 * hp) < maxhp) {
@@ -6327,8 +6328,8 @@ bool Actor::ValidTarget(int ga_flags, const Scriptable* checker) const
 	if (ga_flags & GA_NO_DEAD) {
 		if (InternalFlags & IF_REALLYDIED) return false;
 		if (Modified[IE_STATE_ID] & STATE_DEAD) return false;
-		// DCC: the fallen bleeding out are out of the fight
-		if (Modified[IE_DCC_STATE] & DCC::STATE_DYING) return false;
+		// DCC: the fallen bleeding out (or knocked out by subdual blows) are out of the fight
+		if ((Modified[IE_DCC_STATE] & DCC::STATE_DYING) || Modified[IE_DCC_SUBDUED]) return false;
 	}
 	if (ga_flags & GA_SELECT) {
 		if (UnselectableTimer) return false;
@@ -6721,6 +6722,10 @@ void Actor::DoStep(unsigned int newWalkScale, ieDword time)
 		return;
 	}
 	Movable::DoStep(newWalkScale, time);
+	// DCC: walking out of a melee gives the foes a free attack (combat.md "Withdrawal")
+	if (core->HasFeature(GFFlags::RULES_DCC) && !dccEngaged.empty()) {
+		DCCCheckWithdrawal();
+	}
 }
 
 ieDword Actor::GetNumberOfAttacks()
@@ -11880,6 +11885,9 @@ void Actor::PlayArmorSound() const
 
 bool Actor::ShouldModifyMorale() const
 {
+	// DCC: no stock morale; monsters check DCC morale at its triggers instead (ActorDCCCombat.cpp)
+	if (core->HasFeature(GFFlags::RULES_DCC)) return false;
+
 	// pst ignores it for pcs, treating it more like reputation
 	if (pstflags) {
 		return Modified[IE_EA] != EA_PC;

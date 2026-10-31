@@ -1,0 +1,30 @@
+2DA V1.0
+*
+                 ITEMTYPE  HANDS  SUBDUAL  BACKSTAB  WIZARD  WARRIOR  THIEF  DWARF  ELF  HALFLING  CLERIC_L  CLERIC_N  CLERIC_C
+BATTLEAXE        25        2      YES      *         0       1        0      1      0    0         0         0         1
+HANDAXE          25        1      YES      *         0       1        0      1      0    1         0         0         1
+BLACKJACK        DCCBJACK  *      ALWAYS   2d6       0       0        1      0      0    0         0         0         0
+BLOWGUN          DCCBLOWG  *      NO       1d5       0       0        1      0      0    0         0         0         0
+CLUB             44        *      YES      *         0       1        0      1      0    1         1         0         0
+CROSSBOW         27        *      NO       *         0       1        1      1      0    1         0         0         0
+DAGGER           16        *      NO       1d10      1       1        1      1      1    1         0         1         1
+DART             24        *      NO       *         0       1        1      0      0    0         0         0         1
+FLAIL            23        *      NO       *         0       1        0      0      0    0         0         0         1
+MORNINGSTAR      22        *      NO       *         0       1        0      1      0    0         1         1         0
+GARROTE          DCCGARRT  *      NO       3d4       0       0        1      0      0    0         0         0         0
+JAVELIN          DCCJAVLN  *      NO       *         0       1        0      1      1    1         0         0         0
+LANCE            DCCLANCE  *      NO       *         0       1        0      0      1    0         0         0         0
+LONGBOW          DCCLBOW   *      NO       *         1       1        0      0      1    0         0         0         1
+SHORTBOW         15        *      NO       *         1       1        0      1      1    1         0         0         1
+LONGSWORD        20        1      YES      *         1       1        1      1      1    0         0         1         0
+TWO_HANDED_SWORD 20        2      YES      *         0       1        0      1      1    0         0         1         0
+GREATSWORD       57        *      YES      *         0       1        0      1      1    0         0         1         0
+BASTARD_SWORD    69        *      YES      *         0       1        0      1      1    0         0         1         0
+MACE             17        *      NO       *         0       1        0      1      0    0         1         1         0
+POLEARM          30        *      NO       *         0       1        0      0      0    0         0         0         0
+SHORT_SWORD      19        *      YES      *         1       1        1      1      1    1         0         1         0
+SLING            18        *      NO       *         0       1        1      1      0    1         1         1         0
+SPEAR            29        *      YES      *         0       1        0      1      1    0         0         0         0
+STAFF            26        *      YES      *         1       1        1      0      1    1         1         1         0
+WARHAMMER        21        *      NO       *         0       1        0      1      0    0         1         0         0
+UNARMED          28        *      ALWAYS   *         1       1        1      1      1    1         1         1         1

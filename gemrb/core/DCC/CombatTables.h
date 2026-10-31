@@ -38,6 +38,7 @@
 #include "exports.h"
 
 #include "DCC/Character.h"
+#include "DCC/Classes.h"
 #include "DCC/Combat.h"
 
 #include <array>
@@ -93,12 +94,13 @@ using TableAlternatives = std::vector<TableTerm>; // the first one that applies 
 
 struct SaveSpec {
 	Save save = Save::Fort;
+	int ability = -1; // an ability check (DCC::Ability) instead of a save: STR:10:L
 	int dc = 0;
 	bool plusLevel = false; // + the attacker's level
 	bool vsAttack = false; // the DC is the attack roll's total (Mighty Deeds)
 	bool IsNone() const { return dc == 0 && !vsAttack; }
 };
-/** FORT:15:L, REF:10, WILL:20, REF:A (vs the attack roll), or * */
+/** FORT:15:L, REF:10, WILL:20, REF:A (vs the attack roll), an ability check STR:10:L, AGI:16, or * */
 GEM_EXPORT bool ParseSaveSpec(const std::string& text, SaveSpec& save);
 /** parses the EFFECTS grammar above */
 GEM_EXPORT bool ParseEffects(const std::string& text, std::vector<TableAlternatives>& effects);
@@ -230,6 +232,51 @@ private:
 /** NONE, MAX, MAX_AUTO, NORMAL */
 GEM_EXPORT bool ParseCritRule(const std::string& text, CritRule& rule);
 
+// weapons (M2.3b, dccweap.2da): training by class (classes.md), subdual damage and backstab dice
+// (equipment.md Table 3-1). A row per DCC weapon: ITEMTYPE (the IE item type, or a resref for an
+// item of its own, * none), HANDS (1, 2 or * either), SUBDUAL (NO, YES, ALWAYS), BACKSTAB (the
+// thief's backstab damage, or *) and a column per class (1 trained), the cleric's by alignment
+enum class WeaponClass : uint8_t {
+	Wizard,
+	Warrior,
+	Thief,
+	Dwarf,
+	Elf,
+	Halfling,
+	ClericLaw,
+	ClericNeutral,
+	ClericChaos,
+	count
+};
+constexpr int WEAPON_CLASS_COUNT = static_cast<int>(WeaponClass::count);
+GEM_EXPORT const char* WeaponClassKey(WeaponClass which);
+/** the column of a class (a cleric's by alignment); count for level 0 and monsters */
+GEM_EXPORT WeaponClass WeaponClassFor(ClassID classID, Alignment alignment);
+
+struct WeaponRow {
+	std::string key; // BATTLEAXE, ...
+	int itemType = -1;
+	std::string resref;
+	int hands = 0; // 0 either
+	Subdual subdual = Subdual::Never;
+	DiceExpr backstab; // none: the normal damage
+	std::array<bool, WEAPON_CLASS_COUNT> trained {};
+	bool Trained(WeaponClass which) const { return which < WeaponClass::count && trained[static_cast<size_t>(which)]; }
+};
+
+class GEM_EXPORT WeaponTable {
+public:
+	bool SetRows(std::vector<WeaponRow> newRows);
+	bool Load(const TableMgr& table);
+	bool IsEmpty() const { return rows.empty(); }
+	/** the row of an item: by resref first, then the first row of its IE item type and hands */
+	const WeaponRow* Lookup(const std::string& resref, int itemType, bool twoHanded) const;
+	const WeaponRow* Find(const std::string& key) const;
+
+private:
+	std::vector<WeaponRow> rows;
+};
+
 // everything the combat code reads (RulesData::combat)
 struct GEM_EXPORT CombatTables {
 	std::array<ResultTable, static_cast<size_t>(CritTableID::count)> crits; // by CritTableID
@@ -237,6 +284,7 @@ struct GEM_EXPORT CombatTables {
 	MonsterCritTable monsterCrits;
 	ArmorFumbleTable armorFumbles;
 	TwoWeaponTable twoWeapons;
+	WeaponTable weapons;
 
 	/** the crit table to roll on; monster tables that aren't shipped fall back to M */
 	const ResultTable* Crit(CritTableID id) const;
