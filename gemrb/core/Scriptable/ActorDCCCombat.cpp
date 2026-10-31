@@ -112,6 +112,12 @@ void Actor::DCCFeedback(String text, int type)
 	}
 }
 
+void Actor::DCCRecordLine(String text)
+{
+	combatLog.push_back(std::move(text));
+	if (combatLog.size() > 300) combatLog.pop_front();
+}
+
 std::vector<String> Actor::DCCCombatLog(bool clear)
 {
 	std::vector<String> lines(combatLog.begin(), combatLog.end());

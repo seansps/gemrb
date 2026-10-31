@@ -342,7 +342,7 @@ bool Actor::DCCCanCast(const ResRef& base, String* why) const
 		// a lost spell only with spellburn of at least its level (magic.md §6)
 		if (kind != CasterKind::Wizard) return refuse(u"lost the spell for the day");
 		std::array<int, 3> current { Signed(GetStat(IE_STR)), Signed(GetStat(IE_DEX)), Signed(GetStat(IE_CON)) };
-		if (dccExt.burn.policy == SpellburnPolicy::Never || SpellburnMax(current) < info->level) return refuse(u"lost the spell for the day");
+		if (SpellburnMax(current) < info->level) return refuse(u"lost the spell for the day");
 	}
 	return true;
 }
@@ -386,7 +386,7 @@ void Actor::DCCBeginCast(const ResRef& base, bool ask)
 	bool lost = known && (known->flags & SPELL_LOST);
 	const Spellburn& settings = dccExt.burn;
 	int preset = settings.policy == SpellburnPolicy::Never ? 0 : settings.preset;
-	if (lost) preset = std::max(preset, info->level);
+	if (lost && settings.policy != SpellburnPolicy::Never) preset = std::max(preset, info->level);
 	dccCast.burn = PresetBurn(this, preset);
 	dccCast.decided = true;
 	if (dccNextBurnSet) {
@@ -618,7 +618,8 @@ ResRef Actor::DCCCastCheck(const ResRef& base, Scriptable* target, const Point& 
 	// the roll
 	int natural = 0;
 	int die = DCCCheckDie(known, natural);
-	int other = Signed(GetStat(IE_DCC_SPELLMOD)) + Signed(GetStat(IE_DCC_ROLLMOD)) + GetDCCAugurBonus(AugurRoll::SpellCheck);
+	int other = Signed(GetStat(IE_DCC_SPELLMOD)) + Signed(GetStat(IE_DCC_ROLLMOD)) + GetDCCAugurBonus(AugurRoll::SpellCheck) + dccNextSituational;
+	dccNextSituational = 0;
 	if (known->flags & SPELL_PENALTY) other -= 4;
 	// mercurial magic before the roll counts: 97 drains the nearest creature, 72 casts in a row, 73 swings
 	for (uint8_t entry : known->mercurial) {
@@ -691,11 +692,11 @@ ResRef Actor::DCCCastCheck(const ResRef& base, Scriptable* target, const Point& 
 		outcome = fmt::format(u"{}: {}", range, text);
 		if (band->lost && kind == CasterKind::Wizard) outcome += u" (lost)";
 	}
-	String line = fmt::format(u"{} casts {}: d{} {}{} = {}: {}", GetName(), Widen(info->name), die, natural, parts, result.total, outcome);
+	String line = fmt::format(u"{} casts {}: d{} {}{} = {}: {}", GetName(), Widen(info->name), die, result.natural, parts, result.total, outcome);
 	Feedback(std::move(line));
 
 	record.die = die;
-	record.natural = natural;
+	record.natural = result.natural;
 	record.total = result.total;
 	record.bandIndex = bandIndex;
 	record.bandMin = band ? band->min : 0;

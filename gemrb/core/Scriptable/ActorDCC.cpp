@@ -362,6 +362,7 @@ bool Actor::GetSavingThrowDCC(ieDword type, int modifier, const Effect* fx)
 		String msg = fmt::format(u"{} save: {} {:+} = {} vs DC {}: {}", SaveName(save), result.natural, result.total - result.natural, result.total, result.target,
 					 result.success ? u"success" : (result.cursed ? u"failed (cursed by fortune)" : u"failed"));
 		Log(COMBAT, "DCC", "{}: {}", fmt::WideToChar { GetName() }, fmt::WideToChar { msg });
+		DCCRecordLine(fmt::format(u"{}: {}", GetName(), msg));
 		if (core->HasFeedback(FT_COMBAT)) displaymsg->DisplayStringName(std::move(msg), GUIColors::WHITE, this);
 	}
 	lastSave.prevType = type;

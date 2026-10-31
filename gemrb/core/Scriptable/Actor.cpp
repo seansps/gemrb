@@ -4233,6 +4233,9 @@ bool Actor::HandleCastingStance(const ResRef& spellResRef, bool deplete, bool in
 		String why;
 		if (!DCCCanCast(spellResRef, &why)) {
 			DCCFeedback(fmt::format(u"{} can't cast that: {}", GetName(), why), FT_COMBAT);
+			dccLastCast = DCCCastRecord();
+			dccLastCast.spell = spellResRef.c_str();
+			dccLastCast.notes.push_back(fmt::format("{}", fmt::WideToChar { why }));
 			SetStance(IE_ANI_READY);
 			return true;
 		}

@@ -7619,11 +7619,12 @@ static PyObject* GemRB_DCCLearnSpell(PyObject* /*self*/, PyObject* args)
 PyDoc_STRVAR(GemRB_DCCCast__doc,
 	     "===== DCCCast =====\n\
 \n\
-**Prototype:** GemRB.DCCCast (globalID, spell, targetID[, burn])\n\
+**Prototype:** GemRB.DCCCast (globalID, spell, targetID[, burn[, situational]])\n\
 \n\
 **Description:** Casts a DCC spell at once (no casting time) with its spell check, for tests \n\
 and scripts: the band's SPL, the check total as its DC, loss, corruption, disapproval. burn \n\
-is a list [Str, Agi, Sta] of spellburn instead of the character's policy. Use DCCForceDice \n\
+is a list [Str, Agi, Sta] of spellburn instead of the character's policy (None: the policy); \n\
+situational a modifier for this check only. Use DCCForceDice \n\
 for the dice. Host or single player only.\n\
 \n\
 **Return value:** dict, see GetDCCLastCast");
@@ -7634,7 +7635,8 @@ static PyObject* GemRB_DCCCast(PyObject* /*self*/, PyObject* args)
 	char* spell = nullptr;
 	int targetID;
 	PyObject* burn = nullptr;
-	PARSE_ARGS(args, "isi|O", &globalID, &spell, &targetID, &burn);
+	int situational = 0;
+	PARSE_ARGS(args, "isi|Oi", &globalID, &spell, &targetID, &burn, &situational);
 	GET_GAME();
 	GET_ACTOR_GLOBAL();
 	const NetSession* net = core->GetNetSession();
@@ -7647,7 +7649,9 @@ static PyObject* GemRB_DCCCast(PyObject* /*self*/, PyObject* args)
 		}
 		actor->dccNextBurnSet = true;
 	}
+	actor->dccNextSituational = situational;
 	actor->DirectlyCastSpell(target, ResRef(spell), 0, true, false);
+	actor->dccNextSituational = 0;
 	actor->dccNextBurnSet = false;
 	return DCCCastDict(actor->GetDCCLastCast());
 }

@@ -794,6 +794,8 @@ public:
 	static std::vector<String> DCCCombatLog(bool clear = false);
 	/** adds a line to the DCC combat log (shown with feedback of that type, replicated to co-op clients) */
 	static void DCCFeedback(String text, int feedbackType);
+	/** adds a line to the DCC combat log only (lines shown another way, like saves) */
+	static void DCCRecordLine(String text);
 	/** an attack action waits for a Luck prompt's answer */
 	bool DCCAttackPending() const { return dccPendingAttack != nullptr; }
 
@@ -858,6 +860,9 @@ public:
 	/** tests and scripts: the next cast's spellburn (Str, Agi, Sta), instead of the policy and prompt */
 	std::array<int, 3> dccNextBurn {};
 	bool dccNextBurnSet = false;
+	/** scripts and tests: a situational modifier for the next spell check (Blessing's -1/-2 for
+	 * another alignment, +1..+4 for an auspicious moment); used up by the check */
+	int dccNextSituational = 0;
 	/** the disapproval roll of a natural in the range (Table 5-7) */
 	void DCCDisapprovalPublic(int natural);
 	void DCCExtChanged();
