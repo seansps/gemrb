@@ -1,0 +1,11 @@
+2DA V1.0
+*
+     SUB   EFFECTS                                  TEXT
+1    *     TODO:part_animal_transformation^ALLY     the_nearest_ally_is_partly_turned_into_an_animal
+2    *     TODO:another_spell_of_the_level_fires    another_spell_fires_instead
+3    d6    *                                        a_rain_of_junk_falls
+4    *     DMG:1d3xSL^NEAREST                       an_explosion_on_the_nearest_creature
+5    *     TODO:turned_into_an_element^RANDOM6      a_nearby_creature_is_turned_to_an_element
+6    *     MINORROLL:1d12+5^RANDOM6                 a_nearby_creature_is_corrupted
+7    *     *                                        fireworks_light_up_the_area
+8    *     *                                        ash_coats_everything_nearby

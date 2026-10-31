@@ -1,0 +1,23 @@
+2DA V1.0
+*
+     SUB   EFFECTS                                  TEXT
+1    *     *                                        must_chant_for_10_minutes
+2    *     SPELLMOD:-1:HEAL                         must_pray_for_an_hour:_-1_to_spell_checks_until_then
+3    *     SPELLMOD:-1:HEAL                         must_win_a_convert:_-1_to_spell_checks_until_then
+4    *     SPELLMOD:-1:HEAL                         -1_to_spell_checks_until_tomorrow
+5    *     BLOCK:SPELLS:1T                          must_humble_itself:_no_spells_for_a_turn
+6    *     LOHMOD:-1:PERM                           -1_to_lay_on_hands_until_a_healing_quest
+7    *     ABIL:STR:1,ABIL:AGI:1,ABIL:STA:1         -1_Str,_Agi_and_Sta
+8    *     SPELLPEN:-4                              -4_to_checks_with_this_until_tomorrow
+9    *     SPELLMOD:-2:HEAL                         -2_to_spell_checks_until_tomorrow
+10   *     LOSESPELLS:1:1                           loses_a_level_1_spell_until_tomorrow
+11   *     SPELLMOD:-2:PERM:MEDITATE                -2_to_spell_checks_until_it_atones_(Will_DC_15_a_night)
+12   *     TODO:no_XP_for_the_rest_of_the_day       earns_no_XP_today
+13   *     LOSESPELLS:2:1                           loses_two_level_1_spells_until_tomorrow
+14   *     SPELLMOD:-4:PERM:TITHE                   -4_to_spell_checks_until_it_tithes
+15   *     NORESET                                  the_range_won't_reset_tomorrow
+16   *     BLOCK:LOH:1d4D                           no_lay_on_hands_for_1d4_days
+17   *     LOSESPELLS:1d4+1                         loses_1d4+1_spells_until_tomorrow
+18   *     BLOCK:TURN:1d4D                          no_turning_for_1d4_days
+19   *     MUT:MARK:1W                              marked_as_unfaithful_for_a_week
+20   *     BLOCK:LOHONCE:1D                         lay_on_hands_once_per_creature_for_a_day

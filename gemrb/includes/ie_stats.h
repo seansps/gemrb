@@ -628,7 +628,15 @@ namespace GemRB {
 // the CRE's DCC block, version 3 (base, saved): battle rage and the combat options
 #define IE_DCC_RAGE       311 // Personality/Intelligence points spent on a battle rage crit
 #define IE_DCC_COMBATOPT  312 // DCC::CombatOption bits: next attack a charge or a grapple, subdual blows
-#define IE_DCC_LAST       312
+// spellcasting (M2.5): totals worked out by RefreshDCCStats, or set by DCC:Magic effects (modified)
+#define IE_DCC_SPELLMOD   313 // flat spell check modifier (disapproval penalties, blessings of the gods)
+#define IE_DCC_CASTERLVL  314 // caster level: the class level of a wizard, elf or cleric, else 0
+#define IE_DCC_ARMORPEN   315 // armor check penalty on a wizard's or elf's spell checks (0 or less)
+#define IE_DCC_MAXSPELL   316 // highest spell level the caster can cast (class table and Table 1-1)
+#define IE_DCC_NOCAST     317 // DCC::MagicBlock bits: no spells, no lay on hands, no turning, ...
+#define IE_DCC_LOHMOD     318 // lay on hands check modifier (disapproval 6)
+#define IE_DCC_MUTATION   319 // DCC::Mutation bits of the corruptions (the visual hooks and the record screen)
+#define IE_DCC_LAST       319
 
 }
 

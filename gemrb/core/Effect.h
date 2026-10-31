@@ -143,6 +143,8 @@ struct GEM_EXPORT Effect {
 	ieDword RandomValue = 0;
 
 	ieDword SpellLevel = 0; // Power does not always contain the Source level, which is needed in iwd2; items will be left at 0
+	// DCC (ethren): the spell check total of the casting, the DC of the effect's save; 0 for none
+	ieDword DCCSpellCheck = 0;
 
 public:
 	//don't modify position in case it was already set

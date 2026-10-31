@@ -335,12 +335,19 @@ MonsterCrit MonsterCritTable::Lookup(int hd, MonsterType type) const
 bool ArmorFumbleTable::Load(const TableMgr& table)
 {
 	dice.clear();
+	checks.clear();
 	auto dieCol = table.GetColumnIndex("DIE");
+	auto checkCol = table.GetColumnIndex("CHECK");
 	if (dieCol == TableMgr::npos) return false;
 	for (TableMgr::index_t row = 0; row < table.GetRowCount(); ++row) {
 		int die = 0;
 		if (!valid_signednumber(table.QueryField(row, dieCol).c_str(), die) || die < 0) return false;
 		dice[Upper(table.GetRowName(row))] = die;
+		int check = 0;
+		if (checkCol != TableMgr::npos) {
+			if (!valid_signednumber(table.QueryField(row, checkCol).c_str(), check) || check > 0) return false;
+			checks[Upper(table.GetRowName(row))] = check;
+		}
 	}
 	return !dice.empty();
 }
@@ -363,6 +370,29 @@ int ArmorFumbleTable::ShieldDie(const std::string& resref) const
 	int die = resref.empty() ? -1 : Find(resref);
 	if (die < 0) die = Find("SHIELD");
 	return std::max(0, die);
+}
+
+int ArmorFumbleTable::FindCheck(const std::string& key, bool& found) const
+{
+	auto it = checks.find(Upper(key));
+	found = it != checks.end();
+	return found ? it->second : 0;
+}
+
+int ArmorFumbleTable::ArmorCheck(const std::string& resref, const std::string& animation) const
+{
+	bool found = false;
+	int check = resref.empty() ? 0 : FindCheck(resref, found);
+	if (!found && !animation.empty()) check = FindCheck("ANIM_" + animation, found);
+	return std::min(0, check);
+}
+
+int ArmorFumbleTable::ShieldCheck(const std::string& resref) const
+{
+	bool found = false;
+	int check = resref.empty() ? 0 : FindCheck(resref, found);
+	if (!found) check = FindCheck("SHIELD", found);
+	return std::min(0, check);
 }
 
 bool ParseCritRule(const std::string& text, CritRule& rule)

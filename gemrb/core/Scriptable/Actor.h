@@ -26,7 +26,9 @@
 #include "DCC/Character.h"
 #include "DCC/Combat.h"
 #include "DCC/Deeds.h"
+#include "DCC/Extension.h"
 #include "DCC/Luck.h"
+#include "DCC/Magic.h"
 #include "Scriptable/Movable.h"
 #include "Scriptable/PCStatStruct.h"
 
@@ -44,7 +46,7 @@ class DataFileMgr;
 class Map;
 enum class Feat : uint8_t;
 
-#define MAX_STATS 320 // 256 IE stats, then the DCC ones (ie_stats.h, IE_DCC_*)
+#define MAX_STATS 512 // 256 IE stats, then the DCC ones (ie_stats.h, IE_DCC_*); NET_MAX_STATS in Net/Protocol.h matches
 #define MAX_LEVEL 128
 
 //lucky roll
@@ -625,6 +627,29 @@ private:
 	struct DCCHeldSave;
 	std::shared_ptr<DCCHeldSave> dccHeldSave;
 	bool DCCAskSaveBurn(const Effect& fx, ieDword type, const DCC::RollResult& roll);
+	/* DCC spellcasting (M2.5, ActorDCCMagic.cpp), not saved: the cast in progress */
+	struct DCCCastState {
+		ResRef spell; // the base spell being cast
+		std::array<int, 3> burn {}; // Str, Agi, Sta to burn
+		bool decided = false; // the burn is known (asked and answered, or the policy)
+		uint32_t prompt = 0; // the spellburn prompt waiting for an answer
+		int total = 0; // the check total: the DC of the band's effects
+		int level = 1;
+		int durationSeconds = -1; // the band's rolled duration (DUR), -1 none
+		int repeat = 0; // REPEAT: more casts of the band
+		int targets = 0; // TARGETS: up to this many more targets near the first
+		int radius = 0; // feet around the target for TARGETS
+		bool area = false; // AREA: every foe within radius
+		ResRef band;
+		ieDword castRound = 0; // the IE round of the last check, for the second action die
+		int castsThisRound = 0;
+	} dccCast;
+	std::set<ieDword> dccLaidHands; // Table 5-7 20: who got a lay on hands today
+	int DCCCheckDie(const DCC::KnownSpell* known, int& natural);
+	void DCCNatOne(const DCC::SpellInfo& info, const std::string& spell, bool burning);
+	void DCCDisapproval(int natural, const std::string& spell);
+	void DCCMercurialAfter(const DCC::SpellInfo& info, DCC::KnownSpell* known, bool success);
+	bool DCCOfferCorruptionBurn(const DCC::Corruption& corruption, int spellLevel, const std::string& text);
 	/* DCC combat completion (M2.3b, ActorDCCCombat.cpp), not saved */
 	ieDword dccCombatTime = 0; // game time this actor last attacked or was attacked: it's in a fight
 	std::map<ieDword, ieDword> dccEngaged; // foes in melee with it: global ID -> game time of the last swing
@@ -819,6 +844,77 @@ public:
 	/** the signature deed (IE_DCC_DEED) and the one-off deed queued for the next attack */
 	DCC::Deed GetDCCSignatureDeed() const;
 	DCC::Deed GetDCCQueuedDeed() const;
+
+	// DCC spellcasting (M2.5, ActorDCCMagic.cpp)
+	/** the lists and settings that don't fit in stats: known spells (mercurial magic, manifestation,
+	 * lost for the day), corruptions, spellburn, disapproval. Saved as the CRE's extension and
+	 * replicated (NetDCCExtension); call DCCExtChanged after changing it */
+	DCC::CharacterExt dccExt;
+	uint32_t dccExtRevision = 0;
+	uint32_t dccMutations = 0; // DCC::Mutation bits of the corruption list (DCCSyncSpellbook)
+	/** the disapproval roll of a natural in the range (Table 5-7) */
+	void DCCDisapprovalPublic(int natural);
+	void DCCExtChanged();
+	/** wizard (and elf), cleric or none, by class and level */
+	DCC::CasterKind GetDCCCasterKind() const;
+	/** learns a DCC spell (a base spell of dccspell.2da): the spellbook and the extension; wizards
+	 * and elves roll mercurial magic (d% + Luck mod x 10), everyone the manifestation. Returns the
+	 * first mercurial result (0 for none), -1 if it isn't a DCC spell or is known already */
+	int DCCLearnSpell(const ResRef& base, bool rolls = true);
+	/** the spellbook follows the extension: one memorized copy of each known DCC spell, depleted
+	 * while the spell is lost; the action bar shows what can be cast */
+	void DCCSyncSpellbook();
+	/** whether a DCC spell can be cast now (known, not lost unless spellburn pays for it, the level,
+	 * blocks); why holds the reason */
+	bool DCCCanCast(const ResRef& base, String* why = nullptr) const;
+	/** cast start (Scriptable::CastSpell): the spellburn decision, a prompt for party members */
+	void DCCBeginCast(const ResRef& base, bool ask = true);
+	/** cast end (CastSpellEnd): rolls the spell check and runs what it brings; returns the band's SPL
+	 * to cast (empty: nothing to cast). The check total becomes the DC of its effects */
+	ResRef DCCCastCheck(const ResRef& base, Scriptable* target, const Point& targetPos);
+	/** the band SPL's effects as cast: the check total as their DC, a rolled duration */
+	void DCCStampSpell(class Spell& spl) const;
+	/** the extra casts of a band (more missiles, more targets) after the main one */
+	void DCCCastExtras(Scriptable* target, int level);
+	/** the end of a DCC cast: the extras, then the check total stops being a DC */
+	void DCCEndCast(Scriptable* target, int level);
+	/** a night's rest for magic: lost spells come back, the disapproval range resets, burned
+	 * points come back 1 a day without spellburn, penalties "until tomorrow" end */
+	void DCCRestMagic();
+	/** runs magic effect terms (corruption, misfire, disapproval, mercurial results) on subject;
+	 * returns the log's words */
+	String DCCMagicEffects(const std::string& effects, Actor* subject, int spellLevel, int sub = 0, const std::string& save = "");
+	/** a corruption: added to the list and its effects applied (after the Luck offer) */
+	void DCCAddCorruption(const DCC::Corruption& corruption, int spellLevel);
+	/** rolls a generic corruption (Table 5-3/5-4/5-5 by table, 1d10 - level + Luck mod, or a fixed
+	 * roll) and offers the Luck burn; returns the row */
+	int DCCCorrupt(DCC::CorruptionTable table, int spellLevel, const std::string& spell, int roll = 0);
+	/** cleric: lay on hands (classes.md); returns the hp healed, -1 if it couldn't be tried */
+	int DCCLayOnHands(Actor* target, int natural = 0);
+	/** cleric: turn unholy (combat.md Table 4-4) on the unholy creatures around; returns the number turned
+	 * or destroyed, -1 if it couldn't be tried */
+	int DCCTurnUnholy(int natural = 0);
+	/** cleric: sacrifice gold to narrow the disapproval range (50 gp a point); returns the points */
+	int DCCAtone(int gold);
+	/** the record of the last spell check (Python, tests) */
+	struct DCCCastRecord {
+		std::string spell; // the base spell
+		std::string band; // the band SPL
+		int die = 0, natural = 0, total = 0, bandIndex = -1, bandMin = 0;
+		bool success = false, lost = false, critical = false, natOne = false, disapproval = false, cursed = false;
+		int burn = 0, burnBonus = 0, mercurial = 0, repeat = 0, targets = 0, disapprovalRoll = 0, rangeAfter = 0;
+		uint32_t natOneOutcome = 0;
+		int corruptionRow = 0, corruptionTable = -1, misfireRoll = 0;
+		bool corruptionCancelled = false;
+		std::vector<std::string> notes;
+	};
+	DCCCastRecord dccLastCast;
+	const DCCCastRecord& GetDCCLastCast() const { return dccLastCast; }
+	/** the crit table grammar (EFFECTS, an optional SAVE) run on subject, this actor causing it
+	 * (its dice; level for the save's :L); damage lands at once. Returns the log's words */
+	String DCCApplyTableEffects(const std::string& effects, Actor* subject, const std::string& save = "", int level = 0);
+	/** the settings of spellburn and the Luck that cancels corruption */
+	void SetDCCSpellburn(int policy, int preset, int corruption);
 	/* returns the weapon proficiency stat of the actor */
 	int GetProficiency(ieByte proftype) const;
 	/** Returns true if the actor is targetable */

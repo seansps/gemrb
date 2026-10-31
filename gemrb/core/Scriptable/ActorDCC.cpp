@@ -13,11 +13,13 @@
 #include "Game.h"
 #include "Interface.h"
 #include "Map.h"
+#include "Item.h"
 #include "Prompts.h"
 #include "RNG.h"
 
 #include "DCC/Combat.h"
 #include "DCC/Luck.h"
+#include "DCC/Magic.h"
 #include "DCC/Rules.h"
 #include "DCC/Stats.h"
 #include "GUI/GameControl.h"
@@ -191,6 +193,39 @@ void Actor::RefreshDCCStats(const stats_t& previous)
 	Modified[IE_DCC_INIT] = Signed(Modified[IE_DCC_INIT]) + InitiativeMod(mod(Ability::Agi), warriorLevel, GetDCCAugurBonus(AugurRoll::Initiative));
 	Modified[IE_DCC_SPEED] = Speed(Signed(Modified[IE_DCC_SPEED]), GetDCCAugurBonus(AugurRoll::Speed));
 
+	// spellcasting (M2.5): caster level, the armor check penalty (wizards and elves only), the
+	// highest castable spell level (class table, capped by Int or Per on Table 1-1), the mutations
+	CasterKind caster = GetDCCCasterKind();
+	int casterLevel = caster != CasterKind::None ? Signed(BaseStats[IE_LEVEL]) : 0;
+	Modified[IE_DCC_CASTERLVL] = Signed(Modified[IE_DCC_CASTERLVL]) + casterLevel;
+	int armorPenalty = 0;
+	if (caster == CasterKind::Wizard) {
+		const CREItem* armorItem = inventory.GetSlotItem(Inventory::GetArmorSlot());
+		if (armorItem) {
+			std::string animation;
+			const Item* itm = gamedata->GetItem(armorItem->ItemResRef, true);
+			if (itm) {
+				animation = itm->AnimationType.c_str();
+				gamedata->FreeItem(itm, armorItem->ItemResRef);
+			}
+			armorPenalty += rules->combat.armorFumbles.ArmorCheck(armorItem->ItemResRef.c_str(), animation);
+		}
+		int shieldSlot = IsDualWielding() ? -1 : inventory.GetShieldSlot();
+		const CREItem* shieldItem = shieldSlot >= 0 ? inventory.GetSlotItem(shieldSlot) : nullptr;
+		if (shieldItem) armorPenalty += rules->combat.armorFumbles.ShieldCheck(shieldItem->ItemResRef.c_str());
+	}
+	Modified[IE_DCC_ARMORPEN] = Signed(Modified[IE_DCC_ARMORPEN]) + armorPenalty;
+	int maxSpell = 0;
+	if (caster != CasterKind::None) {
+		const LevelRow* row = rules->classes.Row(BaseStats[IE_CLASS], BaseStats[IE_LEVEL]);
+		int score = current[static_cast<size_t>(caster == CasterKind::Cleric ? Ability::Per : Ability::Int)];
+		maxSpell = std::min(row ? row->maxSpellLevel : 0, core->GetDCCAbilityBonus(STAT_DCC_MAX_SPELL_LEVEL, score));
+	}
+	Modified[IE_DCC_MAXSPELL] = std::max(0, maxSpell);
+	Modified[IE_DCC_MUTATION] |= dccMutations;
+	uint32_t tint = MutationTint(Modified[IE_DCC_MUTATION]);
+	if (tint) SetColorMod(0xff, RGBModifier::TINT, -1, Color((tint >> 16) & 0xff, (tint >> 8) & 0xff, tint & 0xff, 0xff));
+
 	// the states at 0 (combat.md, Ethren design proposal); the dead and dying are past them
 	uint32_t states = StatesAtZero(current, apply);
 	if (Modified[IE_DCC_BLEED]) states |= STATE_DYING;
@@ -283,6 +318,7 @@ static bool IsLethalEffect(const Effect* fx)
 static int EffectSaveDC(const Effect* fx)
 {
 	if (!fx) return DEFAULT_SAVE_DC;
+	if (fx->DCCSpellCheck) return static_cast<int>(fx->DCCSpellCheck);
 	return DefaultSaveDC(fx->SpellLevel);
 }
 
@@ -467,11 +503,15 @@ void Actor::DCCRestHeal(bool bedRest)
 	for (int i = 0; i < ABILITY_COUNT; ++i) {
 		Ability ability = static_cast<Ability>(i);
 		int loss = Signed(BaseStats[LossStat(ability)]);
-		if (loss <= 0) continue;
-		SetBase(LossStat(ability), LossAfterRest(ability, loss, bedRest));
+		// spellburn's points come back their own way (DCCRestMagic), not with the night's healing
+		int burned = i < 3 ? int(dccExt.burn.points[size_t(i)]) : 0;
+		if (loss - burned <= 0) continue;
+		SetBase(LossStat(ability), burned + LossAfterRest(ability, loss - burned, bedRest));
 	}
 	// thieves and halflings get burned Luck back, up to the natural maximum (luck.md)
 	DCCRecoverLuck();
+	// spells come back, disapproval resets, spellburn recovers (M2.5)
+	DCCRestMagic();
 }
 
 }

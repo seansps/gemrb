@@ -1637,6 +1637,37 @@ static String Joined(const std::vector<String>& notes)
 	return text;
 }
 
+// M2.5: the crit table grammar for magic results (corruption, misfire, disapproval, mercurial
+// magic): this actor causes them (its dice), subject suffers them; damage lands at once
+String Actor::DCCApplyTableEffects(const std::string& effects, Actor* subject, const std::string& save, int level)
+{
+	if (!subject || effects.empty() || effects == "*") return u"";
+	std::vector<TableAlternatives> parsed;
+	if (!ParseEffects(effects, parsed)) {
+		Log(WARNING, "DCC", "Bad magic result effects '{}'", effects);
+		return u"";
+	}
+	SaveSpec spec;
+	if (!save.empty() && !ParseSaveSpec(save, spec)) spec = SaveSpec();
+	RowContext ctx;
+	ctx.attacker = this;
+	ctx.target = subject;
+	ctx.subject = subject;
+	ctx.crit = true;
+	ctx.level = level;
+	ctx.save = &spec;
+	WeaponInfo wi;
+	for (const auto& alternatives : parsed) {
+		for (const auto& term : alternatives) {
+			if (!TermApplies(term, ctx)) continue;
+			ApplyTerm(term, ctx, wi);
+			break;
+		}
+	}
+	if (ctx.extraDamage > 0) DirectDamage(subject, ctx.extraDamage, this);
+	return Joined(ctx.notes);
+}
+
 void Actor::DCCResolveSwing(DCCSwing& swing, Actor* target, int depth, DCCAttackState* state)
 {
 	const RulesData* rules = Rules();

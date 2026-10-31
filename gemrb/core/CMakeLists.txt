@@ -25,7 +25,9 @@ FILE(GLOB gemrb_core_LIB_SRCS
 	DCC/CombatTables.cpp
 	DCC/Deeds.cpp
 	DCC/DiceChain.cpp
+	DCC/Extension.cpp
 	DCC/Luck.cpp
+	DCC/Magic.cpp
 	DCC/Rules.cpp
 	Debug.cpp
 	Dialog.cpp
@@ -130,6 +132,7 @@ FILE(GLOB gemrb_core_LIB_SRCS
 	Scriptable/ActorDCC.cpp
 	Scriptable/ActorDCCCombat.cpp
 	Scriptable/ActorDCCLuck.cpp
+	Scriptable/ActorDCCMagic.cpp
 	Scriptable/CombatInfo.cpp
 	Scriptable/Container.cpp
 	Scriptable/Door.cpp

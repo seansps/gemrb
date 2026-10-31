@@ -193,10 +193,17 @@ public:
 	int ArmorDie(const std::string& resref, const std::string& animation) const;
 	/** the die of any shield (the SHIELD row, or an entry for the resref) */
 	int ShieldDie(const std::string& resref) const;
+	/** M2.5: the armor check penalty (Table 3-3; the optional CHECK column, 0 or less) of an armor
+	 * or a shield, found the same way as the die */
+	int ArmorCheck(const std::string& resref, const std::string& animation) const;
+	int ShieldCheck(const std::string& resref) const;
+	void SetCheck(const std::string& key, int check) { checks[key] = check; }
 
 private:
 	int Find(const std::string& key) const;
+	int FindCheck(const std::string& key, bool& found) const;
 	std::map<std::string, int> dice; // upper case keys
+	std::map<std::string, int> checks;
 };
 
 // two-weapon fighting (Table 4-3)

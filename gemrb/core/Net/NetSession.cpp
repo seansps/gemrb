@@ -2188,6 +2188,10 @@ struct NetSession::Impl {
 		return msg;
 	}
 
+	// every actor stat travels, the DCC ones past the IE 256 included
+	static_assert(MAX_STATS <= NET_MAX_STATS, "NetActorStats can't carry every actor stat");
+	static_assert(IE_DCC_LAST < MAX_STATS, "a DCC stat is past MAX_STATS");
+
 	static std::vector<NetStatEntry> ActorStats(const Actor* actor)
 	{
 		std::vector<NetStatEntry> list(MAX_STATS);

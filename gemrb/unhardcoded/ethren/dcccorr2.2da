@@ -1,0 +1,13 @@
+2DA V1.0
+*
+     SUB   EFFECTS                                  TEXT
+1    *     ABIL:STR:1d4:PERM,MUT:WITHER             wasting:_-1d4_Str_for_good
+2    *     MUT:FACE                                 a_second_face_grows_on_the_back
+3    *     ABIL:STA:1:PERM,MUT:WITHER               loses_weight:_-1_Sta_for_good
+4    *     ABIL:AGI:1:PERM,MUT:BLOAT,TODO:speed_-5'_for_good gains_weight:_-1_Agi_for_good
+5    *     MUT:CRACKLE                              crackles_with_magical_energy
+6    *     MUT:HEIGHT                               grows_taller_or_shorter
+7    d3    MUT:BEAST,1#TODO:claw_attack_1d6         grows_claws,_cloven_hooves_or_goat_legs
+8    d10   MUT:SKIN                                 skin_changes_colour_and_texture
+9    *     MUT:HORNS                                horns_start_to_grow
+10   *     MUT:TONGUE                               forked_tongue_and_slit_nostrils
