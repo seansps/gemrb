@@ -464,7 +464,9 @@ TEST(DCC_Tables, CritAndFumbleKeysKnown)
 						   // M2.3b
 						   "INJURY", "RAGE", "HALFACT", "ONEACTION", "FOUL", "DOWNED", "STUCK", "WOUND", "CHOKE", "NUMB",
 						   "HALFDMG", "DOUBLEDMG", "SLEEP", "ROLLMOD", "MAXHP", "XP", "REROLL", "ABILTO", "LIMBS", "SMASHGEAR",
-						   "FLING", "CLEAVE", "RAMPAGE", "AGAIN", "MORALECHECK", "DRAIN", "ATTACKER" };
+						   "FLING", "CLEAVE", "RAMPAGE", "AGAIN", "MORALECHECK", "DRAIN", "ATTACKER",
+						   // M2.5
+						   "CORRUPT" };
 	static const std::set<std::string> conditions { "", "NOHELM", "NOSHIELD", "ARMORED", "HASWEAPON" };
 	for (const char* name : { "dcccrit1", "dcccrit2", "dcccrit3", "dcccrit4", "dcccrit5", "dcccritm", "dccfumbl", "dcccritd", "dcccritn", "dcccritg", "dcccritu" }) {
 		auto table = Open2DA(name);
@@ -838,5 +840,134 @@ TEST(DCC_Tables, MightyDeeds)
 		EXPECT_EQ(std::stoi(term.args[1]), guard[roll - 3][1]) << roll;
 	}
 }
+// --- spellcasting (M2.5) ------------------------------------------------------------
+
+static MagicTableList LoadMagic(const char* name)
+{
+	MagicTableList list;
+	auto table = Open2DA(name);
+	EXPECT_TRUE(table);
+	if (table) EXPECT_TRUE(list.Load(*table)) << name;
+	return list;
+}
+
+// Tables 5-3, 5-4, 5-5 (magic.md §8): rows 1-10, the mechanical rows as written
+TEST(DCC_Tables, CorruptionTables)
+{
+	for (const char* name : { "dcccorr1", "dcccorr2", "dcccorr3" }) {
+		MagicTableList list = LoadMagic(name);
+		ASSERT_EQ(list.Rows().size(), 10u) << name;
+		for (int roll = 1; roll <= 10; ++roll) {
+			EXPECT_EQ(list.Lookup(roll)->roll, roll) << name;
+		}
+	}
+	MagicTableList minor = LoadMagic("dcccorr1");
+	EXPECT_NE(minor.Lookup(1)->effects.find("ABIL:PER:1:PERM"), std::string::npos); // pustules: -1 Per for good
+	EXPECT_EQ(minor.Lookup(4)->subDie, 4); // eyes, 1d4
+	EXPECT_EQ(minor.Lookup(6)->subDie, 5); // ears, 1d5
+	EXPECT_NE(minor.Lookup(10)->effects.find("UNCON:1d6H"), std::string::npos);
+	EXPECT_EQ(minor.Lookup(-3)->roll, 1); // 1 or lower
+	EXPECT_EQ(minor.Lookup(14)->roll, 10); // 10 or higher
+	MagicTableList major = LoadMagic("dcccorr2");
+	EXPECT_NE(major.Lookup(1)->effects.find("ABIL:STR:1d4:PERM"), std::string::npos);
+	EXPECT_NE(major.Lookup(3)->effects.find("ABIL:STA:1:PERM"), std::string::npos);
+	EXPECT_NE(major.Lookup(4)->effects.find("ABIL:AGI:1:PERM"), std::string::npos);
+	EXPECT_EQ(major.Lookup(7)->subDie, 3);
+	EXPECT_EQ(major.Lookup(8)->subDie, 10); // skin, 1d10 (Ethren: the book's 1d8 lists 10)
+	MagicTableList greater = LoadMagic("dcccorr3");
+	EXPECT_NE(greater.Lookup(1)->effects.find("DMG:3d6"), std::string::npos);
+	EXPECT_NE(greater.Lookup(1)->effects.find("ABIL:LCK:2:PERM"), std::string::npos);
+	EXPECT_EQ(greater.Lookup(8)->subDie, 6);
+	EXPECT_EQ(greater.Lookup(9)->subDie, 4); // Ethren: the book's 1d6 lists 4
+}
+
+// Table 5-6 (generic misfire, d8), Table 5-7 (disapproval, 1-20), Table 5-1 (spellburn, d24)
+TEST(DCC_Tables, MisfireDisapprovalSpellburn)
+{
+	MagicTableList misfire = LoadMagic("dccmisf");
+	ASSERT_EQ(misfire.Rows().size(), 8u);
+	EXPECT_NE(misfire.Lookup(4)->effects.find("DMG:1d3xSL^NEAREST"), std::string::npos);
+	EXPECT_NE(misfire.Lookup(6)->effects.find("MINORROLL:1d12+5"), std::string::npos);
+	MagicTableList disapproval = LoadMagic("dccdisap");
+	ASSERT_EQ(disapproval.Rows().size(), 20u);
+	EXPECT_EQ(disapproval.Lookup(4)->effects, "SPELLMOD:-1:HEAL");
+	EXPECT_EQ(disapproval.Lookup(9)->effects, "SPELLMOD:-2:HEAL");
+	EXPECT_EQ(disapproval.Lookup(10)->effects, "LOSESPELLS:1:1");
+	EXPECT_EQ(disapproval.Lookup(13)->effects, "LOSESPELLS:2:1");
+	EXPECT_EQ(disapproval.Lookup(15)->effects, "NORESET");
+	EXPECT_EQ(disapproval.Lookup(16)->effects, "BLOCK:LOH:1d4D");
+	EXPECT_EQ(disapproval.Lookup(18)->effects, "BLOCK:TURN:1d4D");
+	EXPECT_EQ(disapproval.Lookup(25)->roll, 20); // 20 and up
+	MagicTableList burn = LoadMagic("dccburn");
+	EXPECT_EQ(burn.Rows().size(), 24u);
+}
+
+// mercurial magic: every d% result, 41-60 one row
+TEST(DCC_Tables, Mercurial)
+{
+	MagicTableList mercurial = LoadMagic("dccmerc");
+	EXPECT_EQ(mercurial.Rows().size(), 81u);
+	for (int roll = 1; roll <= 100; ++roll) {
+		const MagicEntry* entry = mercurial.Lookup(roll);
+		ASSERT_TRUE(entry);
+		if (roll >= 41 && roll <= 60) {
+			EXPECT_EQ(entry->roll, 41);
+		} else {
+			EXPECT_EQ(entry->roll, roll);
+		}
+	}
+	EXPECT_EQ(mercurial.Lookup(4)->effects, "ABIL:STA:1d3");
+	EXPECT_EQ(mercurial.Lookup(12)->effects, "SPELLMOD:-4:1d4");
+	EXPECT_EQ(mercurial.Lookup(24)->subDie, 6);
+	EXPECT_EQ(mercurial.Lookup(32)->subDie, 10);
+	EXPECT_EQ(mercurial.Lookup(84)->subDie, 6);
+}
+
+// Table 4-4 (combat.md "Turn unholy")
+TEST(DCC_Tables, TurnUnholy)
+{
+	auto table = Open2DA("dccturn");
+	ASSERT_TRUE(table);
+	MagicTables magic;
+	ASSERT_TRUE(magic.LoadTurn(*table));
+	ASSERT_EQ(magic.turn.size(), 9u);
+	EXPECT_EQ(magic.TurnFor(11)->min, 1);
+	EXPECT_EQ(magic.TurnFor(11)->cells[0].kind, TurnCell::Kind::None);
+	const TurnRow* row = magic.TurnFor(18);
+	EXPECT_EQ(row->range, 30);
+	EXPECT_EQ(row->cells[0].sides, 4);
+	EXPECT_TRUE(row->cells[0].addCL);
+	EXPECT_EQ(row->cells[1].kind, TurnCell::Kind::Turn);
+	EXPECT_EQ(row->cells[2].kind, TurnCell::Kind::None);
+	row = magic.TurnFor(25);
+	EXPECT_EQ(row->smiteDice, 1);
+	EXPECT_EQ(row->smiteSides, 3);
+	EXPECT_TRUE(row->cells[0].noSave);
+	EXPECT_EQ(row->cells[0].damageSides, 4);
+	row = magic.TurnFor(31);
+	EXPECT_EQ(row->range, 120);
+	EXPECT_EQ(row->cells[0].kind, TurnCell::Kind::Kill);
+	row = magic.TurnFor(40);
+	EXPECT_EQ(row->range, 240);
+	EXPECT_EQ(row->cells[6].kind, TurnCell::Kind::Turn);
+	EXPECT_EQ(row->cells[7].kind, TurnCell::Kind::Turn); // past 12 HD: as 11-12
+	EXPECT_FALSE(row->cells[2].noSave); // 3-4 HD at 32+: a save (the spec's open question)
+}
+
+// Table 3-3's armor check penalties beside the fumble dice
+TEST(DCC_Tables, ArmorCheckPenalty)
+{
+	auto table = Open2DA("dccfumdi");
+	ASSERT_TRUE(table);
+	ArmorFumbleTable armor;
+	ASSERT_TRUE(armor.Load(*table));
+	EXPECT_EQ(armor.ArmorCheck("", "1A"), 0);
+	EXPECT_EQ(armor.ArmorCheck("", "2A"), -1);
+	EXPECT_EQ(armor.ArmorCheck("", "3A"), -5);
+	EXPECT_EQ(armor.ArmorCheck("", "4A"), -8);
+	EXPECT_EQ(armor.ShieldCheck("anyshield"), -1);
+	EXPECT_EQ(armor.ArmorDie("", "3A"), 12); // the fumble dice stay
+}
+
 }
 }
