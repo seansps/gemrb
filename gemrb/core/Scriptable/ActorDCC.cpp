@@ -16,6 +16,7 @@
 #include "RNG.h"
 
 #include "DCC/Combat.h"
+#include "DCC/Luck.h"
 #include "DCC/Rules.h"
 #include "DCC/Stats.h"
 #include "Scriptable/Actor.h"
@@ -253,6 +254,15 @@ RollResult Actor::DCCRollLuckCheck(int natural) const
 	return ResolveLuckCheck(natural, Signed(GetStat(IE_DCC_LUCK)), cursed);
 }
 
+// a failed save against this kills: Death (slay, disintegrate) and petrification
+static bool IsLethalEffect(const Effect* fx)
+{
+	if (!fx) return false;
+	static EffectRef fx_death_ref = { "Death", -1 };
+	static EffectRef fx_petrify_ref = { "State:Petrification", -1 };
+	return fx->Opcode == ieDword(EffectQueue::ResolveEffect(fx_death_ref)) || fx->Opcode == ieDword(EffectQueue::ResolveEffect(fx_petrify_ref));
+}
+
 // the DC of a saving throw an effect asks for
 // M2.5: effects from DCC spells carry their spell check total, which becomes the DC here
 static int EffectSaveDC(const Effect* fx)
@@ -278,6 +288,17 @@ bool Actor::GetSavingThrowDCC(ieDword type, int modifier, const Effect* fx)
 	}
 
 	RollResult result = DCCRollSave(save, modifier, dc, lastSave.savingThrow[type], flags);
+
+	// Luck: a burn on this save die counts for every effect that shares the die (one spell's
+	// effects); else the policy may burn on a failure, to avoid death (DCC::BurnReason)
+	if (dccSaveBurn[type] && !result.cursed) {
+		result.total += dccSaveBurn[type];
+		result.success = result.total >= result.target;
+	} else if (!result.success && !result.cursed) {
+		int before = result.total;
+		BurnReason reason = IsLethalEffect(fx) ? BurnReason::Death : BurnReason::Miss;
+		if (DCCPolicyRollBurn(result, reason, u"a save")) dccSaveBurn[type] = result.total - before;
+	}
 
 	// each effect of a spell ends up here, so only report a new roll
 	if (core->HasFeedback(FT_COMBAT) && (lastSave.prevType != type || lastSave.prevRoll != result.total)) {
@@ -344,6 +365,8 @@ void Actor::DCCRestHeal(bool bedRest)
 		if (loss <= 0) continue;
 		SetBase(LossStat(ability), LossAfterRest(ability, loss, bedRest));
 	}
+	// thieves and halflings get burned Luck back, up to the natural maximum (luck.md)
+	DCCRecoverLuck();
 }
 
 }

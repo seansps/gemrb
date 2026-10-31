@@ -21,6 +21,7 @@
 #include "DCC/Character.h"
 #include "DCC/Classes.h"
 #include "DCC/CombatTables.h"
+#include "DCC/Deeds.h"
 
 #include <array>
 
@@ -69,6 +70,7 @@ public:
 	SaveMap saves;
 	ThiefSkillTable thiefSkills;
 	CombatTables combat;
+	DeedTable deeds;
 
 	/** loads every table through gamedata; logs and returns false if one is missing or bad */
 	bool Load();

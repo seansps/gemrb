@@ -167,6 +167,10 @@ bool ParseSaveSpec(const std::string& text, SaveSpec& save)
 	} else {
 		return false;
 	}
+	if (parts[1] == "A" && parts.size() == 2) {
+		save.vsAttack = true;
+		return true;
+	}
 	if (!ParseInt(parts[1], save.dc) || save.dc <= 0) return false;
 	if (parts.size() == 3) {
 		if (parts[2] != "L") return false;

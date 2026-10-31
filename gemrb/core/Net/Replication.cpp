@@ -423,6 +423,11 @@ NetGuiOpInfo NetGuiInfo(NetGuiOp op)
 			return { -1, 4, NetPermission::Control, "SetJournalEntry", false, true };
 		case NetGuiOp::SetMapnote:
 			return { -1, 3, NetPermission::Control, "SetMapnote", false, true };
+		// M2.4: a character's Luck burn and deed choices, its owner's only
+		case NetGuiOp::DCCSetLuckPolicy:
+			return { 0, 4, NetPermission::Control, "DCCSetLuckPolicy" };
+		case NetGuiOp::DCCSetDeeds:
+			return { 0, 3, NetPermission::Control, "DCCSetDeeds" };
 		default:
 			return {};
 	}

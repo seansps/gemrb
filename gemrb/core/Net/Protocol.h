@@ -31,7 +31,7 @@
 namespace GemRB {
 
 constexpr uint8_t NET_MAGIC = 0xE7;
-constexpr uint8_t NET_PROTOCOL_VERSION = 8;
+constexpr uint8_t NET_PROTOCOL_VERSION = 9;
 constexpr uint16_t NET_DEFAULT_PORT = 27015;
 constexpr size_t NET_HEADER_SIZE = 3;
 constexpr size_t NET_MAX_STRING = 1024;
@@ -670,6 +670,8 @@ enum class NetGuiOp : uint8_t {
 	SetupQuickItemSlot, // actor, slot, inventory slot, header, translate
 	SetJournalEntry, // strref (-1: text), section, chapter, feedback (text: a new entry)
 	SetMapnote, // x, y, color (text: the note, empty removes it)
+	DCCSetLuckPolicy, // actor, policy, threshold, flags (v9)
+	DCCSetDeeds, // actor, signature deed, one-off deed (v9)
 	count
 };
 

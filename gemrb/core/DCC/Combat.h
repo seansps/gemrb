@@ -140,6 +140,14 @@ struct AttackRecord {
 	int fumbleDie = 0;
 	int fumbleRoll = 0; // after Luck
 	std::string result; // the crit or fumble result text
+	// M2.4
+	int luckBurned = 0; // Luck burned on this roll (by the attacker, or by the halfling luckBy)
+	int luckBonus = 0; // what it added to the total
+	unsigned int luckBy = 0; // global ID of a halfling who burned for the attacker, 0: the attacker
+	bool fumbleCancelled = false; // a warrior or dwarf burned 1 Luck to skip the fumble table
+	int deedKind = 0; // DCC::Deed declared for the attack action (0: none)
+	bool deedDone = false; // the deed happened on this roll (a hit with the deed die at 3+)
+	std::string deedResult; // the deed table text
 };
 
 // monsters: a CRE without a DCC block stores this HD, and its IE level is its HD and attack bonus

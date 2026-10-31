@@ -6,6 +6,7 @@
 // (docs/rules/classes.md Tables 1-4 to 1-18, luck.md Table 1-2, funnel.md),
 // read through the real 2DA importer and the DCC loaders.
 
+#include "../../core/DCC/Deeds.h"
 #include "../../core/DCC/Rules.h"
 #include "../../core/Streams/FileStream.h"
 #include "../../plugins/2DAImporter/2DAImporter.h"
@@ -572,5 +573,64 @@ TEST(DCC_Tables, TwoWeaponTable43)
 	EXPECT_EQ(twoWeapons.Lookup(10, true).primaryCrit, CritRule::MaxAutoHit); // halflings
 }
 
+
+// the deed table (combat.md, the seven categories by deed die result): every category has rows
+// 3..7, the keys are ones the engine knows, and the rows follow the spec where the engine can
+TEST(DCC_Tables, MightyDeeds)
+{
+	auto file = Open2DA("dccdeeds");
+	ASSERT_TRUE(file);
+	DeedTable deeds;
+	ASSERT_TRUE(deeds.Load(*file));
+	static const std::set<std::string> known { "NONE", "PRONE", "NOATTACK", "BLIND", "SPEED", "ATK", "NEXTATK", "DISARM", "SUNDER", "DMGMOD",
+						   "PUSH", "GUARD", "ALLYATK", "MORALE", "TODO" };
+	auto keys = [](const ResultRow* row) {
+		std::vector<std::string> list;
+		for (const auto& alternatives : row->effects) {
+			for (const auto& term : alternatives) {
+				list.push_back(term.key);
+			}
+		}
+		return list;
+	};
+	for (int i = 1; i < DEED_COUNT; ++i) {
+		Deed deed = static_cast<Deed>(i);
+		EXPECT_EQ(deeds.Lookup(deed, 2), nullptr) << DeedKey(deed);
+		for (int roll = DEED_SUCCESS; roll <= DEED_MAX_RESULT; ++roll) {
+			const ResultRow* row = deeds.Lookup(deed, roll);
+			ASSERT_TRUE(row) << DeedKey(deed) << roll;
+			EXPECT_FALSE(row->text.empty()) << DeedKey(deed) << roll;
+			for (const auto& key : keys(row)) {
+				EXPECT_TRUE(known.count(key)) << DeedKey(deed) << roll << ": " << key;
+			}
+		}
+	}
+	// blinding: -2 then -4 on the next attack, blind 1d4 and 2d6 rounds, a day with a Fort save vs the attack
+	EXPECT_EQ(deeds.Lookup(Deed::Blind, 3)->effects[0][0].args[0], "-2");
+	EXPECT_EQ(deeds.Lookup(Deed::Blind, 4)->effects[0][0].args[0], "-4");
+	EXPECT_EQ(deeds.Lookup(Deed::Blind, 5)->effects[0][0].args[0], "1d4");
+	EXPECT_EQ(deeds.Lookup(Deed::Blind, 6)->effects[0][0].args[0], "2d6");
+	EXPECT_TRUE(deeds.Lookup(Deed::Blind, 7)->save.vsAttack);
+	EXPECT_EQ(deeds.Lookup(Deed::Blind, 7)->save.save, Save::Fort);
+	// trips: a Ref save vs the attack roll at 3, automatic from 4
+	EXPECT_TRUE(deeds.Lookup(Deed::Trip, 3)->save.vsAttack);
+	EXPECT_EQ(deeds.Lookup(Deed::Trip, 3)->save.save, Save::Ref);
+	EXPECT_EQ(deeds.Lookup(Deed::Trip, 3)->effects[0][0].gate, '?');
+	EXPECT_TRUE(deeds.Lookup(Deed::Trip, 4)->save.IsNone());
+	// precision shots: +1d4 up to +1d8
+	for (int roll = 3; roll <= 7; ++roll) {
+		const DiceExpr& dice = deeds.Lookup(Deed::Precision, roll)->dice;
+		EXPECT_EQ(dice.count, 1);
+		EXPECT_EQ(dice.sides, roll + 1);
+	}
+	// defensive maneuvers: +1 alone, +1 with 2 and 4 allies, then +2 and +3
+	const int guard[][2] = { { 1, 0 }, { 1, 2 }, { 1, 4 }, { 2, 4 }, { 3, 4 } };
+	for (int roll = 3; roll <= 7; ++roll) {
+		const TableTerm& term = deeds.Lookup(Deed::Defend, roll)->effects[0][0];
+		EXPECT_EQ(term.key, "GUARD");
+		EXPECT_EQ(std::stoi(term.args[0]), guard[roll - 3][0]) << roll;
+		EXPECT_EQ(std::stoi(term.args[1]), guard[roll - 3][1]) << roll;
+	}
+}
 }
 }
