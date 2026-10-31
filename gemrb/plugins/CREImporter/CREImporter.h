@@ -41,6 +41,9 @@ private:
 	int QWPCount = 0; // weapons
 	int QSPCount = 0; // spells
 	int QITCount = 0; // items
+	// DCC: the CRE extension after the effects (read: the DCC block says it's there; write: its bytes)
+	bool hasDCCExtension = false;
+	std::vector<uint8_t> dccExtension;
 
 public:
 	CREImporter(void);
@@ -56,6 +59,8 @@ public:
 	int PutActor(DataStream* stream, const Actor* actor, bool chr = false) override;
 
 private:
+	int GetStoredFileSizeStock(const Actor* ac);
+	void ReadDCCExtension(Actor* act);
 	/** sets up some variables based on creature version for serializing the object */
 	void SetupSlotCounts();
 	/** writes out the chr header */

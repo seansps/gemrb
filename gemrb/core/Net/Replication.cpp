@@ -433,6 +433,15 @@ NetGuiOpInfo NetGuiInfo(NetGuiOp op)
 			return { 0, 3, NetPermission::Control, "DCCSetCombat" };
 		case NetGuiOp::DCCRecoverBody:
 			return { 1, 2, NetPermission::Control, "DCCRecoverBody", true };
+		// M2.5: spellburn settings for the owner; atonement, lay on hands and turning are host rolls
+		case NetGuiOp::DCCSetSpellburn:
+			return { 0, 4, NetPermission::Control, "DCCSetSpellburn" };
+		case NetGuiOp::DCCAtone:
+			return { 0, 2, NetPermission::Control, "DCCAtone", true };
+		case NetGuiOp::DCCLayOnHands:
+			return { 0, 2, NetPermission::Control, "DCCLayOnHands", true };
+		case NetGuiOp::DCCTurnUnholy:
+			return { 0, 1, NetPermission::Control, "DCCTurnUnholy", true };
 		default:
 			return {};
 	}
@@ -446,6 +455,11 @@ static uint64_t EncodedHash(const MSG& msg)
 }
 
 uint64_t NetMessageHash(const NetInventory& msg)
+{
+	return EncodedHash(msg);
+}
+
+uint64_t NetMessageHash(const NetDCCExtension& msg)
 {
 	return EncodedHash(msg);
 }

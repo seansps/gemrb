@@ -1,0 +1,13 @@
+2DA V1.0
+*
+     SUB   EFFECTS                                  TEXT
+1    *     ABIL:PER:1:PERM,MUT:PUSTULES             facial_pustules_(-1_Per_for_good)
+2    d6    MUT:SKIN                                 skin_melts_and_sags
+3    d6    MUT:GAIT                                 one_leg_grows_longer:_an_odd_gait
+4    d4    MUT:EYES,2#TODO:-1_to_all_rolls_in_daylight eyes_change_(1_glow,_2_shun_daylight,_3_see_in_the_dark,_4_fish_eyes)
+5    *     MUT:SKIN                                 lesions_and_sores_that_never_heal
+6    d5    MUT:EARS                                 the_ears_change_shape
+7    *     MUT:SHAKES,TODO:can't_move_quietly       constant_shaking_and_chattering_teeth
+8    *     MUT:SKIN                                 scarred_by_the_spell's_element
+9    d4    MUT:HAIR                                 the_hair_changes
+10   *     UNCON:1d6H                               knocked_unconscious_for_1d6_hours

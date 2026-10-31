@@ -70,6 +70,7 @@ Effect& Effect::operator=(const Effect& rhs) noexcept
 		CasterID = rhs.CasterID;
 		RandomValue = rhs.RandomValue;
 		SpellLevel = rhs.SpellLevel;
+		DCCSpellCheck = rhs.DCCSpellCheck;
 
 		IsVariable = rhs.IsVariable;
 		if (IsVariable) {

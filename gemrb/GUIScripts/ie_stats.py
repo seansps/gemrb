@@ -419,6 +419,14 @@ IE_DCC_PINNED                   = 309 # held in a grapple by this global ID
 IE_DCC_SUBDUED                  = 310 # knocked out by subdual damage
 IE_DCC_RAGE                     = 311 # battle rage: Per/Int points to spend
 IE_DCC_COMBATOPT                = 312 # DCC_OPT_* bits
+# spellcasting (M2.5)
+IE_DCC_SPELLMOD                 = 313 # flat spell check modifier
+IE_DCC_CASTERLVL                = 314 # caster level
+IE_DCC_ARMORPEN                 = 315 # armor check penalty on arcane spell checks
+IE_DCC_MAXSPELL                 = 316 # highest castable spell level
+IE_DCC_NOCAST                   = 317 # DCC_BLOCK_* bits
+IE_DCC_LOHMOD                   = 318 # lay on hands check modifier
+IE_DCC_MUTATION                 = 319 # mutation bits
 
 # DCC states at 0 (IE_DCC_STATE bits)
 DCC_STATE_IMMOBILE = 1

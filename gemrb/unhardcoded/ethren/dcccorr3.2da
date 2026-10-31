@@ -1,0 +1,13 @@
+2DA V1.0
+*
+     SUB   EFFECTS                                  TEXT
+1    *     DMG:3d6,ABIL:STR:2:PERM,ABIL:AGI:2:PERM,ABIL:STA:2:PERM,ABIL:PER:2:PERM,ABIL:INT:2:PERM,ABIL:LCK:2:PERM,MUT:WITHER ravaged:_3d6_damage,_-2_to_every_ability_and_Luck_for_good
+2    *     MUT:WITHER,TODO:loses_1d4_hp_a_day_without_magical_healing withering:_loses_1d4_hp_a_day
+3    d6    MUT:BEAST                                an_animal's_head
+4    *     MUT:TENTACLES                            the_limbs_become_tentacles
+5    *     MUT:TENTACLES                            tentacles_grow_from_the_mouth_and_ears
+6    d4    MUT:EYES                                 a_third_eye_opens
+7    *     MUT:CLAW,TODO:crab_claw_attack_1d6,_that_hand_can't_hold_things a_hand_becomes_a_crab's_claw
+8    d6    MUT:TAIL,3#ABIL:AGI:-1:PERM,1#TODO:scorpion_sting,5#TODO:spiked_tail_attack grows_a_tail_(3:_a_demon's_tail,_+1_Agi)
+9    d4    MUT:SCALES                               scales,_gills,_feathers_or_webbed_feet
+10   *     MUT:BEAK,TODO:beak_bite_1d3              grows_a_beak

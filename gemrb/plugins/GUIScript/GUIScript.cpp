@@ -7415,6 +7415,435 @@ static PyObject* GemRB_DCCSetDeeds(PyObject* /*self*/, PyObject* args)
 	Py_RETURN_NONE;
 }
 
+// DCC spellcasting (M2.5) ////////////////////////////////////////////////////
+
+static PyObject* DCCStringList(const std::vector<std::string>& list)
+{
+	PyObject* result = PyList_New(0);
+	for (const auto& entry : list) {
+		PyObject* text = PyUnicode_FromString(entry.c_str());
+		PyList_Append(result, text);
+		Py_DecRef(text);
+	}
+	return result;
+}
+
+static PyObject* DCCCastDict(const Actor::DCCCastRecord& r)
+{
+	PyObject* dict = PyDict_New();
+	PyObject* spell = PyUnicode_FromString(r.spell.c_str());
+	PyDict_SetItemString(dict, "Spell", spell);
+	Py_DecRef(spell);
+	PyObject* band = PyUnicode_FromString(r.band.c_str());
+	PyDict_SetItemString(dict, "Band", band);
+	Py_DecRef(band);
+	DictInt(dict, "Die", r.die);
+	DictInt(dict, "Natural", r.natural);
+	DictInt(dict, "Total", r.total);
+	DictInt(dict, "BandIndex", r.bandIndex);
+	DictInt(dict, "BandMin", r.bandMin);
+	DictInt(dict, "Success", r.success);
+	DictInt(dict, "Lost", r.lost);
+	DictInt(dict, "Critical", r.critical);
+	DictInt(dict, "NatOne", r.natOne);
+	DictInt(dict, "Disapproval", r.disapproval);
+	DictInt(dict, "Cursed", r.cursed);
+	DictInt(dict, "Burn", r.burn);
+	DictInt(dict, "BurnBonus", r.burnBonus);
+	DictInt(dict, "Repeat", r.repeat);
+	DictInt(dict, "Targets", r.targets);
+	DictInt(dict, "DisapprovalRoll", r.disapprovalRoll);
+	DictInt(dict, "RangeAfter", r.rangeAfter);
+	DictInt(dict, "NatOneOutcome", r.natOneOutcome);
+	DictInt(dict, "CorruptionTable", r.corruptionTable);
+	DictInt(dict, "CorruptionRow", r.corruptionRow);
+	DictInt(dict, "CorruptionCancelled", r.corruptionCancelled);
+	DictInt(dict, "MisfireRoll", r.misfireRoll);
+	PyObject* notes = DCCStringList(r.notes);
+	PyDict_SetItemString(dict, "Notes", notes);
+	Py_DecRef(notes);
+	return dict;
+}
+
+PyDoc_STRVAR(GemRB_GetDCCMagic__doc,
+	     "===== GetDCCMagic =====\n\
+\n\
+**Prototype:** GemRB.GetDCCMagic (globalID)\n\
+\n\
+**Description:** A DCC caster's magic: its known spells with their mercurial magic, \n\
+manifestation and whether they are lost for the day, its corruptions and mutations, \n\
+spellburn and the cleric's disapproval range.\n\
+\n\
+**Return value:** dict with CasterKind (0 none, 1 wizard or elf, 2 cleric), CasterLevel, \n\
+MaxSpell, ArmorPenalty, SpellMod, Blocks, Spells (list of dicts: Spell, Name, Level, Lost, \n\
+Lucky, Penalty, Mercurial, MercurialText, Manifestation, ManifestationText, Casts), \n\
+Corruptions (dicts: Table, Row, Sub, Spell, Text, Effects), Mutations (bits), MutationNames, \n\
+Spellburn (Points, Policy, Preset, Corruption, LastDay, Flavour), Disapproval, NoReset, Revision");
+
+static PyObject* GemRB_GetDCCMagic(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	PARSE_ARGS(args, "i", &globalID);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	const DCC::RulesData* rules = core->GetDCCRules();
+	if (!rules) return RuntimeError("No DCC rules!");
+	PyObject* dict = PyDict_New();
+	DictInt(dict, "CasterKind", static_cast<int>(actor->GetDCCCasterKind()));
+	DictInt(dict, "CasterLevel", actor->GetStat(IE_DCC_CASTERLVL));
+	DictInt(dict, "MaxSpell", actor->GetStat(IE_DCC_MAXSPELL));
+	DictInt(dict, "ArmorPenalty", static_cast<ieDwordSigned>(actor->GetStat(IE_DCC_ARMORPEN)));
+	DictInt(dict, "SpellMod", static_cast<ieDwordSigned>(actor->GetStat(IE_DCC_SPELLMOD)));
+	DictInt(dict, "Blocks", actor->GetStat(IE_DCC_NOCAST));
+	DictInt(dict, "Revision", actor->dccExtRevision);
+	PyObject* spells = PyList_New(0);
+	for (const auto& known : actor->dccExt.spells) {
+		const DCC::SpellInfo* info = rules->Spell(known.spell);
+		PyObject* entry = PyDict_New();
+		PyObject* name = PyUnicode_FromString(known.spell.c_str());
+		PyDict_SetItemString(entry, "Spell", name);
+		Py_DecRef(name);
+		PyObject* title = PyUnicode_FromString(info ? info->name.c_str() : known.spell.c_str());
+		PyDict_SetItemString(entry, "Name", title);
+		Py_DecRef(title);
+		DictInt(entry, "Level", info ? info->level : 0);
+		DictInt(entry, "Lost", (known.flags & DCC::SPELL_LOST) != 0);
+		DictInt(entry, "Lucky", (known.flags & DCC::SPELL_LUCKY) != 0);
+		DictInt(entry, "Penalty", (known.flags & DCC::SPELL_PENALTY) != 0);
+		DictInt(entry, "Casts", known.casts);
+		PyObject* mercurial = PyList_New(0);
+		std::vector<std::string> mercurialText;
+		for (uint8_t value : known.mercurial) {
+			PyObject* number = PyLong_FromLong(value);
+			PyList_Append(mercurial, number);
+			Py_DecRef(number);
+			const DCC::MagicEntry* row = rules->magic.mercurial.Lookup(value);
+			mercurialText.push_back(row ? row->text : std::string());
+		}
+		PyDict_SetItemString(entry, "Mercurial", mercurial);
+		Py_DecRef(mercurial);
+		PyObject* texts = DCCStringList(mercurialText);
+		PyDict_SetItemString(entry, "MercurialText", texts);
+		Py_DecRef(texts);
+		DictInt(entry, "Manifestation", known.manifestation);
+		const DCC::SpellEntry* how = info && known.manifestation ? DCC::EntryFor(info->manifestation, known.manifestation) : nullptr;
+		PyObject* manifest = PyUnicode_FromString(how ? how->text.c_str() : "");
+		PyDict_SetItemString(entry, "ManifestationText", manifest);
+		Py_DecRef(manifest);
+		PyList_Append(spells, entry);
+		Py_DecRef(entry);
+	}
+	PyDict_SetItemString(dict, "Spells", spells);
+	Py_DecRef(spells);
+	PyObject* corruptions = PyList_New(0);
+	for (const auto& corruption : actor->dccExt.corruptions) {
+		PyObject* entry = PyDict_New();
+		DictInt(entry, "Table", static_cast<int>(corruption.table));
+		DictInt(entry, "Row", corruption.row);
+		DictInt(entry, "Sub", corruption.sub);
+		PyObject* spell = PyUnicode_FromString(corruption.spell.c_str());
+		PyDict_SetItemString(entry, "Spell", spell);
+		Py_DecRef(spell);
+		std::string text;
+		std::string effects;
+		if (corruption.table == DCC::CorruptionTable::Spell) {
+			const DCC::SpellInfo* info = rules->Spell(corruption.spell);
+			const DCC::SpellEntry* row = info ? DCC::EntryFor(info->corruption, corruption.row) : nullptr;
+			if (row) {
+				text = row->text;
+				effects = row->effects;
+			}
+		} else {
+			const DCC::MagicEntry* row = rules->magic.corruption[static_cast<size_t>(corruption.table) - 1].Lookup(corruption.row);
+			if (row) {
+				text = row->text;
+				effects = row->effects;
+			}
+		}
+		PyObject* words = PyUnicode_FromString(text.c_str());
+		PyDict_SetItemString(entry, "Text", words);
+		Py_DecRef(words);
+		PyObject* terms = PyUnicode_FromString(effects.c_str());
+		PyDict_SetItemString(entry, "Effects", terms);
+		Py_DecRef(terms);
+		PyList_Append(corruptions, entry);
+		Py_DecRef(entry);
+	}
+	PyDict_SetItemString(dict, "Corruptions", corruptions);
+	Py_DecRef(corruptions);
+	ieDword mutations = actor->GetStat(IE_DCC_MUTATION);
+	DictInt(dict, "Mutations", mutations);
+	std::vector<std::string> mutationNames;
+	for (int bit = 0; bit < 32; ++bit) {
+		if (mutations & (1u << bit)) mutationNames.emplace_back(DCC::MutationName(1u << bit));
+	}
+	PyObject* names = DCCStringList(mutationNames);
+	PyDict_SetItemString(dict, "MutationNames", names);
+	Py_DecRef(names);
+	DictInt(dict, "Tint", DCC::MutationTint(mutations));
+	PyObject* burn = PyDict_New();
+	const DCC::Spellburn& sb = actor->dccExt.burn;
+	PyObject* points = Py_BuildValue("[iii]", sb.points[0], sb.points[1], sb.points[2]);
+	PyDict_SetItemString(burn, "Points", points);
+	Py_DecRef(points);
+	DictInt(burn, "Policy", static_cast<int>(sb.policy));
+	DictInt(burn, "Preset", sb.preset);
+	DictInt(burn, "Corruption", static_cast<int>(sb.corruption));
+	DictInt(burn, "LastDay", sb.lastBurnDay);
+	DictInt(burn, "Flavour", sb.flavour);
+	const DCC::MagicEntry* flavour = sb.flavour ? rules->magic.spellburn.Lookup(sb.flavour) : nullptr;
+	PyObject* flavourText = PyUnicode_FromString(flavour ? flavour->text.c_str() : "");
+	PyDict_SetItemString(burn, "FlavourText", flavourText);
+	Py_DecRef(flavourText);
+	PyDict_SetItemString(dict, "Spellburn", burn);
+	Py_DecRef(burn);
+	DictInt(dict, "Disapproval", actor->dccExt.disapproval.range);
+	DictInt(dict, "NoReset", (actor->dccExt.disapproval.flags & DCC::DISAPPROVAL_NO_RESET) != 0);
+	return dict;
+}
+
+PyDoc_STRVAR(GemRB_DCCLearnSpell__doc,
+	     "===== DCCLearnSpell =====\n\
+\n\
+**Prototype:** GemRB.DCCLearnSpell (globalID, spell[, rolls])\n\
+\n\
+**Description:** A DCC caster learns a DCC spell (a base spell of dccspell.2da): wizards and \n\
+elves roll mercurial magic, everyone the manifestation (rolls 0: neither). Host or single \n\
+player only.\n\
+\n\
+**Return value:** the first mercurial magic result (0 for none), -1 if it can't be learned");
+
+static PyObject* GemRB_DCCLearnSpell(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	char* spell = nullptr;
+	int rolls = 1;
+	PARSE_ARGS(args, "is|i", &globalID, &spell, &rolls);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	const NetSession* net = core->GetNetSession();
+	if (net && !net->IsHost()) return PyLong_FromLong(-1);
+	return PyLong_FromLong(actor->DCCLearnSpell(ResRef(spell), rolls != 0));
+}
+
+PyDoc_STRVAR(GemRB_DCCCast__doc,
+	     "===== DCCCast =====\n\
+\n\
+**Prototype:** GemRB.DCCCast (globalID, spell, targetID[, burn[, situational]])\n\
+\n\
+**Description:** Casts a DCC spell at once (no casting time) with its spell check, for tests \n\
+and scripts: the band's SPL, the check total as its DC, loss, corruption, disapproval. burn \n\
+is a list [Str, Agi, Sta] of spellburn instead of the character's policy (None: the policy); \n\
+situational a modifier for this check only. Use DCCForceDice \n\
+for the dice. Host or single player only.\n\
+\n\
+**Return value:** dict, see GetDCCLastCast");
+
+static PyObject* GemRB_DCCCast(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	char* spell = nullptr;
+	int targetID;
+	PyObject* burn = nullptr;
+	int situational = 0;
+	PARSE_ARGS(args, "isi|Oi", &globalID, &spell, &targetID, &burn, &situational);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	const NetSession* net = core->GetNetSession();
+	if (net && !net->IsHost()) return RuntimeError("Only the host casts!");
+	Actor* target = targetID > 1000 ? game->GetActorByGlobalID(targetID) : game->FindPC(targetID);
+	if (!target) return RuntimeError("Target not found!");
+	if (burn && PyList_Check(burn) && PyList_Size(burn) == 3) {
+		for (int i = 0; i < 3; ++i) {
+			actor->dccNextBurn[size_t(i)] = int(PyLong_AsLong(PyList_GetItem(burn, i)));
+		}
+		actor->dccNextBurnSet = true;
+	}
+	actor->dccNextSituational = situational;
+	actor->DirectlyCastSpell(target, ResRef(spell), 0, true, false);
+	actor->dccNextSituational = 0;
+	actor->dccNextBurnSet = false;
+	return DCCCastDict(actor->GetDCCLastCast());
+}
+
+PyDoc_STRVAR(GemRB_GetDCCLastCast__doc,
+	     "===== GetDCCLastCast =====\n\
+\n\
+**Prototype:** GemRB.GetDCCLastCast (globalID)\n\
+\n\
+**Description:** The last spell check of a DCC caster (spells, lay on hands, turning).\n\
+\n\
+**Return value:** dict with Spell, Band, Die, Natural, Total, BandIndex, BandMin, Success, Lost, \n\
+Critical, NatOne, Disapproval, Cursed, Burn, BurnBonus, Repeat, Targets, DisapprovalRoll, \n\
+RangeAfter, NatOneOutcome (1 corruption, 2 taint, 4 misfire), CorruptionTable, CorruptionRow, \n\
+CorruptionCancelled, MisfireRoll, Notes");
+
+static PyObject* GemRB_GetDCCLastCast(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	PARSE_ARGS(args, "i", &globalID);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	return DCCCastDict(actor->GetDCCLastCast());
+}
+
+PyDoc_STRVAR(GemRB_DCCSetSpellburn__doc,
+	     "===== DCCSetSpellburn =====\n\
+\n\
+**Prototype:** GemRB.DCCSetSpellburn (globalID, policy, preset, corruption)\n\
+\n\
+**Description:** A wizard's or elf's spellburn settings: policy 0 never, 1 ask before each \n\
+check (party members; the preset is the default), 2 always the preset; preset the points; \n\
+corruption when 1 Luck cancels a corruption by itself (and the prompt's default): 0 never, \n\
+1 greater only, 2 major and greater, 3 always. -1 keeps one. In co-op the host runs it again \n\
+for the character's owner only.\n\
+\n\
+**Return value:** N/A");
+
+static PyObject* GemRB_DCCSetSpellburn(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int policy;
+	int preset;
+	int corruption;
+	PARSE_ARGS(args, "iiii", &globalID, &policy, &preset, &corruption);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	if (!NetForward(NetGuiOp::DCCSetSpellburn, { globalID, policy, preset, corruption })) Py_RETURN_NONE;
+	actor->SetDCCSpellburn(policy, preset, corruption);
+	Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(GemRB_DCCAtone__doc,
+	     "===== DCCAtone =====\n\
+\n\
+**Prototype:** GemRB.DCCAtone (globalID, gold)\n\
+\n\
+**Description:** A cleric sacrifices gold (the party's) to its god: every 50 gp narrows the \n\
+disapproval range by 1 (never below a natural 1). Runs on the host.\n\
+\n\
+**Return value:** the points the range narrowed (-2: sent to the host)");
+
+static PyObject* GemRB_DCCAtone(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int gold;
+	PARSE_ARGS(args, "ii", &globalID, &gold);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	if (!NetForward(NetGuiOp::DCCAtone, { globalID, gold })) return PyLong_FromLong(-2);
+	return PyLong_FromLong(actor->DCCAtone(gold));
+}
+
+PyDoc_STRVAR(GemRB_DCCLayOnHands__doc,
+	     "===== DCCLayOnHands =====\n\
+\n\
+**Prototype:** GemRB.DCCLayOnHands (globalID, targetID[, natural])\n\
+\n\
+**Description:** A cleric lays on hands: a spell check (d20 + Per + CL) for dice of the \n\
+target's hit die by alignment, with the disapproval range. targetID: a party slot (co-op) or \n\
+a global ID. Runs on the host.\n\
+\n\
+**Return value:** hp healed, 0 for a failure, -1 if it couldn't be tried (-2: sent to the host)");
+
+static PyObject* GemRB_DCCLayOnHands(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int targetID;
+	int natural = 0;
+	PARSE_ARGS(args, "ii|i", &globalID, &targetID, &natural);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	Actor* target = targetID > 1000 ? game->GetActorByGlobalID(targetID) : game->FindPC(targetID);
+	if (!target) return RuntimeError("Target not found!");
+	if (!NetForward(NetGuiOp::DCCLayOnHands, { globalID, targetID })) return PyLong_FromLong(-2);
+	return PyLong_FromLong(actor->DCCLayOnHands(target, natural));
+}
+
+PyDoc_STRVAR(GemRB_DCCTurnUnholy__doc,
+	     "===== DCCTurnUnholy =====\n\
+\n\
+**Prototype:** GemRB.DCCTurnUnholy (globalID[, natural])\n\
+\n\
+**Description:** A cleric turns the unholy around it (Table 4-4): d20 + Per + CL + Luck mod, \n\
+with the disapproval range; turned creatures flee (DCC:Combat Fleeing). Runs on the host.\n\
+\n\
+**Return value:** creatures turned or destroyed, -1 if it couldn't be tried (-2: sent to the host)");
+
+static PyObject* GemRB_DCCTurnUnholy(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int natural = 0;
+	PARSE_ARGS(args, "i|i", &globalID, &natural);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	if (!NetForward(NetGuiOp::DCCTurnUnholy, { globalID })) return PyLong_FromLong(-2);
+	return PyLong_FromLong(actor->DCCTurnUnholy(natural));
+}
+
+PyDoc_STRVAR(GemRB_DCCSetSpellState__doc,
+	     "===== DCCSetSpellState =====\n\
+\n\
+**Prototype:** GemRB.DCCSetSpellState (globalID, spell, flags[, mercurial[, luckyMod]])\n\
+\n\
+**Description:** Tests and scripts: sets a known DCC spell's flags (1 lost, 2 the elf's lucky \n\
+spell, 8 a disapproval penalty) and, if given, its mercurial magic results (a list) and the \n\
+lucky spell's frozen Luck modifier. Host or single player only.\n\
+\n\
+**Return value:** bool, whether the spell is known");
+
+static PyObject* GemRB_DCCSetSpellState(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	char* spell = nullptr;
+	int flags;
+	PyObject* mercurial = nullptr;
+	int luckyMod = 0;
+	PARSE_ARGS(args, "isi|Oi", &globalID, &spell, &flags, &mercurial, &luckyMod);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	std::string name(spell);
+	std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return std::tolower(c); });
+	DCC::KnownSpell* known = actor->dccExt.FindSpell(name);
+	if (!known) Py_RETURN_FALSE;
+	known->flags = uint8_t(flags);
+	if (mercurial && PyList_Check(mercurial)) {
+		known->mercurial.clear();
+		for (Py_ssize_t i = 0; i < PyList_Size(mercurial); ++i) {
+			known->mercurial.push_back(uint8_t(PyLong_AsLong(PyList_GetItem(mercurial, i))));
+		}
+		known->streak = 0;
+	}
+	known->luckyMod = int8_t(luckyMod);
+	actor->DCCExtChanged();
+	Py_RETURN_TRUE;
+}
+
+PyDoc_STRVAR(GemRB_DCCCorrupt__doc,
+	     "===== DCCCorrupt =====\n\
+\n\
+**Prototype:** GemRB.DCCCorrupt (globalID, table, level[, roll[, ask]])\n\
+\n\
+**Description:** Tests and scripts: a corruption on Table 5-3 (table 1), 5-4 (2) or 5-5 (3) for \n\
+a spell of that level (roll: a fixed row instead of 1d10 - level + Luck mod), with the Luck \n\
+offer (ask 0: the policy decides, no prompt). Host or single player only.\n\
+\n\
+**Return value:** the row");
+
+static PyObject* GemRB_DCCCorrupt(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int table;
+	int level;
+	int roll = 0;
+	int ask = 1;
+	PARSE_ARGS(args, "iii|ii", &globalID, &table, &level, &roll, &ask);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	if (table < 1 || table > 3) return RuntimeError("Bad corruption table!");
+	return PyLong_FromLong(actor->DCCCorrupt(static_cast<DCC::CorruptionTable>(table), level, "", roll, ask != 0));
+}
+
 PyDoc_STRVAR(GemRB_SetPlayerStat__doc,
 	     "===== SetPlayerStat =====\n\
 \n\
@@ -14230,6 +14659,16 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(DCCSetDeeds, METH_VARARGS),
 	METHOD(DCCSetCombat, METH_VARARGS),
 	METHOD(DCCGrapple, METH_VARARGS),
+	METHOD(GetDCCMagic, METH_VARARGS),
+	METHOD(DCCLearnSpell, METH_VARARGS),
+	METHOD(DCCCast, METH_VARARGS),
+	METHOD(GetDCCLastCast, METH_VARARGS),
+	METHOD(DCCSetSpellburn, METH_VARARGS),
+	METHOD(DCCAtone, METH_VARARGS),
+	METHOD(DCCLayOnHands, METH_VARARGS),
+	METHOD(DCCTurnUnholy, METH_VARARGS),
+	METHOD(DCCSetSpellState, METH_VARARGS),
+	METHOD(DCCCorrupt, METH_VARARGS),
 	METHOD(GetPlayerStates, METH_VARARGS),
 	METHOD(GetPlayerString, METH_VARARGS),
 	METHOD(GetPrompt, METH_NOARGS),

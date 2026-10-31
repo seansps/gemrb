@@ -220,6 +220,7 @@ GEM_EXPORT std::vector<NetVariable> NetVariablesDiff(const std::map<std::string,
 // change detection for state sent as a whole (inventories, spellbooks, stores)
 GEM_EXPORT uint64_t NetMessageHash(const NetInventory& msg);
 GEM_EXPORT uint64_t NetMessageHash(const NetSpellbook& msg);
+GEM_EXPORT uint64_t NetMessageHash(const NetDCCExtension& msg);
 GEM_EXPORT uint64_t NetMessageHash(const NetStoreState& msg);
 
 // chat (M1.7): who sees a line, how it reads and looks

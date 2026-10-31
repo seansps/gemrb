@@ -112,6 +112,12 @@ void Actor::DCCFeedback(String text, int type)
 	}
 }
 
+void Actor::DCCRecordLine(String text)
+{
+	combatLog.push_back(std::move(text));
+	if (combatLog.size() > 300) combatLog.pop_front();
+}
+
 std::vector<String> Actor::DCCCombatLog(bool clear)
 {
 	std::vector<String> lines(combatLog.begin(), combatLog.end());
@@ -1209,6 +1215,7 @@ static void ApplyTerm(const TableTerm& term, RowContext& ctx, const WeaponInfo& 
 		fx->Source = attacker->Pos;
 		fx->Target = FX_TARGET_PRESET;
 		core->ApplyEffect(std::move(fx), who, attacker);
+		who->DCCDisengage();
 		note = u"knocked back";
 	} else if (key == "AC") {
 		int value = argInt(0, 0);
@@ -1536,6 +1543,8 @@ static void ApplyTerm(const TableTerm& term, RowContext& ctx, const WeaponInfo& 
 		map->ClearSearchMapFor(who);
 		Point landing = PointAway(map, who->Pos, angle, feet, &blocked);
 		who->SetPosition(landing, true);
+		// a creature thrown out of a melee didn't withdraw, nor did the ones it was fighting
+		who->DCCDisengage();
 		note = fmt::format(u"flung {}'", feet);
 		if (has("FALL")) {
 			DiceExpr fall;
@@ -1563,6 +1572,19 @@ static void ApplyTerm(const TableTerm& term, RowContext& ctx, const WeaponInfo& 
 				other->DCCFreeAttack(who, fmt::format(u"{} is hurled into it", Name(who)));
 			}
 		}
+	} else if (key == "CORRUPT") {
+		// M2.5: corruption rolls (Crit Table DN 5, 10): 1d10 + the subject's Luck mod on the minor
+		// table for an attacker of up to 5 HD, the major one up to 10 HD, the greater one above
+		int count = std::max(1, argInt(0, 1));
+		int hd = attacker->GetDCCHitDice();
+		CorruptionTable table = hd <= 5 ? CorruptionTable::Minor : (hd <= 10 ? CorruptionTable::Major : CorruptionTable::Greater);
+		int luck = who->IsDCCCharacter() ? who->GetDCCAbilityMod(Ability::Luck) : 0;
+		std::vector<int> rows;
+		for (int i = 0; i < count; ++i) {
+			int roll = Clamp(attacker->DCCDie(10) + luck, 1, 10);
+			rows.push_back(who->DCCCorrupt(table, 0, "", roll));
+		}
+		note = fmt::format(u"{} corruption", count == 1 ? u"a" : fmt::format(u"{}x", count));
 	} else if (key == "CLEAVE") {
 		ctx.cleave = true;
 		return;
@@ -1635,6 +1657,37 @@ static String Joined(const std::vector<String>& notes)
 		text += (text.empty() ? u"" : u"; ") + note;
 	}
 	return text;
+}
+
+// M2.5: the crit table grammar for magic results (corruption, misfire, disapproval, mercurial
+// magic): this actor causes them (its dice), subject suffers them; damage lands at once
+String Actor::DCCApplyTableEffects(const std::string& effects, Actor* subject, const std::string& save, int level)
+{
+	if (!subject || effects.empty() || effects == "*") return u"";
+	std::vector<TableAlternatives> parsed;
+	if (!ParseEffects(effects, parsed)) {
+		Log(WARNING, "DCC", "Bad magic result effects '{}'", effects);
+		return u"";
+	}
+	SaveSpec spec;
+	if (!save.empty() && !ParseSaveSpec(save, spec)) spec = SaveSpec();
+	RowContext ctx;
+	ctx.attacker = this;
+	ctx.target = subject;
+	ctx.subject = subject;
+	ctx.crit = true;
+	ctx.level = level;
+	ctx.save = &spec;
+	WeaponInfo wi;
+	for (const auto& alternatives : parsed) {
+		for (const auto& term : alternatives) {
+			if (!TermApplies(term, ctx)) continue;
+			ApplyTerm(term, ctx, wi);
+			break;
+		}
+	}
+	if (ctx.extraDamage > 0) DirectDamage(subject, ctx.extraDamage, this);
+	return Joined(ctx.notes);
 }
 
 void Actor::DCCResolveSwing(DCCSwing& swing, Actor* target, int depth, DCCAttackState* state)
@@ -2134,6 +2187,17 @@ int Actor::DCCGrapple(Actor* target)
 	ApplyCombat(CombatEffect::Pinned, static_cast<int>(GetGlobalID()), turn, target, this);
 	Feedback(line + u"pinned", FT_COMBAT);
 	return 1;
+}
+
+// a forced move (a fling, a push) breaks a creature's melee engagements without a withdrawal
+void Actor::DCCDisengage()
+{
+	const Map* map = GetCurrentArea();
+	for (const auto& entry : dccEngaged) {
+		Actor* foe = map ? map->GetActorByGlobalID(entry.first) : nullptr;
+		if (foe) foe->dccEngaged.erase(GetGlobalID());
+	}
+	dccEngaged.clear();
 }
 
 void Actor::DCCCheckWithdrawal()

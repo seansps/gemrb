@@ -16,6 +16,7 @@
 #include "Projectile.h"
 #include "Spell.h"
 
+#include "DCC/Rules.h"
 #include "GUI/GameControl.h"
 #include "GameScript/GSUtils.h"
 #include "GameScript/Matching.h" // MatchActor
@@ -799,6 +800,8 @@ void Scriptable::CreateProjectile(const ResRef& spellResRef, ieDword tgt, int le
 	const Spell* splBase = gamedata->GetSpell(spellResRef);
 	Spell spl(*splBase);
 	Actor* caster = Scriptable::As<Actor>(this);
+	// DCC: a spell check's band carries the check total as the DC of its effects
+	if (caster && core->HasFeature(GFFlags::RULES_DCC)) caster->DCCStampSpell(spl);
 
 	//PST has a weird effect, called Enoll Eva's duplication
 	//it creates every projectile of the affected actor twice
@@ -938,6 +941,14 @@ inline void Scriptable::ResetCastingState(Actor* caster)
 	}
 }
 
+// DCC (DCCRules): a spell of the game's dccspell.2da casts with a spell check (ActorDCCMagic.cpp)
+static bool IsDCCSpell(const ResRef& spellRef)
+{
+	if (!core->HasFeature(GFFlags::RULES_DCC)) return false;
+	const DCC::RulesData* rules = core->GetDCCRules();
+	return rules && rules->Spell(spellRef.c_str());
+}
+
 void Scriptable::CastSpellPointEnd(int level, bool keepStance)
 {
 	const Spell* spl = gamedata->GetSpell(SpellResRef); // this was checked before we got here
@@ -989,7 +1000,10 @@ void Scriptable::CastSpellPointEnd(int level, bool keepStance)
 		core->GetAudioPlayback().Play(spl->CompletionSound, AudioPreset::Spatial, SFXChannel::Missile, Pos);
 	}
 
-	CreateProjectile(SpellResRef, 0, level, false);
+	// DCC: the spell check picks the band SPL (nothing for a failure)
+	bool dccSpell = caster && IsDCCSpell(SpellResRef);
+	ResRef castRef = dccSpell ? caster->DCCCastCheck(SpellResRef, nullptr, objects.LastTargetPos) : SpellResRef;
+	if (!castRef.IsEmpty()) CreateProjectile(castRef, 0, level, false);
 
 	// the original engine saves lasttrigger only in case of SpellCast, so we have to differentiate
 	ieDword oldLastTrigger = objects.LastTrigger;
@@ -1015,6 +1029,7 @@ void Scriptable::CastSpellPointEnd(int level, bool keepStance)
 	// restore LastTrigger as bg2 otygrate.bcs relies on it; mangles trigger_spellcast for the caster
 	objects.LastTrigger = oldLastTrigger;
 
+	if (dccSpell) caster->DCCEndCast(nullptr, level);
 	ResetCastingState(caster);
 }
 
@@ -1065,8 +1080,12 @@ void Scriptable::CastSpellEnd(int level, bool keepStance)
 		core->GetAudioPlayback().Play(spl->CompletionSound, AudioPreset::Spatial, SFXChannel::Missile, Pos);
 	}
 
+	// DCC: the spell check picks the band SPL (nothing for a failure)
+	bool dccSpell = caster && IsDCCSpell(SpellResRef);
+	Scriptable* dccTarget = dccSpell ? area->GetScriptableByGlobalID(objects.LastSpellTarget) : nullptr;
+	ResRef castRef = dccSpell ? caster->DCCCastCheck(SpellResRef, dccTarget, objects.LastTargetPos) : SpellResRef;
 	//if the projectile doesn't need to follow the target, then use the target position
-	CreateProjectile(SpellResRef, objects.LastSpellTarget, level, GetSpellDistance(SpellResRef, this) == 0x7fffffff);
+	if (!castRef.IsEmpty()) CreateProjectile(castRef, objects.LastSpellTarget, level, GetSpellDistance(SpellResRef, this) == 0x7fffffff);
 
 	// the original engine saves lasttrigger only in case of SpellCast, so we have to differentiate
 	ieDword oldLastTrigger = objects.LastTrigger;
@@ -1092,6 +1111,7 @@ void Scriptable::CastSpellEnd(int level, bool keepStance)
 	// restore LastTrigger as bg2 otygrate.bcs relies on it; mangles trigger_spellcast for the caster
 	objects.LastTrigger = oldLastTrigger;
 
+	if (dccSpell) caster->DCCEndCast(dccTarget, level);
 	ResetCastingState(caster);
 }
 

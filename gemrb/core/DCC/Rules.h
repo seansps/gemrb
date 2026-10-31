@@ -22,8 +22,14 @@
 #include "DCC/Classes.h"
 #include "DCC/CombatTables.h"
 #include "DCC/Deeds.h"
+#include "DCC/Magic.h"
 
 #include <array>
+#include <map>
+#include <memory>
+#include <set>
+#include <string>
+#include <vector>
 
 namespace GemRB {
 
@@ -71,9 +77,20 @@ public:
 	ThiefSkillTable thiefSkills;
 	CombatTables combat;
 	DeedTable deeds;
+	MagicTables magic;
 
 	/** loads every table through gamedata; logs and returns false if one is missing or bad */
 	bool Load();
+	/** a DCC spell by its base resref (listed in the game's dccspell.2da, with a table of its
+	 * own of the same name), loaded on first use; nullptr for any other spell */
+	const SpellInfo* Spell(const std::string& resref) const;
+	/** the base resrefs dccspell.2da lists */
+	std::vector<std::string> SpellIndex() const;
+
+private:
+	mutable std::map<std::string, std::unique_ptr<SpellInfo>> spells;
+	mutable std::set<std::string> spellIndex;
+	mutable bool spellIndexLoaded = false;
 };
 
 }

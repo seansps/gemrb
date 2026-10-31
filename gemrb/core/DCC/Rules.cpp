@@ -9,6 +9,8 @@
 
 #include "Logging/Logging.h"
 
+#include <algorithm>
+
 namespace GemRB {
 namespace DCC {
 
@@ -105,7 +107,63 @@ bool RulesData::Load()
 	if (!combat.Load()) ok = false;
 	table = gamedata->LoadTable("dccdeeds");
 	if (!table || !deeds.Load(*table)) fail("dccdeeds");
+
+	// spellcasting (M2.5): the generic magic tables
+	static const std::array<const char*, 3> corruptionTables { "dcccorr1", "dcccorr2", "dcccorr3" };
+	for (size_t i = 0; i < corruptionTables.size(); ++i) {
+		table = gamedata->LoadTable(ResRef(corruptionTables[i]));
+		if (!table || !magic.corruption[i].Load(*table)) fail(corruptionTables[i]);
+	}
+	table = gamedata->LoadTable("dccmisf");
+	if (!table || !magic.misfire.Load(*table)) fail("dccmisf");
+	table = gamedata->LoadTable("dccdisap");
+	if (!table || !magic.disapproval.Load(*table)) fail("dccdisap");
+	table = gamedata->LoadTable("dccmerc");
+	if (!table || !magic.mercurial.Load(*table)) fail("dccmerc");
+	table = gamedata->LoadTable("dccburn");
+	if (!table || !magic.spellburn.Load(*table)) fail("dccburn");
+	table = gamedata->LoadTable("dccturn");
+	if (!table || !magic.LoadTurn(*table)) fail("dccturn");
 	return ok;
+}
+
+const SpellInfo* RulesData::Spell(const std::string& resref) const
+{
+	std::string base = resref;
+	std::transform(base.begin(), base.end(), base.begin(), [](unsigned char c) { return std::tolower(c); });
+	auto cached = spells.find(base);
+	if (cached != spells.end()) return cached->second.get();
+
+	// the game's spell index (dccspell.2da, written by tools/iefmt from the YAML sources)
+	if (!spellIndexLoaded) {
+		spellIndexLoaded = true;
+		AutoTable index = gamedata->LoadTable("dccspell", true);
+		if (index) {
+			for (TableMgr::index_t row = 0; row < index->GetRowCount(); ++row) {
+				std::string name = index->GetRowName(row);
+				std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return std::tolower(c); });
+				spellIndex.insert(name);
+			}
+		}
+	}
+	std::unique_ptr<SpellInfo> info;
+	if (spellIndex.count(base)) {
+		AutoTable table = gamedata->LoadTable(ResRef(base), true);
+		info = std::make_unique<SpellInfo>();
+		if (!table || !info->Load(base, *table)) {
+			Log(ERROR, "DCC", "Unable to read the spell table '{}'!", base);
+			info.reset();
+		}
+	}
+	const SpellInfo* result = info.get();
+	spells[base] = std::move(info);
+	return result;
+}
+
+std::vector<std::string> RulesData::SpellIndex() const
+{
+	Spell(""); // loads the index
+	return std::vector<std::string>(spellIndex.begin(), spellIndex.end());
 }
 
 }

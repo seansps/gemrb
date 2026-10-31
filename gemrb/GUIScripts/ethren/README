@@ -20,5 +20,9 @@ Modules here so far:
   deed, a one-off for the next attack), M2.4; the Combat panel (charge or
   grapple for the next melee attack, subdual blows, battle rage), M2.3b.
 - GUIREC.py also has the "Roll body over" button (GemRB.DCCRecoverBody), M2.3b.
+- DCCMagic.py: the spellbook window (M2.5) from the record screen's "Spells":
+  known spells (greyed while lost, pressing one casts it), the spellburn and
+  corruption Luck settings, and for clerics atonement, lay on hands and turn
+  unholy; plus the record sheet's magic lines.
 - DCCAutotest.py: the DCC checks of testdata/dcctest's autotest; idle unless
   the DCC_AUTOTEST global is 1.

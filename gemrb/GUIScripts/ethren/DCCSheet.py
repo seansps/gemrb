@@ -112,6 +112,11 @@ def Lines (pc):
 	if extra:
 		lines.append ("")
 		lines.extend (extra)
+	import DCCMagic
+	magic = DCCMagic.Lines (pc)
+	if magic:
+		lines.append ("")
+		lines.extend (magic)
 	lines.append ("")
 	lines.append ("States: " + StateNames (stats["States"]))
 	return lines

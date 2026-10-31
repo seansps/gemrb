@@ -31,7 +31,7 @@
 namespace GemRB {
 
 constexpr uint8_t NET_MAGIC = 0xE7;
-constexpr uint8_t NET_PROTOCOL_VERSION = 10;
+constexpr uint8_t NET_PROTOCOL_VERSION = 11;
 constexpr uint16_t NET_DEFAULT_PORT = 27015;
 constexpr size_t NET_HEADER_SIZE = 3;
 constexpr size_t NET_MAX_STRING = 1024;
@@ -43,6 +43,8 @@ constexpr size_t NET_MAX_ACTORS = 4096;
 // save transfers: chunk payload and whole save limits
 constexpr size_t NET_SAVE_CHUNK = 32 * 1024;
 constexpr size_t NET_MAX_SAVE_SIZE = 64 * 1024 * 1024;
+// a DCC character's extension (DCC/Extension.h EXT_MAX_SIZE)
+constexpr size_t NET_MAX_DCC_EXTENSION = 64 * 1024;
 // a spawned creature travels as a CRE file
 constexpr size_t NET_MAX_CREATURE_SIZE = 1024 * 1024;
 // slot 0 is always the host, clients get 1..NET_MAX_PEERS
@@ -107,6 +109,7 @@ enum class NetMsgType : uint8_t {
 	ChatHistory, // host -> client, the recent chat a joining player missed
 	Prompt, // host -> client, the open prompt ("ask the owning player") as everyone sees it, or its outcome
 	PromptAnswer, // client -> host, the asked player's answer
+	DCCExtension, // host -> client, a party member's DCC extension changed (v11: spells, corruptions, spellburn, disapproval)
 	count
 };
 
@@ -645,6 +648,16 @@ struct GEM_EXPORT NetSpellbook {
 	bool Read(NetReader& r);
 };
 
+// a party member's DCC extension, the CRE extension's bytes (DCC::WriteExtension)
+struct GEM_EXPORT NetDCCExtension {
+	static constexpr NetMsgType Type = NetMsgType::DCCExtension;
+	uint32_t netID = 0;
+	std::vector<uint8_t> data;
+
+	void Write(NetWriter& w) const;
+	bool Read(NetReader& r);
+};
+
 // the GemRB.* GUI functions a client may ask the host to run for it
 enum class NetGuiOp : uint8_t {
 	DragItem = 1, // actor, slot, count, type (1: from the pile at its feet)
@@ -674,6 +687,10 @@ enum class NetGuiOp : uint8_t {
 	DCCSetDeeds, // actor, signature deed, one-off deed (v9)
 	DCCSetCombat, // actor, combat options, battle rage points (v10)
 	DCCRecoverBody, // dead party slot, ally party slot (v10; host only)
+	DCCSetSpellburn, // actor, spellburn policy, preset, corruption Luck burn (v11)
+	DCCAtone, // actor, gold (v11; host only)
+	DCCLayOnHands, // actor, target (party slot or global ID) (v11; host only)
+	DCCTurnUnholy, // actor (v11; host only)
 	count
 };
 

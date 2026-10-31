@@ -7,6 +7,8 @@
 #include "config.h"
 #include "ie_stats.h"
 
+#include "DCC/Extension.h"
+
 #include "ActorMgr.h"
 #include "DialogHandler.h"
 #include "DisplayMessage.h"
@@ -399,6 +401,7 @@ struct NetSession::Impl {
 	std::map<ieDword, Point> piles; // ground piles the clients know of, by global ID
 	std::map<ieDword, std::vector<NetStatEntry>> stats;
 	std::map<ieDword, uint64_t> spellbooks;
+	std::map<ieDword, uint64_t> dccExtensions; // M2.5: party members' DCC extensions
 	NetPartyState party;
 	bool partyDirty = false;
 	std::map<std::string, uint64_t> storeHashes; // stores remote players have open
@@ -2135,6 +2138,7 @@ struct NetSession::Impl {
 		inventories.erase(id);
 		stats.erase(id);
 		spellbooks.erase(id);
+		dccExtensions.erase(id);
 	}
 
 	void ForgetContainer(ieDword id)
@@ -2187,6 +2191,10 @@ struct NetSession::Impl {
 		ListItems(container->inventory, msg);
 		return msg;
 	}
+
+	// every actor stat travels, the DCC ones past the IE 256 included
+	static_assert(MAX_STATS <= NET_MAX_STATS, "NetActorStats can't carry every actor stat");
+	static_assert(IE_DCC_LAST < MAX_STATS, "a DCC stat is past MAX_STATS");
 
 	static std::vector<NetStatEntry> ActorStats(const Actor* actor)
 	{
@@ -2311,6 +2319,23 @@ struct NetSession::Impl {
 					list += fmt::format(" {}={}/{}", msg.stats[i].stat, msg.stats[i].base, msg.stats[i].modified);
 				}
 				Log(MESSAGE, "Net", "Event: {} stat(s) of net id {} ({}) changed:{}{}", msg.stats.size(), id, fmt::WideToChar { pc->GetShortName() }, list, msg.stats.size() > 6 ? " ..." : "");
+			}
+
+			// M2.5: the DCC extension (known spells and what they do, corruptions, spellburn, disapproval)
+			if (core->HasFeature(GFFlags::RULES_DCC)) {
+				NetDCCExtension ext;
+				ext.netID = id;
+				ext.data = DCC::WriteExtension(pc->dccExt);
+				uint64_t extHash = NetMessageHash(ext);
+				auto extIt = dccExtensions.find(id);
+				if (extIt == dccExtensions.end() || extIt->second != extHash) {
+					dccExtensions[id] = extHash;
+					if (send) {
+						SendEvent(ext, true);
+						Log(MESSAGE, "Net", "Event: DCC extension of net id {} ({}): {} bytes, {} spells, {} corruptions.", id, fmt::WideToChar { pc->GetShortName() },
+						    ext.data.size(), pc->dccExt.spells.size(), pc->dccExt.corruptions.size());
+					}
+				}
 			}
 
 			NetSpellbook book = SpellbookMessage(pc);
@@ -2640,6 +2665,7 @@ struct NetSession::Impl {
 		piles.clear();
 		stats.clear();
 		spellbooks.clear();
+		dccExtensions.clear();
 		partyDirty = false;
 		TrackItems(false);
 	}
@@ -3215,6 +3241,8 @@ struct NetSession::Impl {
 				return ClientEvent<NetPartyState>(data, size, live, [this](const NetPartyState& msg) { ApplyParty(msg); });
 			case NetMsgType::Spellbook:
 				return ClientEvent<NetSpellbook>(data, size, live, [this](const NetSpellbook& msg) { ApplySpellbook(msg); });
+			case NetMsgType::DCCExtension:
+				return ClientEvent<NetDCCExtension>(data, size, live, [this](const NetDCCExtension& msg) { ApplyDCCExtension(msg); });
 			case NetMsgType::StoreState:
 				return ClientEvent<NetStoreState>(data, size, live, [this](const NetStoreState& msg) { ApplyStore(msg); });
 			case NetMsgType::ContainerOpen:
@@ -4159,6 +4187,24 @@ struct NetSession::Impl {
 		game->Reputation = msg.reputation;
 		core->SetEventFlag(EF_PORTRAIT);
 		refreshGUI = true;
+	}
+
+	void ApplyDCCExtension(const NetDCCExtension& msg)
+	{
+		Actor* actor = LocalActor(msg.netID);
+		if (!actor) return;
+		DCC::CharacterExt ext;
+		if (!DCC::ReadExtension(msg.data.data(), msg.data.size(), ext)) {
+			Log(WARNING, "Net", "Bad DCC extension for net id {}.", msg.netID);
+			return;
+		}
+		actor->dccExt = std::move(ext);
+		actor->DCCExtChanged();
+		actor->RefreshEffects();
+		if (actor->InParty) core->SetEventFlag(EF_PORTRAIT);
+		refreshGUI = true;
+		Log(MESSAGE, "Net", "DCC extension of net id {} ({}): {} spells, {} corruptions, disapproval 1-{}.", msg.netID, fmt::WideToChar { actor->GetShortName() },
+		    actor->dccExt.spells.size(), actor->dccExt.corruptions.size(), int(actor->dccExt.disapproval.range));
 	}
 
 	void ApplySpellbook(const NetSpellbook& msg)

@@ -34,6 +34,14 @@
 #      melee, charge, withdrawal, battle rage, subdual blows, cleave and rampage, Crit Table DR
 #      (wounds, flinging, a severed arm), morale (first death, leader, alone and hurt), the record
 #      screen's "Roll body over" and the Combat panel
+#  11. spellcasting (M2.5): Mirela learns spells (mercurial magic with her Luck), spellburns, loses a
+#      spell and gains a corruption before the save; the extension is checked after the load and
+#      the rests (lost spells back, spellburn back a point a day after the first); then after the
+#      fight a wizard, an elf and a cleric outside the party cast the starter spells with forced
+#      dice: every band of all six spells, spell loss and a spellburned recast, the save DC = the
+#      check total, misfires, corruption with and without a Luck burn (and the prompt, with the
+#      wizard in the party), mercurial magic, disapproval and atonement, lay on hands, turn unholy,
+#      the spellburn prompt of a real SpellRES cast, and amnesia
 # Every check logs "[DCC] ok ..." or "[DCC] FAIL ...", and the end "[DCC] autotest done:
 # N checks, F failed"; the DCT_AT_DCC global becomes 1 if all passed, 2 if not.
 import GemRB
@@ -135,6 +143,7 @@ def _StepCheck ():
 	roll = GemRB.DCCRoll (pc, 2, 0, 0, 18) # Luck check: 18 <= 18
 	_Check ("dctilsa Luck check 18 under 18", roll["Success"], 1)
 	_StepCheckLuck ()
+	_StepCheckMagic ()
 
 	# drains: Grub's Str to 0 (immobile), Brak's Sta past 0 (unconscious, floors at 0),
 	# Ilsa's Luck to 0 (cursed by fortune) and 2 points of her Int (no state)
@@ -255,6 +264,7 @@ def _StepSave ():
 def _StepLoaded ():
 	_CheckDrained ("loaded")
 	_CheckLuckLoaded ()
+	_CheckMagicLoaded ()
 	# a night in the field heals 1 point of loss
 	info = GemRB.RestParty (1 | 16, -1, 1)
 	_Check ("field rest allowed", info["Error"], False)
@@ -276,6 +286,7 @@ def _StepRested ():
 	# M2.3b: an injury "until healed" heals with the night, one for good stays
 	_Check ("field rest dctgrub smell back", _Stats ("dctgrub")[1]["InjuryBits"] & DCC_INJ_SMELL, 0)
 	_Check ("field rest dctilsa eye still out", _Stats ("dctilsa")[1]["InjuryBits"] & DCC_INJ_EYE, DCC_INJ_EYE)
+	_CheckMagicRested (False)
 	# bed rest (an inn): 2 points
 	info = GemRB.RestParty (16, -1, 1)
 	_Check ("bed rest allowed", info["Error"], False)
@@ -293,6 +304,7 @@ def _StepBedRested ():
 	# up to the natural maximum only
 	_Check ("bed rest dctsly Luck 14 -> 15 (max)", _Luck (_Party ()["dctsly"]), 15)
 	_Check ("bed rest dctbrak Luck stays 11", _Luck (_Party ()["dctbrak"]), 11)
+	_CheckMagicRested (True)
 
 	# level up: Ilsa is human, so no dwarf; with 10 XP she becomes a warrior
 	GemRB.SetPlayerStat (pc, IE_XP, 10)
@@ -970,6 +982,345 @@ def _Fight ():
 
 	for line in GemRB.GetDCCCombatLog ():
 		_Log ("combat: " + line)
+
+	yield from _Magic_ ()
+
+
+# --- M2.5 spellcasting ----------------------------------------------------------
+
+STATE_SLEEP = 0x20
+DCC_INJ_AMNESIA = 64
+
+def _Magic (actor):
+	return GemRB.GetDCCMagic (actor)
+
+def _Spell (actor, name):
+	for spell in _Magic (actor)["Spells"]:
+		if spell["Spell"] == name:
+			return spell
+	return None
+
+def _Cast (caster, spell, target, dice, burn = None, situational = 0):
+	GemRB.DCCForceDice (caster, dice)
+	if burn is None:
+		r = GemRB.DCCCast (caster, spell, target, None, situational)
+	else:
+		r = GemRB.DCCCast (caster, spell, target, burn, situational)
+	return r
+
+def _StepCheckMagic ():
+	"""before the save: Mirela (wizard 1, Int 17 +2, Luck 6 -1) learns, spellburns, loses a spell, is corrupted"""
+	pc = _Party ()["dctmirel"]
+	m = _Magic (pc)
+	_Check ("dctmirel caster", [m["CasterKind"], m["CasterLevel"], m["MaxSpell"], m["ArmorPenalty"]], [1, 1, 1, 0])
+	# mercurial magic: d% 60 + (-1 x 10) = 50, no change; the manifestation d10 3: a force arrow
+	GemRB.DCCForceDice (pc, [60, 3])
+	_Check ("dctmirel learns magic missile: mercurial 50", GemRB.DCCLearnSpell (pc, "dwmmis"), 50)
+	GemRB.DCCForceDice (pc, [100, 2])
+	_Check ("dctmirel learns sleep: d% 100 - 10 = 90", GemRB.DCCLearnSpell (pc, "dwslee"), 90)
+	GemRB.DCCForceDice (pc, [])
+	_Check ("dctmirel can't learn a spell twice", GemRB.DCCLearnSpell (pc, "dwmmis"), -1)
+	spell = _Spell (pc, "dwmmis")
+	_Check ("dctmirel magic missile", spell and [spell["Mercurial"], spell["Manifestation"], spell["ManifestationText"], spell["Lost"]], [[50], 3, "force arrow", 0])
+	_Check ("log: learns magic missile", _Logged ("Mirela learns Magic Missile (it shows as force arrow); mercurial magic 50: no change"), True)
+	# a spellburned cast: d24 flavour 5, d20 12 + 1 CL + 2 Int + 1 Str = 16: one missile (14-17)
+	r = _Cast (pc, "dwmmis", _ID ("dcttgt4"), [5, 12, 3], [1, 0, 0])
+	_Check ("dctmirel spellburned cast", _Pick (r, ["Natural", "Total", "BandMin", "Burn", "BurnBonus", "Success", "Lost"]), [12, 16, 14, 1, 1, 1, 0])
+	_Check ("log: spellburn", _Logged ("Mirela spellburns 1 (1 Str): pulls out and burns some hair"), True)
+	_Check ("log: the check", _Logged ("Mirela casts Magic Missile: d20 12 +1 CL +2 Int +1 spellburn = 16: 14-17: one missile, 1d4+CL damage"), True)
+	m = _Magic (pc)
+	_Check ("dctmirel spellburn points", [m["Spellburn"]["Points"], m["Spellburn"]["Flavour"]], [[1, 0, 0], 5])
+	_Check ("dctmirel Str after the burn", GemRB.GetDCCStats (pc)["Abilities"][0][:3], [8, 7, 1])
+	# sleep lost for the day, and a major corruption (row 9: horns) the policy doesn't burn Luck for
+	GemRB.DCCSetSpellState (pc, "dwslee", 1 | 4, [90])
+	GemRB.DCCSetSpellburn (pc, -1, -1, 0)
+	_Check ("dctmirel major corruption row 9", GemRB.DCCCorrupt (pc, 2, 1, 9, 0), 9)
+	m = _Magic (pc)
+	_Check ("dctmirel corruption", [[c["Table"], c["Row"]] for c in m["Corruptions"]], [[2, 9]])
+	_Check ("dctmirel horns", "horns" in m["MutationNames"], True)
+	_Check ("dctmirel tinted", m["Tint"] != 0, True)
+	_Check ("dctmirel sleep lost", _Spell (pc, "dwslee")["Lost"], 1)
+
+def _CheckMagicLoaded ():
+	pc = _Party ()["dctmirel"]
+	m = _Magic (pc)
+	_Check ("loaded dctmirel spells", [[s["Spell"], s["Mercurial"], s["Manifestation"], s["Lost"]] for s in m["Spells"]],
+		[["dwmmis", [50], 3, 0], ["dwslee", [90], 2, 1]])
+	_Check ("loaded dctmirel corruption", [[c["Table"], c["Row"], c["Spell"]] for c in m["Corruptions"]], [[2, 9, ""]])
+	_Check ("loaded dctmirel spellburn", [m["Spellburn"]["Points"], m["Spellburn"]["Policy"], m["Spellburn"]["Corruption"], m["Spellburn"]["LastDay"] > 0],
+		[[1, 0, 0], 1, 0, True])
+	_Check ("loaded dctmirel mutations", "horns" in m["MutationNames"], True)
+	_Check ("loaded dctmirel Str loss", GemRB.GetDCCStats (pc)["Abilities"][0][:3], [8, 7, 1])
+
+def _CheckMagicRested (bed):
+	pc = _Party ()["dctmirel"]
+	m = _Magic (pc)
+	_Check ("%s dctmirel sleep back" % ("bed rest" if bed else "field rest"), _Spell (pc, "dwslee")["Lost"], 0)
+	# spellburn: nothing back the first night (she burned that day), a point the next
+	points = [0, 0, 0] if bed else [1, 0, 0]
+	_Check ("%s dctmirel spellburn points" % ("bed rest" if bed else "field rest"), m["Spellburn"]["Points"], points)
+	_Check ("%s dctmirel Str" % ("bed rest" if bed else "field rest"), GemRB.GetDCCStats (pc)["Abilities"][0][:3], [8, 8, 0] if bed else [8, 7, 1])
+
+def _Sweep (caster, spell, target, mod, bands, ally = False):
+	"""casts spell once per band with a forced natural (and a situational modifier past 20), checks the band"""
+	base = spell
+	for index, low in enumerate (bands):
+		natural = max (2, min (19, low - mod))
+		situational = low - mod - natural
+		r = _Cast (caster, spell, target, [natural], None, situational)
+		letter = "abcdefghijk"[index + (2 if bands[0] >= 12 and spell.startswith ("dw") else (1 if spell.startswith ("dc") else 0))]
+		band = base + letter + ("2" if ally else "1")
+		_Check ("%s %s band %d%s" % (GemRB.GetPlayerName (caster, 1), spell, low, " (ally)" if ally else ""),
+			_Pick (r, ["Total", "BandMin", "Success", "Band"]), [low, low, 1, band])
+		GemRB.DCCForceDice (caster, [])
+
+def _Magic_ ():
+	"""M2.5 in play: the starter spells with forced dice"""
+	zed, elf, clem, hale = _ID ("dctzed"), _ID ("dctelf"), _ID ("dctclem"), _ID ("dcthurt")
+	tgt1, tgt2, tgt3, tgt4 = [_ID ("dcttgt%d" % i) for i in range (1, 5)]
+	skel1, skel2 = _ID ("dctskel1"), _ID ("dctskel2")
+	_Check ("M2.5 casters and targets in the area", all ([zed, elf, clem, hale, tgt1, tgt2, tgt3, tgt4, skel1, skel2]), True)
+	m = _Magic (zed)
+	_Check ("dctzed caster", [m["CasterKind"], m["CasterLevel"], m["MaxSpell"], [s["Spell"] for s in m["Spells"]]], [1, 1, 1, ["dwmmis", "dwslee", "dwflam"]])
+	m = _Magic (elf)
+	_Check ("dctelf caster in leather", [m["CasterKind"], m["CasterLevel"], m["ArmorPenalty"]], [1, 1, -1])
+	m = _Magic (clem)
+	_Check ("dctclem caster", [m["CasterKind"], m["CasterLevel"], m["MaxSpell"], m["Disapproval"]], [2, 1, 1, 1])
+	GemRB.GetDCCCombatLog (True)
+
+	# every band of the six spells (Zed: CL 1 + Int 2; Clem: CL 1 + Per 2)
+	_Sweep (zed, "dwmmis", tgt1, 3, [12, 14, 18, 20, 24, 28, 30, 32])
+	_Sweep (zed, "dwslee", tgt2, 3, [12, 14, 18, 20, 24, 28, 30, 32])
+	_Sweep (zed, "dwflam", tgt3, 3, [12, 14, 18, 20, 24, 28, 30, 32])
+	# (Blessing's sweeps come last: its auras would bless everyone near for the other checks)
+	_Sweep (clem, "dcpara", tgt4, 3, [12, 14, 18, 20, 24, 28, 30, 32])
+	_Sweep (clem, "dcword", tgt4, 3, [12, 14, 18, 20, 24, 28, 30, 32])
+	_Check ("dctclem range after successes", _Magic (clem)["Disapproval"], 1)
+	GemRB.DCCSetSpellburn (zed, -1, -1, 0)
+	for i in range (8):
+		yield
+
+	# the band's own dice: 18-19's 1d4 missiles (2), each 1d4 + 1 (4 and 1): 7 damage on target 2
+	hp = _HP (tgt2)
+	r = _Cast (zed, "dwmmis", tgt2, [15, 2, 4, 1])
+	_Check ("magic missile 18-19", _Pick (r, ["Total", "BandMin", "Repeat"]), [18, 18, 1])
+	yield from _Wait (lambda: _HP (tgt2) <= hp - 7, 30)
+	_Check ("two missiles hit target 2 for 7", hp - _HP (tgt2), 7)
+	# a natural 20: + CL again, 4d12 + 1
+	hp = _HP (tgt3)
+	r = _Cast (zed, "dwmmis", tgt3, [20, 12, 12, 12, 12])
+	_Check ("magic missile critical", _Pick (r, ["Natural", "Total", "Critical", "BandMin"]), [20, 24, 1, 24])
+	_Check ("log: critical", _Logged ("Zed casts Magic Missile: d20 20 +1 CL +2 Int +1 critical = 24: 24-27: one great missile, 4d12+CL"), True)
+	yield from _Wait (lambda: _HP (tgt3) <= hp - 49, 30)
+	_Check ("the great missile hits for 49", hp - _HP (tgt3), 49)
+
+	# the save DC is the check total: sleep 14-17 on target 1 and the nearest foe (2 targets);
+	# target 1 rolls 3 (fails), target 2 rolls 19 (saves); the band's duration 1d6 turns (2)
+	GemRB.DCCForceDice (tgt1, [3])
+	GemRB.DCCForceDice (tgt2, [19])
+	r = _Cast (zed, "dwslee", tgt1, [12, 2])
+	_Check ("sleep 14-17", _Pick (r, ["Total", "BandMin", "Success"]), [15, 14, 1])
+	yield from _Wait (lambda: _Logged ("Target 1: Willpower save: 3 +0 = 3 vs DC 15: failed"), 20)
+	_Check ("log: target 1's save vs DC 15", _Logged ("Target 1: Willpower save: 3 +0 = 3 vs DC 15: failed"), True)
+	_Check ("target 1 asleep", bool (GemRB.GetPlayerStat (tgt1, IE_STATE_ID) & STATE_SLEEP), True)
+	GemRB.DCCForceDice (tgt1, [])
+	GemRB.DCCForceDice (tgt2, [])
+
+	# spell loss: 2-11 loses the spell; casting it again needs spellburn of its level (Zed: never by policy)
+	r = _Cast (zed, "dwflam", tgt3, [5])
+	_Check ("flaming hands 2-11: lost", _Pick (r, ["Total", "BandMin", "Success", "Lost"]), [8, 2, 0, 1])
+	_Check ("flaming hands lost for the day", _Spell (zed, "dwflam")["Lost"], 1)
+	r = _Cast (zed, "dwflam", tgt3, [15])
+	_Check ("a lost spell won't cast", _Pick (r, ["Band", "Success"]), ["", 0])
+	r = _Cast (zed, "dwflam", tgt3, [7, 10, 2], [1, 0, 0])
+	_Check ("a lost spell with 1 point of spellburn", _Pick (r, ["Burn", "BurnBonus", "Total", "BandMin", "Success"]), [1, 0, 13, 12, 1])
+	_Check ("log: spellburn for the lost spell", _Logged ("Zed spellburns 1 (1 Str, 1 for the lost spell)"), True)
+	# 20 points of spellburn count as a natural 20
+	r = _Cast (zed, "dwmmis", tgt4, [9, 4], [8, 6, 6])
+	_Check ("20 points of spellburn: a natural 20", _Pick (r, ["Natural", "Critical", "Burn", "BurnBonus", "Total"]), [20, 1, 20, 20, 44])
+	GemRB.SetPlayerStat (zed, IE_DCC_LOSS_STR, 0)
+	GemRB.SetPlayerStat (zed, IE_DCC_LOSS_STR + 1, 0)
+	GemRB.SetPlayerStat (zed, IE_DCC_LOSS_STR + 2, 0)
+	yield
+
+	# a natural 1: magic missile's 1d6 + Luck 0 = 2: corruption, d8 5: the eyes go chalk white
+	r = _Cast (zed, "dwmmis", tgt4, [1, 2, 5])
+	_Check ("magic missile natural 1", _Pick (r, ["NatOne", "BandMin", "Lost", "NatOneOutcome", "CorruptionTable", "CorruptionRow", "CorruptionCancelled"]),
+		[1, 1, 1, 1, 0, 5, 0])
+	m = _Magic (zed)
+	_Check ("zed corrupted: white eyes", [[c["Table"], c["Row"], c["Spell"]] for c in m["Corruptions"]], [[0, 5, "dwmmis"]])
+	_Check ("zed's strange eyes", "strange eyes" in m["MutationNames"], True)
+	_Check ("log: corruption", _Logged ("Zed is corrupted: the eyes go chalk white (corruption)"), True)
+	# sleep's natural 1: 1d6 1 = corruption, d6 5 = major corruption, 1d10 10 - 1 + 0 = 9: horns
+	r = _Cast (zed, "dwslee", tgt4, [1, 1, 5, 10])
+	_Check ("sleep natural 1: major corruption", _Pick (r, ["NatOneOutcome", "CorruptionTable", "CorruptionRow"]), [1, 2, 9])
+	# with "always burn Luck": flaming hands' natural 1, 1d6 1, d4 3 (its hair burns away) is cancelled
+	GemRB.SetPlayerStat (zed, IE_DCC_LOSS_STR, 0)
+	GemRB.DCCSetSpellState (zed, "dwflam", 0)
+	GemRB.DCCSetSpellburn (zed, -1, -1, 3)
+	luck = _Luck (zed)
+	r = _Cast (zed, "dwflam", tgt4, [1, 1, 3])
+	_Check ("flaming hands natural 1: Luck cancels it", _Pick (r, ["CorruptionRow", "CorruptionCancelled"]), [3, 1])
+	_Check ("zed burned 1 Luck", _Luck (zed), luck - 1)
+	_Check ("zed's corruptions", len (_Magic (zed)["Corruptions"]), 2)
+	GemRB.DCCSetSpellburn (zed, -1, -1, 0)
+	# a misfire: the elf (Luck +2) rolls a natural 1, 1d6 2 + 2 = 4: misfire, d6 2: the missiles ricochet, 1d3 3 - 1 = 2
+	hp = _HP (elf)
+	r = _Cast (elf, "dwmmis", tgt4, [1, 2, 2, 3])
+	_Check ("elf natural 1: misfire", _Pick (r, ["NatOneOutcome", "MisfireRoll"]), [4, 2])
+	_Check ("the ricochet hurts the elf for 2", hp - _HP (elf), 2)
+	_Check ("log: misfire", _Logged ("Lirael's Magic Missile misfires (2): the missiles ricochet into the caster; Lirael takes 2 damage"), True)
+	yield
+
+	# mercurial magic: the elf (Luck +2) learns sleep: d% 50 + 20 = 70
+	GemRB.DCCForceDice (elf, [50, 1])
+	_Check ("elf learns sleep: d% 50 + 20 = 70", GemRB.DCCLearnSpell (elf, "dwslee"), 70)
+	GemRB.DCCForceDice (elf, [])
+	# the elf's armor (-1) and its lucky spell (+2, frozen): d20 10 + 1 + 1 - 1 + 2 = 13
+	GemRB.DCCSetSpellState (elf, "dwmmis", 2, None, 2)
+	r = _Cast (elf, "dwmmis", tgt4, [10])
+	_Check ("elf in leather, lucky spell", _Pick (r, ["Total", "BandMin"]), [13, 12])
+	_Check ("log: elf's check", _Logged ("Lirael casts Magic Missile: d20 10 +1 CL +1 Int -1 armor +2 Luck = 13"), True)
+	# 96: the die a step up (d24), a natural 21 crits
+	GemRB.DCCSetSpellState (zed, "dwflam", 4, [96])
+	r = _Cast (zed, "dwflam", tgt3, [21, 3])
+	_Check ("mercurial 96: d24", _Pick (r, ["Die", "Natural", "Critical", "Total"]), [24, 21, 1, 25])
+	# 12: -4 to spell checks for 1d4 rounds after the cast (sleep 12-13, 1d6 turns 1, then 1d4 2)
+	GemRB.DCCSetSpellState (zed, "dwslee", 4, [12])
+	r = _Cast (zed, "dwslee", tgt4, [10, 1, 2])
+	_Check ("mercurial 12 after the cast", _Magic (zed)["SpellMod"], -4)
+	_Check ("log: mercurial 12", _Logged ("Zed's mercurial magic (12): -4 to spell checks for 1d4 rounds"), True)
+	yield
+
+	# disapproval (Clem: CL 1 + Per 2, Luck 0): a natural 1, 1d4 3: must win a convert, -1 until tomorrow
+	r = _Cast (clem, "dcbles", clem, [1, 3])
+	_Check ("clem natural 1: disapproval", _Pick (r, ["Disapproval", "DisapprovalRoll", "RangeAfter", "Success"]), [1, 3, 2, 0])
+	_Check ("clem -1 to spell checks", _Magic (clem)["SpellMod"], -1)
+	# a natural 2 is in the range now: 2d4 4 + 4 = 8: -4 with this spell until tomorrow
+	r = _Cast (clem, "dcbles", clem, [2, 4, 4])
+	_Check ("clem natural 2 in the range", _Pick (r, ["Disapproval", "DisapprovalRoll", "RangeAfter"]), [1, 8, 3])
+	_Check ("blessing's own penalty", _Spell (clem, "dcbles")["Penalty"], 1)
+	# a plain failure widens it too: 6 + 3 - 1 = 8
+	r = _Cast (clem, "dcpara", tgt4, [6])
+	_Check ("clem fails: the range widens", _Pick (r, ["Total", "Disapproval", "RangeAfter"]), [8, 0, 4])
+	_Check ("log: disapproval", _Logged ("Clem rolls on the disapproval table: 1d4 3 = 3: must win a convert: -1 to spell checks until then"), True)
+	# atonement: 100 gp narrows it by 2
+	_Check ("clem atones with 100 gp", GemRB.DCCAtone (clem, 100), 2)
+	_Check ("clem's range and gold", [_Magic (clem)["Disapproval"], GemRB.GetPlayerStat (clem, IE_GOLD)], [2, 100])
+
+	# lay on hands on Hale (lawful, level 1 warrior: d12, 1 die at most): 12 + 3 - 1 = 14: 3 dice, capped at 1
+	hp = _HP (hale)
+	GemRB.DCCForceDice (clem, [7])
+	_Check ("clem lays on hands", GemRB.DCCLayOnHands (clem, hale, 12), 7)
+	GemRB.DCCForceDice (clem, [])
+	_Check ("hale healed 7", _HP (hale) - hp, 7)
+	_Check ("log: lay on hands", _Logged ("Clem heals Hale: 1d12 (same alignment) = 7 hp"), True)
+	# turn unholy: 15 + 3 + 0 Luck - 1 = 17: 1 HD: 1d3 (2) + 1 turned; both skeletons fail their Will saves
+	GemRB.DCCForceDice (skel1, [1])
+	GemRB.DCCForceDice (skel2, [1])
+	GemRB.DCCForceDice (clem, [2, 3, 3, 3, 4, 4, 4])
+	_Check ("clem turns two skeletons", GemRB.DCCTurnUnholy (clem, 15), 2)
+	GemRB.DCCForceDice (clem, [])
+	_Check ("skeleton 1 flees", bool (GemRB.GetPlayerStat (skel1, IE_STATE_ID) & STATE_PANIC), True)
+	_Check ("log: turning", _Logged ("Clem turns the unholy: d20 15 +1 CL +2 Per -1 = 17: success"), True)
+	yield
+
+	# mercurial 12's -4 runs out first
+	yield from _Wait (lambda: _Magic (zed)["SpellMod"] == 0, 80)
+	_Check ("mercurial 12's -4 ran out", _Magic (zed)["SpellMod"], 0)
+	# the party: Zed takes dead Mirela's place, so his casts ask (spellburn) and offer Luck (corruption)
+	mirela = _Party ().get ("dctmirel")
+	if mirela:
+		GemRB.LeaveParty (mirela)
+	GemRB.ExecuteString ("JoinParty()", zed)
+	yield from _Wait (lambda: "dctzed" in _Party (), 20)
+	_Check ("zed joined the party", "dctzed" in _Party (), True)
+	GemRB.DCCSetSpellState (zed, "dwmmis", 4, [])
+	GemRB.DCCSetSpellburn (zed, 1, 2, 0)
+	GemRB.SetPlayerStat (zed, IE_DCC_LOSS_STR, 0)
+	GemRB.SetPlayerStat (zed, IE_DCC_LOSS_STR + 1, 0)
+	GemRB.SetPlayerStat (zed, IE_DCC_LOSS_STR + 2, 0)
+	points = _Magic (zed)["Spellburn"]["Points"]
+	before = _Magic (zed)["Revision"]
+	# a real SpellRES cast: the prompt before the check (the preset 2 from Str), answered 1 Str 1 Sta;
+	# then d24 4, d20 10 + 3 + 2 = 15, 1d4 3
+	GemRB.DCCForceDice (zed, [4, 10, 3])
+	GemRB.ExecuteString ('SpellRES("dwmmis","dcttgt4")', zed)
+	yield from _Wait (lambda: GemRB.GetPrompt () is not None, 20)
+	prompt = GemRB.GetPrompt ()
+	_Check ("spellburn prompt", prompt and [prompt["Tag"], [f["Value"] for f in prompt["Fields"]], [f["Max"] for f in prompt["Fields"]]],
+		["spellburn", [2, 0, 0], [13, 11, 11]])
+	if prompt:
+		_Log ("prompt: " + prompt["Text"])
+		GemRB.AnswerPrompt (prompt["ID"], [1, 0, 1])
+	yield from _Wait (lambda: GemRB.GetDCCLastCast (zed)["Spell"] == "dwmmis" and _Magic (zed)["Revision"] != before, 40)
+	r = GemRB.GetDCCLastCast (zed)
+	_Check ("the cast after the prompt", _Pick (r, ["Burn", "BurnBonus", "Total", "BandMin"]), [2, 2, 15, 14])
+	_Check ("zed's spellburn", _Magic (zed)["Spellburn"]["Points"], [points[0] + 1, points[1], points[2] + 1])
+	GemRB.DCCForceDice (zed, [])
+	# the corruption's Luck offer goes to the owner: yes burns a point, no keeps the corruption
+	GemRB.DCCSetSpellburn (zed, 0, 0, 0)
+	luck = _Luck (zed)
+	r = _Cast (zed, "dwmmis", tgt4, [1, 2, 6])
+	yield
+	prompt = GemRB.GetPrompt ()
+	_Check ("corruption prompt", prompt and prompt["Tag"], "corruption")
+	if prompt:
+		_Log ("prompt: " + prompt["Text"])
+		GemRB.AnswerPrompt (prompt["ID"], [1])
+	yield from _Wait (lambda: GemRB.GetPrompt () is None, 10)
+	yield
+	_Check ("burned 1 Luck to avoid it", [_Luck (zed), len (_Magic (zed)["Corruptions"])], [luck - 1, 2])
+	GemRB.DCCSetSpellState (zed, "dwmmis", 4, [])
+	r = _Cast (zed, "dwmmis", tgt4, [1, 2, 8])
+	yield
+	prompt = GemRB.GetPrompt ()
+	if prompt:
+		GemRB.AnswerPrompt (prompt["ID"], [0])
+	yield from _Wait (lambda: GemRB.GetPrompt () is None, 10)
+	yield
+	m = _Magic (zed)
+	_Check ("declined: the force stone stays", [len (m["Corruptions"]), "an orbiting stone" in m["MutationNames"]], [3, True])
+	GemRB.DCCForceDice (zed, [])
+
+	# the record screen and the spellbook window
+	import DCCMagic, DCCSheet, GUIREC
+	slot = _Party ()["dctzed"]
+	lines = DCCSheet.Lines (slot)
+	_Check ("sheet: zed's spells", any ("Magic Missile (1)" in line for line in lines), True)
+	_Check ("sheet: zed's horns and what they do", any ("horns start to grow (major): cosmetic" in line for line in lines), True)
+	_Check ("sheet: the white eyes", any ("the eyes go chalk white (the spell's own)" in line for line in lines), True)
+	GUIREC.OpenRecordsWindow (slot)
+	win = DCCMagic.OpenSpellsWindow (slot)
+	_Check ("spellbook window", win is not None, True)
+	DCCMagic.SetSpellburn (2)
+	_Check ("spellbook: preset policy", _Magic (zed)["Spellburn"]["Policy"], 2)
+	DCCMagic.SetSpellburn (-1, 3)
+	_Check ("spellbook: preset 3", _Magic (zed)["Spellburn"]["Preset"], 3)
+	DCCMagic.SetSpellburn (0, 0)
+	DCCMagic.OpenSpellsWindow (clem)
+	_Check ("clem's sheet lines", any ("Disapproval range 1-2" in line for line in DCCMagic.Lines (clem)), True)
+	DCCMagic.Close ()
+	GUIREC.CloseRecordsWindow ()
+	yield
+
+	# amnesia (a crit injury): no spells at all
+	GemRB.ApplyEffect (zed, "DCC:Combat", DCC_INJ_AMNESIA, COMBAT_INJURY | COMBAT_UNTIL_HEALED, "", "", "", "", AFTER_BONUSES)
+	yield
+	r = _Cast (zed, "dwslee", tgt4, [15])
+	_Check ("amnesia: no casting", [r["Band"], r["Success"], "amnesia" in " ".join (r["Notes"])], ["", 0, True])
+
+	# Blessing's every band, on the cleric and on an ally (Clem still has disapproval's -1 until
+	# tomorrow; blessing's own -4 is lifted)
+	GemRB.DCCSetSpellState (clem, "dcbles", 0)
+	_Sweep (clem, "dcbles", clem, 2, [12, 14, 18, 20, 24, 28, 30, 32])
+	_Sweep (clem, "dcbles", hale, 2, [12, 14, 18, 20, 24, 28, 30, 32], True)
+	yield
+	_Check ("hale blessed", GemRB.GetPlayerStat (hale, IE_DCC_ATKMOD) > 0 or GemRB.GetPlayerStat (hale, IE_DCC_ROLLMOD) > 0, True)
+
+	for line in GemRB.GetDCCCombatLog ():
+		if "cast" in line or "spell" in line or "corrupt" in line or "Luck" in line or "disapproval" in line:
+			_Log ("magic: " + line)
 
 FightSteps = None
 

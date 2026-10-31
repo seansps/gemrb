@@ -7,10 +7,12 @@
 # needs no CHU for it. Opened with the "R" button of the message window.
 # "Luck" and "Deeds" open the M2.4 settings panels (DCCLuck), "Combat" the M2.3b one
 # (charge, grapple, subdual blows, battle rage), and "Roll body over" lets a living
-# party member roll a fallen one's body over (GemRB.DCCRecoverBody). The art and the
+# party member roll a fallen one's body over (GemRB.DCCRecoverBody), "Spells" the M2.5
+# spellbook (DCCMagic: known spells, spellburn, disapproval). The art and the
 # level-up button come later (M2.8).
 import GemRB
 import DCCLuck
+import DCCMagic
 import DCCSheet
 from GUIDefines import *
 
@@ -57,6 +59,8 @@ def OpenRecordsWindow (pc = None):
 	# M2.3b: the combat options, and rolling a fallen character's body over
 	_Button (win, 7, 130, Height - 72, 90, 28, "Combat", lambda: DCCLuck.OpenCombatWindow (Shown))
 	BodyButton = _Button (win, 8, 226, Height - 72, 190, 28, "Roll body over", lambda: RecoverBody (Shown))
+	# M2.5: the spellbook
+	_Button (win, 9, 12, Height - 72, 106, 28, "Spells", lambda: DCCMagic.OpenSpellsWindow (Shown))
 	close = _Button (win, 4, Width - 112, Height - 38, 100, 28, "Close", CloseRecordsWindow)
 	close.MakeEscape ()
 	win.Focus ()
@@ -65,6 +69,7 @@ def OpenRecordsWindow (pc = None):
 def CloseRecordsWindow ():
 	global Window, Text, DeedsButton, BodyButton
 	DCCLuck.Close ()
+	DCCMagic.Close ()
 	if Window:
 		Window.Close ()
 	Window = Text = DeedsButton = BodyButton = None
@@ -74,6 +79,7 @@ def OnGameStart ():
 	global Window, Text, DeedsButton, BodyButton
 	Window = Text = DeedsButton = BodyButton = None
 	DCCLuck.OnGameStart ()
+	DCCMagic.OnGameStart ()
 
 def BodyHelper (dead):
 	"""the party member who rolls the body over: the selected one if it can, else the first who can"""
@@ -106,6 +112,7 @@ def _Step (step):
 	if count:
 		Shown = (Shown - 1 + step) % count + 1
 	DCCLuck.Close ()
+	DCCMagic.Close ()
 	UpdateRecordsWindow ()
 
 def UpdateRecordsWindow ():

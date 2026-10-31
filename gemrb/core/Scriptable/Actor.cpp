@@ -36,6 +36,7 @@
 #include "StringMgr.h"
 #include "TableMgr.h"
 
+#include "DCC/Rules.h"
 #include "GUI/GameControl.h"
 #include "GameScript/GSUtils.h" //needed for DisplayStringCore
 #include "GameScript/GameScript.h"
@@ -4227,6 +4228,21 @@ bool Actor::CheckSpellDisruption(int damage) const
 
 bool Actor::HandleCastingStance(const ResRef& spellResRef, bool deplete, bool instant)
 {
+	// DCC: known spells cast with a spell check, nothing to deplete (ActorDCCMagic.cpp)
+	if (core->HasFeature(GFFlags::RULES_DCC) && core->GetDCCRules() && core->GetDCCRules()->Spell(spellResRef.c_str())) {
+		String why;
+		if (!DCCCanCast(spellResRef, &why)) {
+			DCCFeedback(fmt::format(u"{} can't cast that: {}", GetName(), why), FT_COMBAT);
+			dccLastCast = DCCCastRecord();
+			dccLastCast.spell = spellResRef.c_str();
+			dccLastCast.notes.push_back(fmt::format("{}", fmt::WideToChar { why }));
+			SetStance(IE_ANI_READY);
+			return true;
+		}
+		if (!instant) SetStance(IE_ANI_CAST);
+		DCCBeginCast(spellResRef, !instant);
+		return false;
+	}
 	// iwd2 doesn't care, eg. Izbelah in the Volcano will cast Temporal Statis without having it
 	// AND using a normal Spell(Myself,2081)
 	if (deplete && !spellbook.HaveSpell(spellResRef, HS_DEPLETE) && !third) {
@@ -6722,8 +6738,9 @@ void Actor::DoStep(unsigned int newWalkScale, ieDword time)
 		return;
 	}
 	Movable::DoStep(newWalkScale, time);
-	// DCC: walking out of a melee gives the foes a free attack (combat.md "Withdrawal")
-	if (core->HasFeature(GFFlags::RULES_DCC) && !dccEngaged.empty()) {
+	// DCC: walking out of a melee gives the foes a free attack (combat.md "Withdrawal"), but only a
+	// move the creature chose: an action of its own, not a bump out of another's way or a push
+	if (core->HasFeature(GFFlags::RULES_DCC) && !dccEngaged.empty() && !IsBumped() && GetCurrentAction()) {
 		DCCCheckWithdrawal();
 	}
 }

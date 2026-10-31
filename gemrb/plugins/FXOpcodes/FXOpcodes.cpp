@@ -30,6 +30,7 @@
 #include "GameScript/GSUtils.h" //needs for MoveBetweenAreasCore
 #include "GameScript/Matching.h" //needs for GetAllObjects
 #include "GameScript/Targets.h" // fx_teleport_to_target
+#include "DCC/Magic.h"
 #include "DCC/Stats.h"
 #include "Scriptable/Actor.h"
 #include "Scriptable/Container.h"
@@ -402,6 +403,7 @@ int fx_uncanny_dodge(Scriptable* Owner, Actor* target, Effect* fx); // 1cb - 459
 int fx_unknown(Scriptable* Owner, Actor* target, Effect* fx); //???
 int fx_dcc_ability_loss(Scriptable* Owner, Actor* target, Effect* fx); // DCC (ethren)
 int fx_dcc_combat(Scriptable* Owner, Actor* target, Effect* fx);
+int fx_dcc_magic(Scriptable* Owner, Actor* target, Effect* fx);
 
 static EffectDesc effectnames[] = {
 	EffectDesc("*Crash*", fx_crash, EFFECT_NO_ACTOR, -1),
@@ -510,6 +512,7 @@ static EffectDesc effectnames[] = {
 	EffectDesc("Damage", fx_damage, EFFECT_DICED, -1),
 	EffectDesc("DCC:AbilityLoss", fx_dcc_ability_loss, 0, -1),
 	EffectDesc("DCC:Combat", fx_dcc_combat, 0, -1),
+	EffectDesc("DCC:Magic", fx_dcc_magic, 0, -1),
 	EffectDesc("DamageAnimation", fx_damage_animation, 0, -1),
 	EffectDesc("DamageBonusModifier", fx_damage_bonus_modifier, 0, -1),
 	EffectDesc("DamageBonusModifier2", fx_damage_bonus_modifier2, 0, -1), // 49 (iwd, ee)
@@ -8822,6 +8825,34 @@ int fx_dcc_combat(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 				}
 				break;
 			}
+		default:
+			return FX_NOT_APPLIED;
+	}
+	return FX_APPLIED;
+}
+
+// DCC:Magic (ethren, DCCRules; unhardcoded/ethren/effects.ids 0x1c2)
+// spellcasting's lasting modifiers: docs/architecture/rules-dcc.md, "Spellcasting (M2.5)"
+// Parameter2: the kind (DCC::MagicEffect), Parameter1: its value
+int fx_dcc_magic(Scriptable* /*Owner*/, Actor* target, Effect* fx)
+{
+	if (!core->HasFeature(GFFlags::RULES_DCC)) return FX_NOT_APPLIED;
+	if (STATE_GET(STATE_DEAD)) return FX_NOT_APPLIED;
+	int value = static_cast<ieDwordSigned>(fx->Parameter1);
+	using DCC::MagicEffect;
+	switch (static_cast<MagicEffect>(fx->Parameter2 & DCC::COMBAT_KIND_MASK)) {
+		case MagicEffect::SpellMod:
+			STAT_ADD(IE_DCC_SPELLMOD, value);
+			break;
+		case MagicEffect::Block:
+			STAT_SET(IE_DCC_NOCAST, STAT_GET(IE_DCC_NOCAST) | fx->Parameter1);
+			break;
+		case MagicEffect::LayOnHandsMod:
+			STAT_ADD(IE_DCC_LOHMOD, value);
+			break;
+		case MagicEffect::Mutation:
+			STAT_SET(IE_DCC_MUTATION, STAT_GET(IE_DCC_MUTATION) | fx->Parameter1);
+			break;
 		default:
 			return FX_NOT_APPLIED;
 	}

@@ -1,0 +1,12 @@
+2DA V1.0
+*
+     RANGE  SMITE  HD1                HD2                HD3              HD5        HD7        HD9        HD11
+1    0      *      NE                 NE                 NE               NE         NE         NE         NE
+12   30     *      T1                 NE                 NE               NE         NE         NE         NE
+14   30     *      T1d3+CL            NE                 NE               NE         NE         NE         NE
+18   30     *      T1d4+CL            T1                 NE               NE         NE         NE         NE
+20   60     *      T1d6+CL            T1d3+CL            T1               NE         NE         NE         NE
+24   60     1d3    T1d8+CL;D1d4;NS    T1d4+CL            T1d3+CL          T1         NE         NE         NE
+28   60     1d4    T2d6+CL;D1d4;NS    T1d6+CL            T1d4+CL          T1d3+CL    T1         NE         NE
+30   120    1d5    K1d8+CL            T1d8+CL;D1d4;NS    T1d6+CL          T1d4+CL    T1d3+CL    T1         NE
+32   240    1d6    K2d6+CL            T2d6+CL;D1d4;NS    T1d8+CL;D1d4     T1d6+CL    T1d4+CL    T1d3+CL    T1

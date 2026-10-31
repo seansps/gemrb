@@ -15,6 +15,7 @@
 #include "TableMgr.h"
 
 #include "DCC/Deeds.h"
+#include "DCC/Extension.h"
 #include "DCC/Luck.h"
 
 #include "Logging/Logging.h"
@@ -45,11 +46,14 @@ constexpr ieDword FAKE_VARIABLE_OPCODE = 187;
 //   version 2 (M2.4): 25 Luck burn policy (DCC::BurnPolicy), 26 its Luck threshold, 27 Luck flags
 //   (DCC::LuckFlags), 28 signature deed, 29 queued one-off deed (DCC::Deed),
 //   version 3 (M2.3b): 30 battle rage points, 31 combat options (DCC::CombatOption)
+//   version 4 (M2.5): 7 flags: 1 a DCC extension ("DCCX", DCC/Extension.h) follows the effects
+//   section (and variables), at its end: known spells, corruptions, spellburn, disapproval
 // Creatures without the block get Luck 10 (modifier 0), no augur and no loss; as monsters, their
 // IE level stands in for HD and attack bonus (HD 255 marks that). Version 1 blocks and creatures
 // without one get the default Luck and deed settings.
 constexpr size_t DCC_BLOCK_SIZE = 32;
-constexpr ieByte DCC_BLOCK_VERSION = 3;
+constexpr ieByte DCC_BLOCK_VERSION = 4;
+constexpr ieByte DCC_FLAG_EXTENSION = 1;
 constexpr ieDword DCC_DEFAULT_LUCK = 10;
 constexpr ieDword DCC_HD_FROM_LEVEL = 255; // no block: the IE level is the HD and the attack bonus
 
@@ -64,7 +68,8 @@ static void DefaultDCCSettings(Actor* act)
 	act->BaseStats[IE_DCC_COMBATOPT] = 0;
 }
 
-static void ReadDCCBlock(DataStream* str, Actor* act)
+// returns whether a DCC extension follows the effects
+static bool ReadDCCBlock(DataStream* str, Actor* act)
 {
 	std::array<ieByte, DCC_BLOCK_SIZE> block {};
 	str->Read(block.data(), block.size());
@@ -78,7 +83,7 @@ static void ReadDCCBlock(DataStream* str, Actor* act)
 	if (block[0] != 'D' || block[1] != 'C' || block[2] != 'C' || block[3] < 1 || block[3] > DCC_BLOCK_VERSION) {
 		act->BaseStats[IE_DCC_LUCK] = DCC_DEFAULT_LUCK;
 		act->BaseStats[IE_DCC_HD] = DCC_HD_FROM_LEVEL;
-		return;
+		return false;
 	}
 	act->BaseStats[IE_DCC_LUCK] = block[4];
 	act->BaseStats[IE_DCC_AUGUR] = block[5];
@@ -94,18 +99,19 @@ static void ReadDCCBlock(DataStream* str, Actor* act)
 	act->BaseStats[IE_DCC_MINIT] = static_cast<ieDwordSigned>(static_cast<ieByteSigned>(block[19]));
 	act->BaseStats[IE_DCC_DIEDAT] = block[20] | (block[21] << 8) | (block[22] << 16) | (ieDword(block[23]) << 24);
 	act->BaseStats[IE_DCC_BODY] = block[24];
-	if (block[3] < 2) return;
+	if (block[3] < 2) return false;
 	act->BaseStats[IE_DCC_BURNPOLICY] = std::min<ieDword>(block[25], DCC::BURN_POLICY_COUNT - 1);
 	act->BaseStats[IE_DCC_BURNMIN] = block[26];
 	act->BaseStats[IE_DCC_LUCKFLAGS] = block[27];
 	act->BaseStats[IE_DCC_DEED] = std::min<ieDword>(block[28], DCC::DEED_COUNT - 1);
 	act->BaseStats[IE_DCC_NEXTDEED] = std::min<ieDword>(block[29], DCC::DEED_COUNT - 1);
-	if (block[3] < 3) return;
+	if (block[3] < 3) return false;
 	act->BaseStats[IE_DCC_RAGE] = std::min<ieDword>(block[30], DCC::RAGE_MAX_SETTING);
 	act->BaseStats[IE_DCC_COMBATOPT] = block[31] & (DCC::OPT_CHARGE | DCC::OPT_GRAPPLE | DCC::OPT_SUBDUAL);
+	return block[3] >= 4 && (block[7] & DCC_FLAG_EXTENSION);
 }
 
-static void WriteDCCBlock(DataStream* stream, const Actor* act)
+static void WriteDCCBlock(DataStream* stream, const Actor* act, bool extension)
 {
 	auto byte = [act](unsigned int stat) {
 		return static_cast<ieByte>(Clamp<ieDwordSigned>(static_cast<ieDwordSigned>(act->BaseStats[stat]), 0, 255));
@@ -118,6 +124,7 @@ static void WriteDCCBlock(DataStream* stream, const Actor* act)
 	block[4] = byte(IE_DCC_LUCK);
 	block[5] = byte(IE_DCC_AUGUR);
 	block[6] = static_cast<ieByte>(static_cast<ieByteSigned>(Clamp<ieDwordSigned>(static_cast<ieDwordSigned>(act->BaseStats[IE_DCC_AUGURMOD]), -128, 127)));
+	block[7] = extension ? DCC_FLAG_EXTENSION : 0;
 	for (unsigned int i = 0; i < 6; ++i) {
 		block[8 + i] = byte(IE_DCC_LOSS_STR + i);
 	}
@@ -1034,6 +1041,9 @@ Actor* CREImporter::GetActor(unsigned char is_in_party)
 	// Reading inventory, spellbook, etc
 	ReadInventory(act, inventorySize);
 	ReadSpellbook(act);
+	if (hasDCCExtension) ReadDCCExtension(act);
+	hasDCCExtension = false;
+	if (core->HasFeature(GFFlags::RULES_DCC)) act->DCCSyncSpellbook();
 
 	if (IsCharacter) {
 		ReadChrHeader(act);
@@ -1448,7 +1458,7 @@ void CREImporter::GetActorBG(Actor* act)
 
 	str->ReadScalar<Actor::stat_t, ieByte>(act->BaseStats[IE_TRACKING]);
 	if (core->HasFeature(GFFlags::RULES_DCC)) {
-		ReadDCCBlock(str, act);
+		hasDCCExtension = ReadDCCBlock(str, act);
 	} else {
 		str->Seek(32, GEM_CURRENT_POS);
 	}
@@ -1931,7 +1941,39 @@ void CREImporter::GetActorIWD1(Actor* act) //9.0
 	ReadDialog(act);
 }
 
+// the DCC extension follows the effects (and variables); the DCC block's flag says it is there
+void CREImporter::ReadDCCExtension(Actor* act)
+{
+	if (!EffectsOffset) return;
+	strpos_t at = EffectsOffset + CREOffset + EffectsCount * (TotSCEFF ? 264 : 48);
+	if (str->Seek(at, GEM_STREAM_START) == GEM_ERROR) return;
+	std::vector<uint8_t> data(DCC::EXT_HEADER_SIZE);
+	if (str->Read(data.data(), data.size()) != strret_t(data.size())) return;
+	size_t size = DCC::ExtensionSize(data.data(), data.size());
+	if (!size) {
+		Log(WARNING, "CREImporter", "{}: the DCC block promises an extension, but there is none", act->GetScriptName());
+		return;
+	}
+	data.resize(size);
+	if (str->Read(data.data() + DCC::EXT_HEADER_SIZE, size - DCC::EXT_HEADER_SIZE) != strret_t(size - DCC::EXT_HEADER_SIZE) ||
+	    !DCC::ReadExtension(data.data(), size, act->dccExt)) {
+		Log(WARNING, "CREImporter", "{}: bad DCC extension", act->GetScriptName());
+	}
+}
+
 int CREImporter::GetStoredFileSize(const Actor* actor)
+{
+	int headersize = GetStoredFileSizeStock(actor);
+	dccExtension.clear();
+	if (headersize > 0 && core->HasFeature(GFFlags::RULES_DCC) && (actor->creVersion == CREVersion::V1_0 || actor->creVersion == CREVersion::V1_1) &&
+	    !actor->dccExt.Empty()) {
+		dccExtension = DCC::WriteExtension(actor->dccExt);
+		headersize += int(dccExtension.size());
+	}
+	return headersize;
+}
+
+int CREImporter::GetStoredFileSizeStock(const Actor* actor)
 {
 	int headersize;
 	unsigned int Inventory_Size;
@@ -2357,7 +2399,7 @@ int CREImporter::PutHeader(DataStream* stream, const Actor* actor) const
 		}
 		stream->WriteScalar<Actor::stat_t, ieByte>(actor->BaseStats[IE_TRACKING]);
 		if (core->HasFeature(GFFlags::RULES_DCC) && (actor->creVersion == CREVersion::V1_0 || actor->creVersion == CREVersion::V1_1)) {
-			WriteDCCBlock(stream, actor);
+			WriteDCCBlock(stream, actor, !dccExtension.empty());
 		} else {
 			stream->WriteFilling(32);
 		}
@@ -2839,7 +2881,8 @@ int CREImporter::PutActor(DataStream* stream, const Actor* actor, bool chr)
 	stream->WriteDword(ItemSlotsOffset);
 	stream->WriteDword(ItemsCount ? ItemsOffset : 0);
 	stream->WriteDword(ItemsCount);
-	stream->WriteDword((EffectsCount + VariablesCount) ? EffectsOffset : 0);
+	// DCC: the extension is found after the effects, so their offset is written even without any
+	stream->WriteDword((EffectsCount + VariablesCount || !dccExtension.empty()) ? EffectsOffset : 0);
 	stream->WriteDword(EffectsCount + VariablesCount);
 	const ResRef dialog = actor->GetDialog(false);
 	static const ResRef noneDialog { "NONE" };
@@ -2901,6 +2944,10 @@ int CREImporter::PutActor(DataStream* stream, const Actor* actor, bool chr)
 	ret = PutVariables(stream, actor);
 	if (ret) {
 		return ret;
+	}
+	// DCC: the extension (GetStoredFileSize made it)
+	if (!dccExtension.empty()) {
+		stream->Write(dccExtension.data(), dccExtension.size());
 	}
 
 	return 0;

@@ -332,3 +332,4 @@ IDS
 #dcc-rules-ethren-only-see-docs/architecture/rules-dcc.md
 0x1c0 DCC:AbilityLoss
 0x1c1 DCC:Combat
+0x1c2 DCC:Magic
