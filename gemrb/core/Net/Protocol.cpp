@@ -889,6 +889,19 @@ bool NetSpellbook::Read(NetReader& r)
 	return r.Ok();
 }
 
+void NetDCCExtension::Write(NetWriter& w) const
+{
+	w.U32(netID);
+	w.Bytes(data.data(), std::min(data.size(), NET_MAX_DCC_EXTENSION));
+}
+
+bool NetDCCExtension::Read(NetReader& r)
+{
+	netID = r.U32();
+	data = r.Bytes(NET_MAX_DCC_EXTENSION);
+	return r.Ok();
+}
+
 void NetGuiCall::Write(NetWriter& w) const
 {
 	w.U8(uint8_t(op));

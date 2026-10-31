@@ -389,6 +389,11 @@ void Actor::DCCBeginCast(const ResRef& base, bool ask)
 	if (lost) preset = std::max(preset, info->level);
 	dccCast.burn = PresetBurn(this, preset);
 	dccCast.decided = true;
+	if (dccNextBurnSet) {
+		dccCast.burn = dccNextBurn;
+		dccNextBurnSet = false;
+		return;
+	}
 	if (!ask || settings.policy != SpellburnPolicy::Ask || !InParty) return;
 	const NetSession* net = core->GetNetSession();
 	if ((net && !net->IsHost()) || !core->GetGameControl()) return;

@@ -852,6 +852,9 @@ public:
 	DCC::CharacterExt dccExt;
 	uint32_t dccExtRevision = 0;
 	uint32_t dccMutations = 0; // DCC::Mutation bits of the corruption list (DCCSyncSpellbook)
+	/** tests and scripts: the next cast's spellburn (Str, Agi, Sta), instead of the policy and prompt */
+	std::array<int, 3> dccNextBurn {};
+	bool dccNextBurnSet = false;
 	/** the disapproval roll of a natural in the range (Table 5-7) */
 	void DCCDisapprovalPublic(int natural);
 	void DCCExtChanged();
