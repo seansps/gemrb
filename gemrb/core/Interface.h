@@ -721,11 +721,18 @@ private:
 	void HandleGUIBehaviour(GameControl*);
 	/** Executes everything (non graphical) in the main game loop */
 	void GameLoop(void);
+	/** FastForward: what drawing a frame advances, for the ticks that aren't drawn */
+	void UpdateUndrawnFrame() const;
+	/** autotests: the scenario globals of a new or loaded game, the quit and the time limit */
+	void SetAutotestGlobals() const;
+	void CheckAutotest();
 	/** the internal (without cache) part of GetListFrom2DA */
 	std::vector<ieDword> GetListFrom2DAInternal(const ResRef& resref) const;
 
 public:
 	CoreSettings config;
+	// autotests: 0 passed (or none), 1 failed (AutotestQuit's global isn't 1), 2 timed out
+	int autotestStatus = 0;
 	ResRef GameNameResRef; // baldur / icewind / torment base name for GAM/SAV/BMP files in saves
 	ResRef GoldResRef; //MISC07.itm
 	ResRefMap<ItemList> RtRows;

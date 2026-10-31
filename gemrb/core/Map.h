@@ -378,6 +378,8 @@ public:
 	void SetTileMapProps(TileProps props);
 	void AutoLockDoors() const;
 	void UpdateScripts();
+	/** FastForward: the state DrawMap advances (animations, actors going inactive), for a frame that isn't drawn */
+	void UpdateDrawingStates();
 	/** only rebuilds the draw queues, for co-op clients mirroring the host */
 	void UpdateReplica();
 	bool UpdateTraversabilityCache();

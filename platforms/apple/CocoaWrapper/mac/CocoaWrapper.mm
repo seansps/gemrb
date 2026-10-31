@@ -196,6 +196,7 @@ static bool HasCLIConfig()
 		}
 	}
 	
+	int autotestStatus = 0;
 	try {
 		CoreSettings settings = fromCLI ? LoadFromArgs(cliArgc, cliArgv) : LoadFromDictionary(std::move(config));
 		ToggleLogging(settings.Logging);
@@ -211,6 +212,7 @@ static bool HasCLIConfig()
 		[_configWindow close];
 		// pass control to GemRB
 		gemrb.Main();
+		autotestStatus = gemrb.autotestStatus;
 		VideoDriver.reset();
 	} catch (std::exception& e) {
 		Log(FATAL, "Cocoa Wrapper", "Unable to initialize core: {}. Terminating.", e);
@@ -218,6 +220,10 @@ static bool HasCLIConfig()
 
 	PluginMgr::Get()->RunCleanup();
 
+	// autotests: the result as the exit code (NSApp's terminate always exits with 0)
+	if (autotestStatus) {
+		exit(autotestStatus);
+	}
 	if (fromCLI || [defaults boolForKey:@"TerminateOnClose"]) {
 		[NSApp terminate:self];
 	}

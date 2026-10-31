@@ -344,6 +344,15 @@ CoreSettings LoadFromDictionary(InterfaceConfig cfg)
 	CONFIG_INT("NetTravelVote", config.NetTravelVote);
 	CONFIG_INT("PromptTimeout", config.PromptTimeout);
 	CONFIG_STRING("TestPrompts", config.TestPrompts);
+	CONFIG_STRING("AutotestScenario", config.AutotestScenario);
+	CONFIG_STRING("AutotestQuit", config.AutotestQuit);
+	CONFIG_INT("AutotestTimeout", config.AutotestTimeout);
+	if (cfg.Contains("RandomSeed")) {
+		config.RandomSeed = static_cast<unsigned int>(strtoul(cfg.Get("RandomSeed")->c_str(), nullptr, 0));
+		cfg.Erase("RandomSeed");
+	}
+	CONFIG_INT("FastForward", config.FastForward);
+	config.FastForward = Clamp(config.FastForward, 0, 64);
 
 	auto value = cfg.Get("ModPath", "");
 	if (value.length()) {

@@ -13,6 +13,8 @@
 #include "Game.h"
 #include "GameData.h"
 #include "Interface.h"
+#include "ImageWriter.h"
+#include "PluginMgr.h"
 #include "Item.h"
 #include "KeyMap.h"
 #include "Map.h"
@@ -7083,6 +7085,38 @@ static PyObject* GemRB_DCCLevelUp(PyObject* /*self*/, PyObject* args)
 	// co-op: the host rolls it for the owner (v12), the client gets the new numbers back
 	if (!NetForward(NetGuiOp::DCCLevelUp, { globalID, classID })) return PyLong_FromLong(-2);
 	return PyLong_FromLong(actor->DCCLevelUp(classID));
+}
+
+PyDoc_STRVAR(GemRB_SaveScreenshot__doc,
+	     "===== SaveScreenshot =====\n\
+\n\
+**Prototype:** GemRB.SaveScreenshot (path)\n\
+\n\
+**Description:** Draws the game window (the area, without the GUI) and writes it to a BMP file, \n\
+so autotests can look at sprites and colours. For tests.\n\
+\n\
+**Parameters:**\n\
+  * path - the file to write\n\
+\n\
+**Return value:** True if it was written");
+
+static PyObject* GemRB_SaveScreenshot(PyObject* /*self*/, PyObject* args)
+{
+	const char* cpath = nullptr;
+	PARSE_ARGS(args, "s", &cpath);
+	path_t path = cpath;
+	WindowManager* wm = core->GetWindowManager();
+	Window* gameWin = wm ? wm->GetGameWindow() : nullptr;
+	if (!gameWin) return RuntimeError("No game window!");
+	Holder<Sprite2D> shot = wm->GetScreenshot(gameWin);
+	PluginHolder<ImageWriter> writer = MakePluginHolder<ImageWriter>(PLUGIN_IMAGE_WRITER_BMP);
+	FileStream out;
+	if (!shot || !writer || !out.Create(path)) {
+		Py_RETURN_FALSE;
+	}
+	writer->PutImage(&out, std::move(shot));
+	Log(MESSAGE, "GUIScript", "Screenshot written to {}.", path);
+	Py_RETURN_TRUE;
 }
 
 PyDoc_STRVAR(GemRB_DCCForceDice__doc,
@@ -15060,6 +15094,7 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(DCCRoll, METH_VARARGS),
 	METHOD(DCCLevelUp, METH_VARARGS),
 	METHOD(DCCForceDice, METH_VARARGS),
+	METHOD(SaveScreenshot, METH_VARARGS),
 	METHOD(DCCAttack, METH_VARARGS),
 	METHOD(GetDCCLastAttack, METH_VARARGS),
 	METHOD(GetDCCCombatLog, METH_VARARGS),

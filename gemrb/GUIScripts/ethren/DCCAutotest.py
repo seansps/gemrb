@@ -865,12 +865,10 @@ def _FightDemons ():
 	yield
 
 def _Fight ():
-	GemRB.GetDCCCombatLog (1)
+	"""M2.3: attacks, crits and fumbles with forced dice, bleeding out, a real attack action"""
 	korg, vex, pip, eda, brun, peas = [_ID (n) for n in ("dctkorg", "dctvex", "dctpip", "dcteda", "dctbrun", "dctpeas")]
 	gob1, gob2 = _ID ("dctgob1"), _ID ("dctgob2")
 	_Check ("combatants in the area", all ([korg, vex, pip, eda, brun, peas, gob1, gob2]), True)
-	# the M2.3 checks run without Luck burns (Korg, a warrior, would cancel his fumble by default)
-	GemRB.DCCSetLuckPolicy (korg, DCC_BURN_NEVER, 10, DCC_LUCK_PAUSE | DCC_LUCK_ALLIES)
 
 	# a monster's numbers come from its CRE's DCC block and Table 9-10 (1 HD humanoid: III/d6)
 	gob = GemRB.GetDCCStats (gob1)
@@ -1028,19 +1026,34 @@ def _Fight ():
 	for i in range (6):
 		yield
 
-	yield from _FightLuck ()
-	yield from _FightCompletion ()
-	yield from _FightDemons ()
 
+def _FightFumble ():
 	# Korg fumbles: leather's d8, 7 on Table 4-2 drops the weapon
+	korg, gob2 = _ID ("dctkorg"), _ID ("dctgob2")
 	r = _Attack (korg, gob2, [1, 1, 7])
 	_Check ("korg fumble", _Pick (r[0], ["Fumble", "FumbleDie", "FumbleRoll", "Result"]), [1, 8, 7, "drops its weapon"])
 	_Check ("log: fumble", _Logged ("Fumble (d8 7 = 7): drops its weapon; Korg drops its weapon"), True)
+	yield
 
+def _Fights ():
+	"""the fight's scenarios, in their order"""
+	GemRB.GetDCCCombatLog (1)
+	# the M2.3 checks run without Luck burns (Korg, a warrior, would cancel his fumble by default)
+	GemRB.DCCSetLuckPolicy (_ID ("dctkorg"), DCC_BURN_NEVER, 10, DCC_LUCK_PAUSE | DCC_LUCK_ALLIES)
+	if _Wanted ("combat"):
+		yield from _Fight ()
+	if _Wanted ("luck"):
+		yield from _FightLuck ()
+	if _Wanted ("completion"):
+		yield from _FightCompletion ()
+	if _Wanted ("demons"):
+		yield from _FightDemons ()
+	if _Wanted ("combat"):
+		yield from _FightFumble ()
 	for line in GemRB.GetDCCCombatLog ():
 		_Log ("combat: " + line)
-
-	yield from _Magic_ ()
+	if _Wanted ("magic"):
+		yield from _Magic_ ()
 
 
 # --- M2.5 spellcasting ----------------------------------------------------------
@@ -1384,7 +1397,7 @@ FightSteps = None
 def _StepFight ():
 	global FightSteps
 	if FightSteps is None:
-		FightSteps = _Fight ()
+		FightSteps = _Fights ()
 		# the fight is driven by forced dice: party AI joining in with real dice (a natural 1 fouls a
 		# weapon, say) would make later steps depend on luck
 		GemRB.GameSetScreenFlags (GS_PARTYAI, OP_NAND)
@@ -1405,6 +1418,40 @@ Steps = {
 	"fight": _StepFight,
 }
 
+# Scenarios (scripts/run.sh dcctest-auto --scenario NAMES, default all): the engine sets AT_ONLY
+# and AT_<NAME> for the ones picked. Each runs with the ones it needs before it.
+#   sheet       steps 1-7: the numbers, rolls, drains, the save and load, rests, level up, the record
+#   combat      the M2.3 fight (forced dice, bleeding out, a real attack, the fumble)
+#   luck        M2.4 Luck burns and deeds in the fight
+#   completion  M2.3b combat completion
+#   demons      M2.9's demon crits
+#   magic       M2.5 spellcasting with the starter spells
+SCENARIOS = ("sheet", "combat", "luck", "completion", "demons", "magic")
+NEEDS = {
+	"combat": ["sheet"],
+	"luck": ["sheet"],
+	"completion": ["sheet", "luck"], # Sly died in the luck scenario: his body is rolled over
+	"magic": ["sheet"],
+}
+Picked = None
+
+def _PickScenarios ():
+	global Picked, Failures
+	if not GemRB.GetGameVar ("AT_ONLY"):
+		Picked = set (SCENARIOS)
+		return
+	asked = [name for name in SCENARIOS if GemRB.GetGameVar ("AT_" + name.upper ())]
+	if not asked:
+		Failures += 1
+		_Log ("FAIL no known scenario picked; they are: " + ", ".join (SCENARIOS))
+	Picked = set (asked)
+	for name in asked:
+		Picked.update (NEEDS.get (name, []))
+	_Log ("scenarios: %s (with what they need: %s)" % (", ".join (asked), ", ".join (n for n in SCENARIOS if n in Picked)))
+
+def _Wanted (name):
+	return Picked is None or name in Picked
+
 def _Tick (token):
 	global Step, Failures
 	if token != Token or Step in ("loading", "finished"):
@@ -1413,7 +1460,8 @@ def _Tick (token):
 		if Step == "wait":
 			if GemRB.GetGameVar ("DCC_AUTOTEST") == 1:
 				_Log ("autotest start")
-				Step = "check"
+				_PickScenarios ()
+				Step = "check" if _Wanted ("sheet") else "fight"
 			return
 		if Step == "done":
 			_Log ("autotest done: %d checks, %d failed" % (Checks, Failures))

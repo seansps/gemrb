@@ -965,6 +965,34 @@ VEFObject* Map::GetNextScriptedAnimation(const scaIterator& iter) const
 	return iter->get();
 }
 
+void Map::UpdateDrawingStates()
+{
+	// as DrawMap, without the drawing
+	int q = int(Priority::Display);
+	size_t index = queue[q].size();
+	Actor* actor = GetNextActor(q, index);
+	while (actor) {
+		bool visible = false;
+		if (actor->UpdateDrawingState() && IsExplored(actor->Pos)) {
+			visible = IsVisible(actor->Pos) || actor->Modified[IE_DONOTJUMP] & DNJ_BIRD || actor->GetInternalFlag() & IF_REALLYDIED;
+		}
+		if (!visible || (actor->GetInternalFlag() & (IF_REALLYDIED | IF_ACTIVE)) == (IF_REALLYDIED | IF_ACTIVE)) {
+			actor->SetInternalFlag(IF_TRIGGER_AP, BitOp::NAND);
+			actor->HibernateIfAble();
+		}
+		actor = GetNextActor(q, index);
+	}
+
+	for (auto scaidx = vvcCells.begin(); scaidx != vvcCells.end();) {
+		if ((*scaidx)->UpdateDrawingState(-1)) {
+			scaidx->reset();
+			scaidx = vvcCells.erase(scaidx);
+		} else {
+			++scaidx;
+		}
+	}
+}
+
 //Draw the game area (including overlays, actors, animations, weather)
 void Map::DrawMap(const Region& viewport, FogRenderer& fogRenderer, uint32_t dFlags)
 {

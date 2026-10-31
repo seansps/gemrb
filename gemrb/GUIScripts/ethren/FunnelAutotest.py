@@ -681,16 +681,50 @@ def _StepLoaded ():
 	_Check ("loaded: the roster", len (Roster.Shown), 16)
 	return "done"
 
+# Scenarios (scripts/run.sh funneltest-auto --scenario NAMES, default all): the engine sets AT_ONLY
+# and AT_<NAME> for the ones picked. Each runs with the ones it needs before it.
+SCENARIOS = (
+	("party", _Party), # 1-3: the sixteen, the roster, formation moves
+	("withdrawal", _Withdrawal), # 4
+	("partyai", _PartyAI), # a
+	("encumbrance", _Encumbrance), # b
+	("linetravel", _LineTravel), # c
+	("classpicks", _ClassPicks), # 5
+	("prompts", _Prompts), # 6
+	("travel", _Travel), # 7
+	("save", None), # 8
+)
+NEEDS = {
+	"prompts": ["classpicks"], # the party settings panel's spellburn lines need the wizards
+	# the load checks what these left: the spells, Rolf's death, the party in the cave
+	"save": ["classpicks", "prompts", "travel"],
+}
+Picked = None
+
+def _PickScenarios ():
+	global Picked, Failures
+	names = [name for name, run in SCENARIOS]
+	if not GemRB.GetGameVar ("AT_ONLY"):
+		Picked = set (names)
+		return
+	asked = [name for name in names if GemRB.GetGameVar ("AT_" + name.upper ())]
+	if not asked:
+		Failures += 1
+		_Log ("FAIL no known scenario picked; they are: " + ", ".join (names))
+	Picked = set (asked)
+	for name in asked:
+		Picked.update (NEEDS.get (name, []))
+	_Log ("scenarios: %s (with what they need: %s)" % (", ".join (asked), ", ".join (n for n in names if n in Picked)))
+
+def _Wanted (name):
+	return Picked is None or name in Picked
+
 def _Run ():
-	yield from _Party ()
-	yield from _Withdrawal ()
-	yield from _PartyAI ()
-	yield from _Encumbrance ()
-	yield from _LineTravel ()
-	yield from _ClassPicks ()
-	yield from _Prompts ()
-	yield from _Travel ()
-	_Save ()
+	for name, run in SCENARIOS:
+		if run and _Wanted (name):
+			yield from run ()
+	if _Wanted ("save"):
+		_Save ()
 
 def _StepRun ():
 	global Steps
@@ -700,7 +734,7 @@ def _StepRun ():
 		next (Steps)
 		return "run"
 	except StopIteration:
-		return "save"
+		return "save" if _Wanted ("save") else "done"
 
 StepTable = {
 	"run": _StepRun,
@@ -716,6 +750,7 @@ def _Tick (token):
 		if Step == "wait":
 			if GemRB.GetGameVar ("FNT_AUTOTEST") == 1:
 				_Log ("autotest start")
+				_PickScenarios ()
 				Step = "run"
 			return
 		if Step == "done":
