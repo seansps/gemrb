@@ -196,6 +196,7 @@ def _Withdrawal ():
 		GemRB.DCCForceDice (rat, [])
 		_Check ("withdrawal on a %s move" % how, _LogCount ("Giant rat gets a free attack: Corbin withdraws"), before + 1)
 	_Check ("corbin alive", _Dead (corb), False)
+	_Check ("level 0: the last weapon it fought with", GemRB.GetDCCFunnel (corb)["Occupation"]["LastWeapon"], "fntlswd")
 	GemRB.GameSelectPC (0, 1)
 
 def _ClassPicks ():

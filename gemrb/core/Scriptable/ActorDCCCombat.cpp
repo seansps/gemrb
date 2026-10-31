@@ -434,6 +434,17 @@ bool Actor::DCCBuildSwing(DCCSwing& swing, int hand, const Actor* target, int in
 	if (!header) return false;
 	swing.bash = bash;
 	swing.missile = !bash && (swing.wi->wflags & WEAPON_RANGED);
+	// level 0: trained in the weapon it last fought with (funnel.md), kept in the occupation record
+	if (character && !bash && BaseStats[IE_LEVEL] == 0 && !dccExt.occupation.Empty()) {
+		int slot = 0;
+		const CREItem* used = inventory.GetUsedWeapon(hand == 1, slot);
+		std::string weapon = used ? std::string(used->ItemResRef.c_str()) : std::string();
+		std::transform(weapon.begin(), weapon.end(), weapon.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+		if (!weapon.empty() && weapon != dccExt.occupation.lastWeapon) {
+			dccExt.occupation.lastWeapon = weapon;
+			++dccExtRevision;
+		}
+	}
 	bool fists = !bash && inventory.FistsEquipped();
 
 	uint32_t augurFlags = swing.missile ? AF_MISSILE : AF_MELEE;

@@ -1014,8 +1014,15 @@ TEST(NetProtocolTest, PromptRoundTrip)
 	data = NetEncode(broken);
 	EXPECT_FALSE(NetDecode(data.data(), data.size(), out));
 	data = NetEncode(closed);
-	data[NET_HEADER_SIZE + 4 + 1 + 4] = uint8_t(PromptKind::count);
+	data[NET_HEADER_SIZE + 4 + 1 + 4 + 1] = uint8_t(PromptKind::count); // after id, state, ms left, queued (v12)
 	EXPECT_FALSE(NetDecode(data.data(), data.size(), out));
+	// v12: the count of prompts waiting behind this one travels
+	NetPrompt waiting = closed;
+	waiting.state = NetPrompt::OPEN;
+	waiting.queued = 3;
+	data = NetEncode(waiting);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), out));
+	EXPECT_EQ(out.queued, 3);
 	data = NetEncode(closed);
 	data[NET_HEADER_SIZE + 4] = 2; // state
 	EXPECT_FALSE(NetDecode(data.data(), data.size(), out));

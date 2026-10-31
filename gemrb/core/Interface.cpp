@@ -1633,9 +1633,7 @@ void Interface::LoadGemRBINI()
 	}
 	config.MaxPartySize = Clamp(config.MaxPartySize, 1, HasFeature(GFFlags::RULES_DCC) ? MAX_PARTY_SIZE_DCC : MAX_PARTY_SIZE_STOCK);
 	vars.Set("MaxPartySize", config.MaxPartySize);
-	if (config.MaxPartySize > MAX_PARTY_SIZE_STOCK) {
-		Log(MESSAGE, "Core", "Parties of up to {} characters.", config.MaxPartySize);
-	}
+	Log(MESSAGE, "Core", "Parties of up to {} characters.", config.MaxPartySize);
 
 	// see note in voodooconst.h
 	if (HasFeature(GFFlags::PST_STATE_FLAGS)) {
