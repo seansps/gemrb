@@ -2090,7 +2090,9 @@ void Actor::DCCOnDeath()
 		dccExt.funnel.status = DCC::FunnelStatus::Dead;
 		dccExt.funnel.diedAt = BaseStats[IE_DCC_DIEDAT];
 		const Map* map = GetCurrentArea();
-		dccExt.funnel.diedIn = map ? std::string(map->GetScriptRef().c_str()) : std::string();
+		std::string area = map ? std::string(map->GetScriptRef().c_str()) : std::string();
+		std::transform(area.begin(), area.end(), area.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+		dccExt.funnel.diedIn = area;
 	}
 }
 

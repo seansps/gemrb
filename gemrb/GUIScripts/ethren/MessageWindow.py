@@ -14,6 +14,7 @@ import GUIINV
 import GUIMA
 import GUIREC
 import DCCAutotest
+import FunnelAutotest
 import Roster
 import NetChat
 from GUIDefines import *
@@ -74,6 +75,8 @@ def OnLoad():
 
 	# dcctest-auto: checks the DCC numbers once the area script asks for it
 	DCCAutotest.OnGameStart ()
+	# funneltest-auto: the funnel readiness checks (M2.9), likewise
+	FunnelAutotest.OnGameStart ()
 
 def UpdateControlStatus():
 	pass

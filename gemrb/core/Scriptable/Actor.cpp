@@ -5360,6 +5360,12 @@ ieDword Actor::GetAnyActiveCasterLevel() const
 
 int Actor::GetEncumbranceFactor(bool feedback) const
 {
+	// DCC: no Strength-based weight allowance (equipment.md: encumbrance is by body weight, not
+	// built yet; strmod.2da's allowance would leave a Str 15+ peasant unable to move in the
+	// demo-based test areas, whose table only has a row for 14). Ethren decision until then
+	if (core->HasFeature(GFFlags::RULES_DCC)) {
+		return 1;
+	}
 	int encumbrance = inventory.GetWeight();
 	int maxWeight = GetMaxEncumbrance();
 

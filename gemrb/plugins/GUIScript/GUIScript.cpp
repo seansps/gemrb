@@ -7779,6 +7779,39 @@ static PyObject* GemRB_GameControlMoveSelected(PyObject* /*self*/, PyObject* arg
 	Py_RETURN_NONE;
 }
 
+PyDoc_STRVAR(GemRB_GameControlTravel__doc,
+	     "===== GameControlTravel =====\n\
+\n\
+**Prototype:** GemRB.GameControlTravel (region)\n\
+\n\
+**Description:** What a click on a travel region does: the selected characters head for it and \n\
+may use it (the whole party goes when everyone is near enough). In co-op a client's click goes \n\
+to the host. For scripts and tests.\n\
+\n\
+**Return value:** bool, False if the current area has no such travel region");
+
+static PyObject* GemRB_GameControlTravel(PyObject* /*self*/, PyObject* args)
+{
+	char* region = nullptr;
+	PARSE_ARGS(args, "s", &region);
+	GET_GAME();
+	GET_GAMECONTROL();
+	const Map* map = game->GetCurrentArea();
+	const InfoPoint* exit = map ? map->GetTileMap()->GetInfoPoint(ieVariable(region)) : nullptr;
+	if (!exit || exit->Type != ST_TRAVEL) Py_RETURN_FALSE;
+	NetSession* net = core->GetNetSession();
+	for (Actor* actor : game->selected) {
+		if (net && !net->MayOrder(*actor)) continue;
+		if (net && net->IsReplica()) {
+			net->ForwardUseExit(*actor, *exit);
+		} else {
+			actor->UseExit(exit->GetGlobalID());
+		}
+	}
+	gc->CommandSelectedMovement(exit->Pos, false);
+	Py_RETURN_TRUE;
+}
+
 PyDoc_STRVAR(GemRB_GetActorPosition__doc,
 	     "===== GetActorPosition =====\n\
 \n\
@@ -14957,6 +14990,7 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(GetDCCFunnel, METH_VARARGS),
 	METHOD(DCCWalk, METH_VARARGS),
 	METHOD(GameControlMoveSelected, METH_VARARGS),
+	METHOD(GameControlTravel, METH_VARARGS),
 	METHOD(GetActorPosition, METH_VARARGS),
 	METHOD(DCCSetPromptOptions, METH_VARARGS),
 	METHOD(DCCSetFunnel, METH_VARARGS),

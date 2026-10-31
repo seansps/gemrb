@@ -1397,8 +1397,11 @@ def _Tick (token):
 			return
 		Step = Steps[Step] ()
 	except Exception as error:
+		import traceback
 		Failures += 1
 		_Log ("FAIL step %s raised %s: %s" % (Step, type (error).__name__, error))
+		for line in traceback.format_exc ().splitlines ():
+			_Log ("  " + line)
 		Step = "done"
 
 def OnGameStart ():

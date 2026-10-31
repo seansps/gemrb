@@ -479,7 +479,8 @@ int Actor::DCCLevelUp(int classID, const Roller* roller)
 		return -1;
 	}
 
-	Roller rng = [](int sides) { return RAND(1, sides); };
+	// the actor's dice, so tests can force them (DCCForceDice); random otherwise
+	Roller rng = [this](int sides) { return DCCDie(sides); };
 	int hp = RollLevelHP(info->hitDie, GetDCCAbilityMod(Ability::Sta), GetDCCAugurBonus(AugurRoll::HitPoints), roller ? *roller : rng);
 
 	SetBase(IE_CLASS, classID);
