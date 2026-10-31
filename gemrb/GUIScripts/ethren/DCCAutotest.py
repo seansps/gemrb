@@ -316,6 +316,36 @@ def _StepLethal ():
 	_Check ("record window back on Sly", GUIREC.Shown, _Party ()["dctsly"])
 	GUIREC.CloseRecordsWindow ()
 	_Check ("record window closed", GUIREC.Window, None)
+
+	# the Luck and Deeds panels (M2.4): the same calls their buttons make
+	import DCCLuck
+	brak = _Party ()["dctbrak"]
+	GUIREC.OpenRecordsWindow (brak)
+	DCCLuck.OpenLuckWindow (brak)
+	_Check ("luck panel open", [DCCLuck.Window is not None, DCCLuck.Kind], [True, "luck"])
+	DCCLuck._SetPolicy (DCC_BURN_NEVER)
+	DCCLuck._SetPolicy (None, 12)
+	DCCLuck._SetPolicy (None, None, 0)
+	stats = GemRB.GetDCCStats (brak)
+	_Check ("luck panel: never, keep 12, no pause", [stats["LuckPolicy"], stats["LuckThreshold"], stats["LuckFlags"]], [DCC_BURN_NEVER, 12, 0])
+	DCCLuck.OpenDeedsWindow (brak)
+	_Check ("deeds panel open", DCCLuck.Kind, "deeds")
+	DCCLuck._SetDeeds (DCC_DEED_DISARM)
+	DCCLuck._SetDeeds (-1, DCC_DEED_RALLY)
+	stats = GemRB.GetDCCStats (brak)
+	_Check ("deeds panel: signature disarm, next rally", [stats["Deed"], stats["NextDeed"]], [DCC_DEED_DISARM, DCC_DEED_RALLY])
+	lines = DCCSheet.Lines (brak)
+	for line in lines[-4:]:
+		_Log ("record: " + line)
+	_Check ("record shows the deeds", "Deeds: signature disarm, next attack rally" in lines, True)
+	_Check ("record shows the Luck burn", "Luck burn: never; +1 each" in lines, True)
+	DCCLuck.OpenDeedsWindow (_Party ()["dctsly"])
+	_Check ("no deeds panel for a thief", DCCLuck.Window, None)
+	GUIREC.CloseRecordsWindow ()
+	_Check ("panels closed", [GUIREC.Window, DCCLuck.Window], [None, None])
+	# back to the settings of step 2
+	GemRB.DCCSetLuckPolicy (brak, DCC_BURN_MISS_TO_HIT, 8, DCC_LUCK_PAUSE)
+	GemRB.DCCSetDeeds (brak, DCC_DEED_PUSH, DCC_DEED_BLIND)
 	return "fight"
 
 # --- M2.3 combat -------------------------------------------------------------
