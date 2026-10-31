@@ -471,8 +471,10 @@ bool Actor::DCCBuildSwing(DCCSwing& swing, int hand, const Actor* target, int in
 		return true;
 	}
 	swing.damageBonus += header->DamageBonus + swing.wi->launcherDmgBonus;
-	// subdual blows: fists and the blackjack always, the stance with a sword, axe, club, spear or staff
+	// subdual blows: fists and the blackjack always, the stance with a sword, axe, club, spear or staff;
+	// a monster's natural weapons (its "fists") are lethal (Ethren decision)
 	Subdual subdual = row ? row->subdual : Subdual::Never;
+	if (!character && row && row->key == "UNARMED") subdual = Subdual::Never;
 	bool chosen = GetDCCCombatOptions() & OPT_SUBDUAL;
 	if (!swing.missile && SubdualBlow(subdual, chosen, trained)) {
 		swing.subdual = true;
@@ -934,6 +936,8 @@ static String ApplyFor(EffectRef& ref, ieDword p1, ieDword p2, const Duration& d
 	String what;
 	if (rolled) *rolled = duration;
 	if (duration.kind == Duration::Kind::Permanent || duration.kind == Duration::Kind::UntilHealed) {
+		// DCC:Combat keeps which in the effect too: an old-format CRE doesn't save the source
+		if (ref.Name == fx_dcc_combat_ref.Name) p2 |= duration.kind == Duration::Kind::Permanent ? COMBAT_FOR_GOOD : COMBAT_UNTIL_HEALED;
 		fx = EffectQueue::CreateEffect(ref, p1, p2, FX_DURATION_INSTANT_PERMANENT_AFTER_BONUSES);
 		fx->SourceRef = duration.kind == Duration::Kind::Permanent ? PermanentSource : UntilHealedSource;
 		what = duration.kind == Duration::Kind::Permanent ? u"for good" : u"until healed";
@@ -1171,7 +1175,7 @@ static void ApplyTerm(const TableTerm& term, RowContext& ctx, const WeaponInfo& 
 		} else {
 			percent = std::max(0, (30 + argInt(0, 0)) * 100 / 30); // feet off a 30' move
 		}
-		note = fmt::format(u"speed {}% ", percent) + ApplyFor(fx_dcc_movement_ref, percent, 2, TermDuration(term, 1), who, attacker);
+		note = fmt::format(u"speed {}% ", percent) + ApplyFor(fx_dcc_movement_ref, percent, 2, TermDuration(term, 1, &ctx.lastDuration), who, attacker, 0, &ctx.lastDuration);
 	} else if (key == "ATK") {
 		int value = argInt(0, 0);
 		note = fmt::format(u"{:+} to attack ", value) + ApplyCombat(CombatEffect::AttackMod, value, TermDuration(term, 1, &ctx.lastDuration), who, attacker, &ctx.lastDuration);
@@ -1528,6 +1532,8 @@ static void ApplyTerm(const TableTerm& term, RowContext& ctx, const WeaponInfo& 
 			}
 		}
 		bool blocked = false;
+		// it doesn't block its own way
+		map->ClearSearchMapFor(who);
 		Point landing = PointAway(map, who->Pos, angle, feet, &blocked);
 		who->SetPosition(landing, true);
 		note = fmt::format(u"flung {}'", feet);
@@ -1995,8 +2001,10 @@ void Actor::DCCHealed(int oldHP, int newHP)
 		Feedback(fmt::format(u"{} is healed in time", Name(this)), FT_COMBAT);
 	}
 	// a heal closes a wound that bleeds every round, and wakes the knocked out
-	if (fxqueue.HasEffectWithParam(fx_dcc_combat_ref, static_cast<ieDword>(CombatEffect::Wound))) {
-		fxqueue.RemoveAllEffectsWithParam(fx_dcc_combat_ref, static_cast<ieDword>(CombatEffect::Wound));
+	ieDword wound = static_cast<ieDword>(CombatEffect::Wound);
+	if (fxqueue.HasEffectWithParam(fx_dcc_combat_ref, wound) || fxqueue.HasEffectWithParam(fx_dcc_combat_ref, wound | COMBAT_UNTIL_HEALED)) {
+		fxqueue.RemoveAllEffectsWithParam(fx_dcc_combat_ref, wound);
+		fxqueue.RemoveAllEffectsWithParam(fx_dcc_combat_ref, wound | COMBAT_UNTIL_HEALED);
 		Feedback(fmt::format(u"{}'s wound is closed", Name(this)), FT_COMBAT);
 	}
 	if (fxqueue.HasEffectWithParam(fx_dcc_combat_ref, static_cast<ieDword>(CombatEffect::Subdued))) {
@@ -2146,9 +2154,11 @@ void Actor::DCCCheckWithdrawal()
 		int reach = std::max<int>(foe->GetWeaponRange(false), MELEE_REACH);
 		bool inReach = WithinPersonalRange(foe, this, reach);
 		bool canAttack = !(foe->weaponInfo[0].wflags & WEAPON_RANGED) && !foe->IsDCCHeld() && !foe->Immobile() && !foe->GetStat(IE_DCC_NOATTACK) &&
-				 !foe->GetStat(IE_DCC_PRONE);
-		if (inReach) {
-			++it;
+				 !foe->GetStat(IE_DCC_PRONE) && !(foe->GetStat(IE_STATE_ID) & STATE_PANIC);
+		// still in reach, or walking towards the foe (around it, after it): no withdrawal yet
+		if (inReach || SquaredDistance(foe->Pos, Destination) < SquaredDistance(foe->Pos, Pos)) {
+			if (!inReach) it = dccEngaged.erase(it);
+			else ++it;
 			continue;
 		}
 		// it left the foe's reach on its own feet: one free attack (combat.md "Withdrawal")
@@ -2265,7 +2275,7 @@ bool Actor::DCCRoundEffect(Effect& fx)
 {
 	static const char16_t* abilities[] = { u"Str", u"Agi", u"Sta", u"Per", u"Int", u"Luck" };
 	int value = Signed(fx.Parameter1);
-	switch (static_cast<CombatEffect>(fx.Parameter2)) {
+	switch (static_cast<CombatEffect>(fx.Parameter2 & COMBAT_KIND_MASK)) {
 		case CombatEffect::StandCheck: {
 			// once a round: an ability check to get up or free
 			int dc = value & 0xff;
@@ -2351,9 +2361,12 @@ std::vector<String> Actor::DCCInjuryList() const
 	std::vector<String> lines;
 	const Game* game = core->GetGame();
 	ieDword now = game ? ieDword(game->GameTime) : 0;
-	auto how = [now](const Effect& fx) {
-		if (fx.SourceRef == PermanentSource) return String(u" (for good)");
-		if (fx.SourceRef == UntilHealedSource) return String(u" (until healed)");
+	int combatOpcode = EffectQueue::ResolveEffect(fx_dcc_combat_ref);
+	auto how = [now, combatOpcode](const Effect& fx) {
+		bool combat = static_cast<int>(fx.Opcode) == combatOpcode;
+		if (fx.SourceRef == PermanentSource || (combat && (fx.Parameter2 & COMBAT_FOR_GOOD))) return String(u" (for good)");
+		if (fx.SourceRef == UntilHealedSource || (combat && (fx.Parameter2 & COMBAT_UNTIL_HEALED))) return String(u" (until healed)");
+		if (fx.TimingMode == FX_DURATION_INSTANT_PERMANENT_AFTER_BONUSES || fx.TimingMode == FX_DURATION_INSTANT_PERMANENT) return String(u" (for good)");
 		if (fx.Duration > now) {
 			ieDword rounds = (fx.Duration - now + core->Time.round_size - 1) / core->Time.round_size;
 			return fmt::format(u" ({} round{})", rounds, rounds == 1 ? u"" : u"s");
@@ -2362,13 +2375,13 @@ std::vector<String> Actor::DCCInjuryList() const
 	};
 	static EffectRef refs[] = { fx_dcc_blind_ref, fx_dcc_deaf_ref, fx_dcc_silence_ref, fx_dcc_hold_ref, fx_dcc_movement_ref, fx_dcc_sleep_ref };
 	static const char16_t* names[] = { u"blind", u"deaf", u"can't speak", u"paralyzed", u"slowed", u"unconscious" };
-	int combatOpcode = EffectQueue::ResolveEffect(fx_dcc_combat_ref);
 	auto it = fxqueue.GetFirstEffect();
 	while (const Effect* next = fxqueue.GetNextEffect(it)) {
 		const Effect& fx = *next;
 		bool lasting = fx.SourceRef == PermanentSource || fx.SourceRef == UntilHealedSource;
 		if (static_cast<int>(fx.Opcode) == combatOpcode) {
-			switch (static_cast<CombatEffect>(fx.Parameter2)) {
+			lasting = lasting || (fx.Parameter2 & (COMBAT_UNTIL_HEALED | COMBAT_FOR_GOOD));
+			switch (static_cast<CombatEffect>(fx.Parameter2 & COMBAT_KIND_MASK)) {
 				case CombatEffect::Injury:
 					lines.push_back(Widen(InjuryName(static_cast<Injury>(fx.Parameter1))) + how(fx));
 					break;

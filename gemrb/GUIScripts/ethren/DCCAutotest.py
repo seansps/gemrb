@@ -28,6 +28,12 @@
 #      left to time out (the policy's answer), a save vs death that waits for the answer
 #      (burn and survive; decline and die), and deeds: the deed die on attack and damage,
 #      a signature trip on 3+, nothing on 2, a queued one-off disarm used once, defend, precision
+#  10. combat completion (M2.3b): combat options and lasting injuries through the save and the
+#      rests (steps 2, 4, 5), then in the fight: untrained weapons, fumble 4 and 16+, the dwarf's
+#      shield bash, a backstab and surprise, grappling and a stray blow on the pinned, firing into
+#      melee, charge, withdrawal, battle rage, subdual blows, cleave and rampage, Crit Table DR
+#      (wounds, flinging, a severed arm), morale (first death, leader, alone and hurt), the record
+#      screen's "Roll body over" and the Combat panel
 # Every check logs "[DCC] ok ..." or "[DCC] FAIL ...", and the end "[DCC] autotest done:
 # N checks, F failed"; the DCT_AT_DCC global becomes 1 if all passed, 2 if not.
 import GemRB
@@ -36,8 +42,14 @@ from GUIDefines import *
 from ie_stats import *
 
 STATE_DEAD = 0x800
+STATE_PANIC = 0x4
 LETHAL = 0x100
 PERMANENT = 1 # FX_DURATION_INSTANT_PERMANENT
+AFTER_BONUSES = 9 # FX_DURATION_INSTANT_PERMANENT_AFTER_BONUSES
+# DCC:Combat (Parameter2): the injury kind, and the flags of lasting effects (DCC/Combat.h)
+COMBAT_INJURY = 10
+COMBAT_UNTIL_HEALED = 0x100
+COMBAT_FOR_GOOD = 0x200
 
 Step = "wait"
 Token = 0
@@ -193,6 +205,11 @@ def _StepCheckLuck ():
 	# settings that must come back from the save: misses while Luck 8+, pause only, deeds push / blind next
 	GemRB.DCCSetLuckPolicy (pc, DCC_BURN_MISS_TO_HIT, 8, DCC_LUCK_PAUSE)
 	GemRB.DCCSetDeeds (pc, DCC_DEED_PUSH, DCC_DEED_BLIND)
+	# M2.3b: the combat options and battle rage, and lasting injuries (Ilsa's eye for good, Grub's
+	# lost sense of smell until healed) come back from the save too
+	GemRB.DCCSetCombat (pc, DCC_OPT_SUBDUAL, 2)
+	GemRB.ApplyEffect (_Party ()["dctilsa"], "DCC:Combat", DCC_INJ_EYE, COMBAT_INJURY | COMBAT_FOR_GOOD, "", "", "", "", AFTER_BONUSES)
+	GemRB.ApplyEffect (_Party ()["dctgrub"], "DCC:Combat", DCC_INJ_SMELL, COMBAT_INJURY | COMBAT_UNTIL_HEALED, "", "", "", "", AFTER_BONUSES)
 
 def _CheckLuckLoaded ():
 	pc, brak = _Stats ("dctbrak")
@@ -201,6 +218,12 @@ def _CheckLuckLoaded ():
 	_Check ("loaded dctbrak burned Luck", [brak["Luck"], brak["LuckMax"], brak["Abilities"][5][2]], [11, 14, 3])
 	pc, sly = _Stats ("dctsly")
 	_Check ("loaded dctsly burned Luck", [sly["Luck"], sly["LuckMax"]], [12, 15])
+	_Check ("loaded dctbrak combat options and battle rage", [brak["CombatOptions"], brak["Rage"]], [DCC_OPT_SUBDUAL, 2])
+	GemRB.DCCSetCombat (_Party ()["dctbrak"], 0, 0)
+	pc, ilsa = _Stats ("dctilsa")
+	_Check ("loaded dctilsa eye put out", [ilsa["InjuryBits"] & DCC_INJ_EYE, ilsa["Injuries"]], [DCC_INJ_EYE, ["blind in one eye (for good)"]])
+	pc, grub = _Stats ("dctgrub")
+	_Check ("loaded dctgrub no sense of smell", [grub["InjuryBits"] & DCC_INJ_SMELL, grub["Injuries"]], [DCC_INJ_SMELL, ["no sense of smell (until healed)"]])
 
 SaveName = "DCC autotest"
 
@@ -250,6 +273,9 @@ def _StepRested ():
 	# a thief gets his level (2) of burned Luck back a night; a warrior gets nothing back
 	_Check ("field rest dctsly Luck 12 -> 14", _Luck (_Party ()["dctsly"]), 14)
 	_Check ("field rest dctbrak Luck stays 11", _Luck (_Party ()["dctbrak"]), 11)
+	# M2.3b: an injury "until healed" heals with the night, one for good stays
+	_Check ("field rest dctgrub smell back", _Stats ("dctgrub")[1]["InjuryBits"] & DCC_INJ_SMELL, 0)
+	_Check ("field rest dctilsa eye still out", _Stats ("dctilsa")[1]["InjuryBits"] & DCC_INJ_EYE, DCC_INJ_EYE)
 	# bed rest (an inn): 2 points
 	info = GemRB.RestParty (16, -1, 1)
 	_Check ("bed rest allowed", info["Error"], False)
@@ -339,6 +365,8 @@ def _StepLethal ():
 		_Log ("record: " + line)
 	_Check ("record shows the deeds", "Deeds: signature disarm, next attack rally" in lines, True)
 	_Check ("record shows the Luck burn", "Luck burn: never; +1 each" in lines, True)
+	# M2.3b: the record lists lasting injuries
+	_Check ("record lists ilsa's eye", "Injuries: blind in one eye (for good)" in DCCSheet.Lines (_Party ()["dctilsa"]), True)
 	DCCLuck.OpenDeedsWindow (_Party ()["dctsly"])
 	_Check ("no deeds panel for a thief", DCCLuck.Window, None)
 	GUIREC.CloseRecordsWindow ()
@@ -530,6 +558,244 @@ def _FightLuck ():
 	GemRB.DCCSetLuckPolicy (korg, DCC_BURN_NEVER, 10, ALLFLAGS)
 	yield
 
+# --- M2.3b combat completion --------------------------------------------------
+
+def _Wait (done, most = 40):
+	"""yields until done () or most ticks"""
+	waited = 0
+	while not done () and waited < most:
+		waited += 1
+		yield
+
+def _FightCompletion ():
+	"""M2.3b: the crit and fumble results that are rules now, and the other combat rules, with forced dice"""
+	ids = dict ((name, _ID ("dct" + name)) for name in ("durn", "nim", "wren", "arlo", "vala", "tank", "ox", "thug1", "thug2", "thug3",
+		"weak1", "weak2", "weak3", "weak4", "drake", "orc1", "orc2", "orc3", "wolf"))
+	import DCCLuck
+	_Check ("M2.3b combatants in the area", all (ids.values ()), True)
+	if not all (ids.values ()):
+		return
+	durn, nim, wren, arlo, vala, tank, ox = [ids[n] for n in ("durn", "nim", "wren", "arlo", "vala", "tank", "ox")]
+	thug1, thug2, thug3, weak1, weak2, weak3, weak4, drake = [ids[n] for n in ("thug1", "thug2", "thug3", "weak1", "weak2", "weak3", "weak4", "drake")]
+
+	# untrained: Wren, a wizard, with a club: d20 -> d16; 10 + 0 = 10 vs AC 10, 1d4 2
+	_Check ("wren untrained in the club", GemRB.GetDCCStats (wren)["Trained"], 0)
+	r = _Attack (wren, thug1, [10, 2])
+	_Check ("wren untrained: d16", _Pick (r[0], ["Die", "Natural", "Total", "Hit", "Damage"]), [16, 10, 10, 1, 2])
+	_Check ("record: untrained weapon", any ("untrained weapon (-1d)" in line for line in DCCLuck.Lines (GemRB.GetDCCStats (wren))), True)
+	# fumble 4 (unarmored d4): the weapon is fouled for a turn; the next attack can't be made with it
+	r = _Attack (wren, thug1, [1, 4])
+	_Check ("wren fumble 4: weapon fouled", _Pick (r[0], ["Fumble", "FumbleDie", "FumbleRoll", "Result"]), [1, 4, 4, "weapon fouled"])
+	yield
+	_Check ("wren's weapon fouled", GemRB.GetDCCStats (wren)["Fouled"] > 0, True)
+	r = _Attack (wren, thug1, [15])
+	_Check ("wren can't use the fouled club", [len (r), _Logged ("Wren can't attack: its weapon is fouled")], [0, True])
+
+	# the dwarf's shield bash: deed d3 2; handaxe d20 12 + 2 + 1 = 15, 1d6 4 + 3 = 7; bash d14 9 + 2 + 1 = 12, 1d3 3 + 3 = 6
+	GemRB.DCCSetLuckPolicy (durn, DCC_BURN_NEVER, 10, DCC_LUCK_ALLIES)
+	hp = _HP (thug1)
+	r = _Attack (durn, thug1, [2, 12, 9, 4, 3])
+	_Check ("durn attacks with axe and shield", len (r), 2)
+	_Check ("durn's handaxe", _Pick (r[0], ["Die", "Total", "Hit", "Damage", "Bash"]), [20, 15, 1, 7, 0])
+	_Check ("durn's shield bash", _Pick (r[1], ["Die", "Natural", "Total", "Hit", "Damage", "Bash"]), [14, 9, 12, 1, 6, 1])
+	_Check ("log: shield bash", _Logged ("Durn attacks (shield bash) Thug 1: d14 9 + d3 2 +1 = 12 vs AC 10, hit: 1d3 +3 = 6 damage"), True)
+	yield
+	_Check ("thug 1 took 13", _HP (thug1), hp - 13)
+	# fumble 16+ in plate (d16): hits itself (1d6 3 + 1 + 1 + 1 = 6), and is down until a DC 16 Agility check
+	r = _Attack (durn, thug1, [1, 1, 5, 16, 3])
+	_Check ("durn fumble 16", _Pick (r[0], ["Fumble", "FumbleDie", "FumbleRoll", "Result"]), [1, 16, 16, "hits itself and falls"])
+	yield
+	d = GemRB.GetDCCStats (durn)
+	_Check ("durn down until a DC 16 Agi check", [GemRB.GetPlayerStat (durn, IE_DCC_PRONE), d["StandDC"]], [1, 16])
+	GemRB.DCCForceDice (durn, [20])
+	yield from _Wait (lambda: _Logged ("Durn tries to get up"), 40)
+	GemRB.DCCForceDice (durn, [])
+	_Check ("durn gets up on a 20", [_Logged ("Durn tries to get up: Agi check 20 = 20 vs DC 16: up"), GemRB.GetPlayerStat (durn, IE_DCC_PRONE)], [True, 0])
+
+	# the thief's backstab against an unaware foe (Nim invisible, thug 2 not yet fighting): +3, and the hit is a
+	# crit on Table II; the dagger's backstab damage is 1d10. 8 + 3 + 2 (invisible) = 13; 1d10 6; 1d10 6 on II:
+	# speed and actions halved for 1d4 (2) rounds. Thug 2 is surprised: no action this round
+	GemRB.ApplyEffect (nim, "State:Invisible", 0, 0)
+	yield
+	r = _Attack (nim, thug2, [8, 6, 6, 2])
+	_Check ("nim backstabs", _Pick (r[0], ["Backstab", "Total", "Hit", "Critical", "CritTable", "CritRoll", "Damage", "Result"]), [1, 13, 1, 1, 2, 6, 6, "leg slashed"])
+	_Check ("log: backstab", _Logged ("Nim backstabs Thug 2 (unaware): +3 to hit, a hit is a crit"), True)
+	_Check ("log: surprise", _Logged ("Thug 2 is caught by surprise: no action this round"), True)
+	yield
+	_Check ("thug 2 surprised, half its actions", [GemRB.GetPlayerStat (thug2, IE_DCC_NOATTACK), GemRB.GetDCCStats (thug2)["ActionLimit"]], [1, 1])
+
+	# grappling: Durn d20 15 + 1 (Str) = 16 against thug 1's d20 5 + 1 (HD) = 6: pinned (held)
+	GemRB.DCCForceDice (durn, [15])
+	GemRB.DCCForceDice (thug1, [5])
+	_Check ("durn pins thug 1", GemRB.DCCGrapple (durn, thug1), 1)
+	_Check ("log: grapple", _Logged ("Durn grapples Thug 1: 16 vs 6, pinned"), True)
+	yield
+	_Check ("thug 1 pinned by durn", [GemRB.GetPlayerStat (thug1, IE_DCC_PINNED), GemRB.GetPlayerStat (thug1, IE_HELD)], [durn, 1])
+	# its escape next round: d20 20 + 1 against Durn's 1 + 1
+	GemRB.DCCForceDice (durn, [1])
+	GemRB.DCCForceDice (thug1, [20])
+	# meanwhile Tank misses the pinned thug (helpless: d24 2 + 1 = 3): 1 on the d2, the blow goes to Durn,
+	# d24 18 + 1 = 19 vs AC 10, 1d8 4 + 1 = 5
+	hp = _HP (durn)
+	r = _Attack (tank, thug1, [1, 2, 1, 18, 4])
+	_Check ("tank's miss on a pinned foe", _Pick (r[0], ["Die", "Total", "Hit"]), [24, 3, 0])
+	_Check ("strays to the holder", len (r) > 1 and _Pick (r[1], ["Target", "Free", "Hit", "Damage"]), [durn, 1, 1, 5])
+	_Check ("log: stray blow", _Logged ("Tank's miss goes astray towards Durn"), True)
+	yield
+	_Check ("durn took 5", _HP (durn), hp - 5)
+	yield from _Wait (lambda: _Logged ("Thug 1 struggles against Durn's hold"), 40)
+	GemRB.DCCForceDice (durn, [])
+	GemRB.DCCForceDice (thug1, [])
+	_Check ("thug 1 breaks free", [_Logged ("Thug 1 struggles against Durn's hold: 21 vs 2: free"), GemRB.GetPlayerStat (thug1, IE_DCC_PINNED)], [True, 0])
+
+	# firing into a melee: Arlo's dart at thug 3, Tank next to it (-1); a miss (2), 1 on the d2: at Tank,
+	# d20 18 hits, 1d4 3 + deed 1 = 4
+	r = _Attack (arlo, thug3, [1, 2, 1, 18, 3])
+	_Log ("arlo's dart: %s" % (r[0] if r else None))
+	_Check ("arlo's dart misses into the melee", r and _Pick (r[0], ["Hit", "Fumble"]), [0, 0])
+	_Check ("arlo's dart strays to tank", len (r) > 1 and _Pick (r[1], ["Target", "Hit", "Damage"]), [tank, 1, 4])
+	_Check ("log: dart astray", _Logged ("Arlo's miss goes astray towards Tank"), True)
+
+	# a charge: declared, then a 20' run-up: +2 to hit and -2 AC for a round. d20 10 + d3 2 + 2 = 14
+	ac = GemRB.GetDCCStats (tank)["AC"]
+	GemRB.DCCSetCombat (tank, DCC_OPT_CHARGE)
+	GemRB.ExecuteString ("JumpToPoint([1180.760])", tank)
+	for i in range (3):
+		yield
+	r = _Attack (tank, thug3, [2, 10, 4])
+	_Check ("tank charges", _Pick (r[0], ["Modifier", "Total", "Hit"]), [4, 14, 1])
+	_Check ("log: charge", _Logged ("Tank charges Thug 3 (20' run-up): +2 to hit, -2 AC for a round"), True)
+	yield
+	_Check ("tank -2 AC, the charge used up", [GemRB.GetDCCStats (tank)["AC"], GemRB.GetDCCStats (tank)["CombatOptions"]], [ac - 2, 0])
+
+	# withdrawal: back next to thug 3, a swing engages them; walking away gives thug 3 a free attack (15 + 0, 1d6 3)
+	GemRB.ExecuteString ("JumpToPoint([1180.1000])", tank)
+	for i in range (3):
+		yield
+	_Attack (tank, thug3, [1, 2])
+	GemRB.DCCForceDice (thug3, [15, 3])
+	GemRB.ExecuteString ("MoveToPoint([1180.800])", tank)
+	yield from _Wait (lambda: _Logged ("Thug 3 gets a free attack: Tank withdraws"), 30)
+	GemRB.DCCForceDice (thug3, [])
+	_Check ("log: withdrawal", _Logged ("Thug 3 gets a free attack: Tank withdraws"), True)
+	_Check ("log: the free attack", _Logged ("Thug 3 free attack on Tank: d20 15"), True)
+	GemRB.ExecuteString ("JumpToPoint([1180.1000])", tank)
+	for i in range (3):
+		yield
+
+	# battle rage (Crit Table III, row 0, Tank's Luck 3): he spends 2 (1 Per, 1 Int): +2d12; an ally is caught for 1d4
+	GemRB.DCCSetCombat (tank, 0, 2)
+	r = _Attack (tank, thug3, [1, 20, 3, 1, 4, 2, 5, 6])
+	_Check ("tank crit III row 0", _Pick (r[0], ["Critical", "CritRoll", "Result"]), [1, -2, "wild frenzy catches an ally"])
+	_Check ("log: battle rage", _Logged ("battle rage: Tank spends 1 Per and 1 Int, +2d12 = 11 damage"), True)
+	yield
+	t = GemRB.GetDCCStats (tank)
+	_Check ("tank's Per and Int spent", [t["Abilities"][3][1], t["Abilities"][4][1]], [9, 9])
+
+	# subdual blows: Vala's longsword a die lower (d7): 5 + deed 1 = 6 drops weakling 3 (3 hp): knocked out, not dead
+	GemRB.DCCSetCombat (vala, DCC_OPT_SUBDUAL)
+	r = _Attack (vala, weak3, [1, 15, 5])
+	_Check ("vala's subdual blow", _Pick (r[0], ["Hit", "Subdual", "Damage"]), [1, 1, 6])
+	_Check ("log: subdual", _Logged ("Vala attacks Weakling 3: d20 15 + d8 1 = 16 vs AC 10, hit: 1d7 +1 = 6 damage (deed 1: no trip) (subdual)"), True)
+	yield
+	w = GemRB.GetDCCStats (weak3)
+	_Check ("weakling 3 knocked out", [_Dead (weak3), w["Subdued"], w["HP"], _Logged ("Weakling 3 is knocked out")], [False, 1, 0, True])
+	GemRB.ApplyEffect (weak3, "CurrentHPModifier", 2, 0)
+	yield
+	_Check ("weakling 3 comes to", [GemRB.GetDCCStats (weak3)["Subdued"], _Logged ("Weakling 3 comes to")], [0, True])
+	GemRB.DCCSetCombat (vala, 0)
+
+	# cleave (Crit Table V, 21): d30 21, +3d12; the blow kills weakling 1, a free attack on weakling 2 (15 + 1, 1d8 5 + 1)
+	r = _Attack (vala, weak1, [1, 20, 8, 21, 1, 1, 1, 15, 5])
+	_Check ("vala crit V-21", _Pick (r[0], ["CritTable", "CritRoll", "Result", "Damage"]), [5, 21, "cleaving blow", 12])
+	_Check ("cleave: a free attack on weakling 2", len (r) > 1 and _Pick (r[1], ["Target", "Free", "Hit", "Damage"]), [weak2, 1, 1, 6])
+	_Check ("log: cleave", _Logged ("Vala gets a free attack: Vala cleaves on into Weakling 2"), True)
+	yield from _Wait (lambda: _Dead (weak1), 20)
+	_Check ("weakling 1 dead", _Dead (weak1), True)
+	# decapitated (V-28): weakling 2 dies, Vala keeps attacking foes within 10' until a miss: weakling 4 (15 + 1)
+	r = _Attack (vala, weak2, [1, 20, 2, 28, 15, 3])
+	_Check ("vala crit V-28", _Pick (r[0], ["CritRoll", "Result"]), [28, "decapitated"])
+	_Check ("log: keeps attacking", _Logged ("Vala gets a free attack: Vala keeps attacking"), True)
+	_Check ("the rampage hits weakling 4", len (r) > 1 and _Pick (r[1], ["Target", "Hit"]), [weak4, 1])
+	yield from _Wait (lambda: _Dead (weak2), 20)
+	_Check ("weakling 2 dead", _Dead (weak2), True)
+
+	# Crit Table DR (a 7 HD drake: DR/d20) on Ox: 20, double damage, Str and Agi drop to 1, a wound that bleeds every round
+	r = _Attack (drake, ox, [20, 2, 20])
+	_Check ("drake crit DR-20", _Pick (r[0], ["CritTable", "CritRoll", "Result", "Damage"]), [7, 20, "spines through the body", 4])
+	yield
+	o = GemRB.GetDCCStats (ox)
+	_Check ("ox Str and Agi 1", [o["Abilities"][0][1], o["Abilities"][1][1]], [1, 1])
+	GemRB.DCCForceDice (ox, [5])
+	yield from _Wait (lambda: _Logged ("Ox's wound: 5 damage"), 40)
+	GemRB.DCCForceDice (ox, [])
+	_Check ("log: ox's wound bleeds", _Logged ("Ox's wound: 5 damage"), True)
+	GemRB.ApplyEffect (ox, "CurrentHPModifier", 10, 0)
+	yield
+	_Check ("a heal closes the wound", [_Logged ("Ox's wound is closed"), "bleeding wound (until healed)" in GemRB.GetDCCStats (ox)["Injuries"]], [True, False])
+	# DR-9: flung 3d6 (1+1+1) x 10' = 30' (the d360 says 180: west), +1d4 per 30' (2)
+	r = _Attack (drake, ox, [20, 1, 9, 1, 1, 1, 180, 2])
+	_Check ("drake crit DR-9", _Pick (r[0], ["CritRoll", "Result"]), [9, "tail-slung away"])
+	_Check ("log: flung", _Logged ("flung 30', +2 damage"), True)
+	# DR-8: +1d12, the weapon arm torn off for good: the weapon drops, and Ox fights with the other hand (-1d)
+	r = _Attack (drake, ox, [20, 1, 8, 4])
+	_Check ("drake crit DR-8", _Pick (r[0], ["CritRoll", "Result"]), [8, "arm ripped from its socket"])
+	yield
+	o = GemRB.GetDCCStats (ox)
+	_Check ("ox's arm severed for good", [o["InjuryBits"] & DCC_INJ_WEAPON_ARM, "weapon arm severed (for good)" in o["Injuries"]], [DCC_INJ_WEAPON_ARM, True])
+	r = _Attack (ox, thug2, [1, 5])
+	_Check ("ox with one arm: -1d", r and r[0]["Die"], 16)
+
+	# morale: orc 2 dies; orc 1 (d20 15) stands, orc 3 (d20 3) flees
+	orc1, orc2, orc3, wolf = ids["orc1"], ids["orc2"], ids["orc3"], ids["wolf"]
+	GemRB.DCCForceDice (orc1, [15])
+	GemRB.DCCForceDice (orc3, [3])
+	GemRB.ApplyEffect (orc2, "Death", 0, 4)
+	yield
+	GemRB.DCCForceDice (orc1, [])
+	GemRB.DCCForceDice (orc3, [])
+	_Check ("log: orc 1 stands", _Logged ("Orc 1 checks morale (the first of its side fell): d20 15 = 15 vs 11: stands"), True)
+	_Check ("log: orc 3 flees", _Logged ("Orc 3 checks morale (the first of its side fell): d20 3 = 3 vs 11: flees"), True)
+	_Check ("orc 3 panics", bool (GemRB.GetPlayerStat (orc3, IE_STATE_ID) & STATE_PANIC), True)
+	# the leader (orc 1, 2 HD) falls: orc 3 checks again (d20 18)
+	GemRB.DCCForceDice (orc3, [18])
+	GemRB.ApplyEffect (orc1, "Death", 0, 4)
+	yield
+	GemRB.DCCForceDice (orc3, [])
+	_Check ("log: orc 3 checks for its leader", _Logged ("Orc 3 checks morale (its leader fell): d20 18 = 18 vs 11: stands"), True)
+	# a lone wolf at half hp (d20 2): flees
+	GemRB.DCCForceDice (wolf, [2])
+	GemRB.ApplyEffect (wolf, "Damage", 5, 0)
+	yield
+	GemRB.DCCForceDice (wolf, [])
+	_Check ("log: the wolf alone and hurt", _Logged ("Wolf checks morale (alone and hurt): d20 2 = 2 vs 11: flees"), True)
+
+	# the record screen's "Roll body over": Sly died of the death spell; Luck check 5 under 13, d3 2: -1 Agi
+	import GUIREC
+	sly = _Party ()["dctsly"]
+	_Check ("sly's body can be rolled over", GemRB.GetDCCStats (sly)["BodyRecoverable"], 1)
+	GUIREC.OpenRecordsWindow (sly)
+	_Check ("roll body over button and a helper", [GUIREC.BodyButton is not None, GUIREC.BodyHelper (sly) > 0], [True, True])
+	GemRB.DCCForceDice (sly, [5, 2])
+	_Check ("roll sly's body over", GUIREC.RecoverBody (sly), 1)
+	GemRB.DCCForceDice (sly, [])
+	yield
+	_Check ("sly back at 1 hp", [_Dead (sly), GemRB.GetDCCStats (sly)["HP"]], [False, 1])
+	_Check ("no second roll", GemRB.GetDCCStats (sly)["BodyRecoverable"], 0)
+	# the Combat panel: a charge for the next attack, battle rage 3
+	import DCCLuck
+	brak = _Party ()["dctbrak"]
+	DCCLuck.OpenCombatWindow (brak)
+	_Check ("combat panel open", DCCLuck.Kind, "combat")
+	DCCLuck._SetCombat (DCC_OPT_CHARGE)
+	DCCLuck._SetCombat (None, 3)
+	b = GemRB.GetDCCStats (brak)
+	_Check ("combat panel: charge, rage 3", [b["CombatOptions"], b["Rage"]], [DCC_OPT_CHARGE, 3])
+	_Check ("record shows the combat options", "Combat: charge next, battle rage 3" in DCCSheet.Lines (brak), True)
+	GUIREC.CloseRecordsWindow ()
+	GemRB.DCCSetCombat (brak, 0, 0)
+	yield
+
 def _Fight ():
 	GemRB.GetDCCCombatLog (1)
 	korg, vex, pip, eda, brun, peas = [_ID (n) for n in ("dctkorg", "dctvex", "dctpip", "dcteda", "dctbrun", "dctpeas")]
@@ -695,6 +961,7 @@ def _Fight ():
 		yield
 
 	yield from _FightLuck ()
+	yield from _FightCompletion ()
 
 	# Korg fumbles: leather's d8, 7 on Table 4-2 drops the weapon
 	r = _Attack (korg, gob2, [1, 1, 7])

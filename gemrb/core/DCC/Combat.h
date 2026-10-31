@@ -137,6 +137,12 @@ enum class CombatEffect : uint8_t {
 	Subdued // knocked out at 0 hp by subdual damage; wakes at 1 hp when this ends or on a heal
 };
 
+// DCC:Combat's Parameter2: the kind in the low byte, and for lasting effects one of these (kept in
+// the effect itself: the CRE's old effect format doesn't save its source)
+constexpr uint32_t COMBAT_KIND_MASK = 0xff;
+constexpr uint32_t COMBAT_UNTIL_HEALED = 0x100; // ends with the next night's rest (DCCRestHeal)
+constexpr uint32_t COMBAT_FOR_GOOD = 0x200;
+
 // lasting injuries from crits (CombatEffect::Injury, IE_DCC_INJURY); docs/rules/crits-fumbles.md
 enum Injury : uint32_t {
 	INJ_NONE = 0,

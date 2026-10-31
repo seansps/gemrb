@@ -1747,7 +1747,8 @@ int fx_set_invisible_state(Scriptable* Owner, Actor* target, Effect* fx)
 			} else {
 				STATE_SET(STATE_INVISIBLE);
 			}
-			if (fx->FirstApply || fx->TimingMode != FX_DURATION_INSTANT_PERMANENT) {
+			// DCC: an invisible attacker gets Table 4-1's +2 instead (ActorDCCCombat.cpp)
+			if ((fx->FirstApply || fx->TimingMode != FX_DURATION_INSTANT_PERMANENT) && !core->HasFeature(GFFlags::RULES_DCC)) {
 				target->ToHit.HandleFxBonus(4, fx->TimingMode == FX_DURATION_INSTANT_PERMANENT);
 			}
 			break;
@@ -8714,14 +8715,16 @@ int fx_dcc_combat(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 	bool over = fx->TimingMode == FX_DURATION_JUST_EXPIRED;
 	int value = static_cast<ieDwordSigned>(fx->Parameter1);
 	using DCC::CombatEffect;
-	switch (static_cast<CombatEffect>(fx->Parameter2)) {
+	// the low byte is the kind; DCC::COMBAT_UNTIL_HEALED and COMBAT_FOR_GOOD mark lasting ones
+	ieDword kind = fx->Parameter2 & DCC::COMBAT_KIND_MASK;
+	switch (static_cast<CombatEffect>(kind)) {
 		case CombatEffect::Bleed:
 		case CombatEffect::Doomed:
 			if (over) {
-				target->DCCCountdownOver(static_cast<CombatEffect>(fx->Parameter2));
+				target->DCCCountdownOver(static_cast<CombatEffect>(kind));
 				return FX_NOT_APPLIED;
 			}
-			if (fx->Parameter2 == ieDword(CombatEffect::Bleed)) {
+			if (kind == ieDword(CombatEffect::Bleed)) {
 				// rounds left, for the record screen and the state
 				ieDword now = core->GetGame()->GameTime;
 				ieDword round = core->Time.round_size;
@@ -8792,19 +8795,19 @@ int fx_dcc_combat(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 		case CombatEffect::Pinned:
 			{
 				if (over) {
-					if (fx->Parameter2 == ieDword(CombatEffect::StandCheck) && (fx->Parameter1 & DCC::STAND_PRONE)) target->SetStance(IE_ANI_GET_UP);
+					if (kind == ieDword(CombatEffect::StandCheck) && (fx->Parameter1 & DCC::STAND_PRONE)) target->SetStance(IE_ANI_GET_UP);
 					return FX_NOT_APPLIED;
 				}
 				// the round's work (an ability check, the wound's damage, ...) once a round, from the next one on
 				ieDword now = core->GetGame()->GameTime;
 				if (fx->FirstApply || !fx->Parameter3) {
 					fx->Parameter3 = now + core->Time.round_size;
-					if (fx->Parameter2 == ieDword(CombatEffect::StandCheck) && (fx->Parameter1 & DCC::STAND_PRONE)) target->SetStance(IE_ANI_SLEEP);
+					if (kind == ieDword(CombatEffect::StandCheck) && (fx->Parameter1 & DCC::STAND_PRONE)) target->SetStance(IE_ANI_SLEEP);
 				} else if (now >= fx->Parameter3) {
 					fx->Parameter3 = now + core->Time.round_size;
 					if (!target->DCCRoundEffect(*fx)) return FX_NOT_APPLIED;
 				}
-				if (fx->Parameter2 == ieDword(CombatEffect::StandCheck)) {
+				if (kind == ieDword(CombatEffect::StandCheck)) {
 					STAT_SET(IE_DCC_STAND, fx->Parameter1 & 0xff);
 					if (fx->Parameter1 & DCC::STAND_PRONE) {
 						STAT_SET(IE_DCC_PRONE, 1);
@@ -8812,7 +8815,7 @@ int fx_dcc_combat(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 						STAT_SET(IE_HELD, 1);
 						STATE_SET(STATE_HELPLESS);
 					}
-				} else if (fx->Parameter2 == ieDword(CombatEffect::Pinned)) {
+				} else if (kind == ieDword(CombatEffect::Pinned)) {
 					STAT_SET(IE_DCC_PINNED, fx->Parameter1);
 					STAT_SET(IE_HELD, 1);
 					STATE_SET(STATE_HELPLESS);

@@ -460,6 +460,10 @@ void Actor::DCCRestHeal(bool bedRest)
 	// heal with a night's rest (Ethren decision)
 	DCCNightlyInjuries();
 	fxqueue.RemoveAllEffects(ResRef("DCCHEAL"));
+	static EffectRef fx_dcc_combat_ref = { "DCC:Combat", -1 };
+	for (ieDword kind = 0; kind <= static_cast<ieDword>(CombatEffect::Subdued); ++kind) {
+		fxqueue.RemoveAllEffectsWithParam(fx_dcc_combat_ref, kind | COMBAT_UNTIL_HEALED);
+	}
 	for (int i = 0; i < ABILITY_COUNT; ++i) {
 		Ability ability = static_cast<Ability>(i);
 		int loss = Signed(BaseStats[LossStat(ability)]);
