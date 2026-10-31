@@ -361,6 +361,14 @@ void Map::UseExit(Actor* actor, InfoPoint* ip)
 	const Game* game = core->GetGame();
 
 	int EveryOne = ip->CheckTravel(actor);
+	// DCC (M2.10): a funnel of 16 strung out in a line can't stand within MAX_TRAVELING_DISTANCE of
+	// one spot by itself: the rest of the party (or of the selection) comes to the exit, and the trip
+	// starts once everyone is near the one standing in it (this check runs every tick it stands there)
+	if (core->HasFeature(GFFlags::RULES_DCC) && !ip->Destination.IsEmpty() && (EveryOne == CT_GO_CLOSER || EveryOne == CT_SELECTED)) {
+		if (DCCGatherAtExit(ip, actor->Pos, EveryOne == CT_SELECTED)) {
+			return;
+		}
+	}
 	switch (EveryOne) {
 		case CT_GO_CLOSER:
 			if (LastGoCloser < game->Ticks) {
@@ -400,6 +408,36 @@ void Map::UseExit(Actor* actor, InfoPoint* ip)
 		ip->ExecuteScript(1);
 		ip->ProcessActions();
 	}
+}
+
+int Map::DCCGatherAtExit(const InfoPoint* ip, const Point& goal, bool onlySelected)
+{
+	const Game* game = core->GetGame();
+	if (!game || !ip) return 0;
+	int coming = 0;
+	for (int i = 0; i < game->GetPartySize(false); ++i) {
+		Actor* pc = game->GetPC(i, false);
+		if (!pc || pc->GetCurrentArea() != this) continue;
+		if (onlySelected && !pc->IsSelected()) continue;
+		if (pc->GetStat(IE_STATE_ID) & STATE_DEAD) continue;
+		if (Distance(goal, pc) <= MAX_TRAVELING_DISTANCE) continue;
+		// someone who can't move or isn't ours to move keeps the party here, as in the stock rule
+		if (pc->GetStat(IE_EA) > EA_GOODCUTOFF || (pc->GetStat(IE_STATE_ID) & STATE_CANTMOVE) || !pc->CalculateSpeed(false)) return 0;
+		// on its way already: walking there, or sent here and its walk not started yet
+		bool sent = !pc->CannotPassEntrance(ip->GetGlobalID()) && (pc->GetCurrentAction() || pc->GetNextAction());
+		if ((pc->InMove() && Distance(pc->Destination, goal) <= MAX_TRAVELING_DISTANCE / 2) || (sent && !pc->InMove())) {
+			++coming;
+			continue;
+		}
+		Holder<Action> action = GenerateAction(fmt::format("MoveToPoint([{}.{}])", goal.x, goal.y));
+		if (!action) return coming;
+		action->int0Parameter = MAX_TRAVELING_DISTANCE / 10;
+		pc->CommandActor(std::move(action), true);
+		pc->UseExit(ip->GetGlobalID());
+		Log(MESSAGE, "Map", "{} heads for the exit '{}' with the party.", fmt::WideToChar { pc->GetShortName() }, ip->GetScriptName());
+		++coming;
+	}
+	return coming;
 }
 
 //Draw two overlapped animations to achieve the original effect

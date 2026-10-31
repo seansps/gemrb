@@ -638,6 +638,13 @@ private:
 	void DeleteActor(size_t idx);
 	//actor uses travel region
 	void UseExit(Actor* pc, InfoPoint* ip);
+public:
+	/** DCC (M2.10): the party members in this area that aren't within MAX_TRAVELING_DISTANCE of
+	 * goal head there to use the exit (only the selected with onlySelected); returns how many are
+	 * on their way (sent now or already walking there), 0 if nobody can come */
+	int DCCGatherAtExit(const InfoPoint* ip, const Point& goal, bool onlySelected);
+
+private:
 	//separated position adjustment, so their order could be randomised
 
 	void UpdateSpawns() const;

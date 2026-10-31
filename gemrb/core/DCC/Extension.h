@@ -8,8 +8,9 @@
  * spells a caster knows with their mercurial magic, manifestation and
  * whether they are lost for the day, corruptions), spellburn recovery and
  * the cleric's disapproval range; the 0-level occupation (OCCU) and the
- * character's place in the funnel (FUNL). M2.6 adds patrons as a record of
- * their own.
+ * character's place in the funnel (FUNL); the body weight and the party AI
+ * mode (CHAR, M2.10: kept as stats at run time, IE_DCC_WEIGHT and IE_DCC_PARTYAI).
+ * M2.6 adds patrons as a record of their own.
  *
  * It is saved as a variable-length extension of the CRE ("DCCX", see
  * docs/architecture/rules-dcc.md, "The CRE extension") and replicated to
@@ -212,6 +213,30 @@ struct Funnel {
 	bool Empty() const { return status == FunnelStatus::None && !order && player == FUNNEL_NO_PLAYER && !flags && !diedAt && diedIn.empty(); }
 };
 
+// what a party member does on its own, by the DCC party AI script (DCCPARTY, M2.10). The
+// game-wide party AI toggle (the AI button, CS_PARTY_AI) still turns every party script off.
+enum class PartyAI : uint8_t {
+	Defend, // fights back against an attacker within its weapon's reach, or an enemy that comes within reach; holds its place, never chases
+	Flee, // as Defend, but under half its hit points it runs from an enemy it sees nearby
+	Passive, // does nothing on its own
+	Engage, // as Defend, and also goes for enemies it sees close by (a short leash, never across the map)
+	count
+};
+constexpr PartyAI DEFAULT_PARTY_AI = PartyAI::Defend;
+// the party AI script DCC games give every party member (SCR_DEFAULT) instead of the stock
+// DPLAYER2/DPLAYER3; its source is game/src/scripts/dccparty.baf
+constexpr const char* PARTY_AI_SCRIPT = "DCCPARTY";
+GEM_EXPORT const char* PartyAIName(PartyAI mode);
+
+// "CHAR" (M2.10): what didn't fit the CRE's DCC block. At run time these are the stats
+// IE_DCC_WEIGHT and IE_DCC_PARTYAI; the record only carries them through CREs and saves
+// (CREImporter moves them into the stats on load and back on save).
+struct Body {
+	uint16_t weight = 0; // body weight in pounds, 0 not rolled
+	PartyAI partyAI = DEFAULT_PARTY_AI;
+	bool Empty() const { return !weight && partyAI == DEFAULT_PARTY_AI; }
+};
+
 struct RawRecord {
 	std::array<char, 4> tag {};
 	uint16_t version = 0;
@@ -225,6 +250,7 @@ struct GEM_EXPORT CharacterExt {
 	Disapproval disapproval;
 	Occupation occupation; // Phase 3: OCCU
 	Funnel funnel; // Phase 3: FUNL
+	Body body; // M2.10: CHAR, only while loading and saving (the stats hold it otherwise)
 	std::vector<RawRecord> other; // records this version doesn't know, kept as they are
 
 	/** nothing worth saving: a creature without any of it doesn't get an extension */

@@ -124,17 +124,19 @@ struct PromptActive {
 };
 
 /**
- * One prompt is open at a time; others wait in order and their clocks start when they
- * open. A single prompt asks one player (the owner); while that player is away the
- * host answers instead, and when they come back the prompt is theirs again. A vote
- * asks several; one who is away doesn't hold it up and counts as the default unless
- * they come back in time. Timeouts answer with the default. Nothing waits forever.
+ * Each player has a lane: a single prompt's lane is its owner (the player it asks), a vote's
+ * the players it asks. Prompts whose lanes don't meet are open at the same time (M2.10: four
+ * players each answer their own); in one lane they wait in order, one at a time, and their
+ * clocks start when they open. While its owner is away a single prompt is the host's to answer
+ * (it keeps its lane, so the owner gets it back on return); a vote doesn't wait for a voter who
+ * is away, who counts as the default unless they come back in time. Timeouts answer with the
+ * default. Nothing waits forever. In single player everything is slot 0: one lane, one at a time.
  */
 class GEM_EXPORT PromptQueue {
 public:
 	enum class Status : uint8_t {
 		Accepted,
-		Closed, // not the open prompt: answered already, timed out, cancelled or never asked
+		Closed, // not an open prompt: answered already, timed out, cancelled or never asked
 		NotAsked, // not this player's to answer
 		Already, // this player answered already (votes)
 		Illegal // not an answer the question allows
@@ -142,24 +144,32 @@ public:
 
 	/** asked: the owner (one slot) or the voters; returns the prompt's id, 0 if the question is malformed */
 	uint32_t Ask(PromptQuestion question, std::vector<uint8_t> asked, uint64_t now);
-	/** the open prompt, nullptr if none */
+	/** the open prompts, oldest first */
+	const std::vector<PromptActive>& Open() const { return open; }
+	/** the oldest open prompt, nullptr if none */
 	const PromptActive* Active() const;
-	/** prompts in line behind the open one */
+	const PromptActive* Find(uint32_t id) const;
+	/** prompts waiting to open, in every lane */
 	size_t Queued() const { return queue.size(); }
-	bool Busy() const { return active.id || !queue.empty(); }
+	/** prompts waiting behind an open one, in its lane */
+	size_t QueuedBehind(uint32_t id) const;
+	/** prompts waiting in a player's lane */
+	size_t QueuedFor(uint8_t slot) const;
+	bool Busy() const { return !open.empty() || !queue.empty(); }
 	Status Answer(uint32_t id, uint8_t slot, const std::vector<int32_t>& values, uint64_t now);
 	/** players come and go; the host is always there */
 	void SetPresent(uint8_t slot, bool present);
 	bool Present(uint8_t slot) const;
-	/** timeouts and opening the next prompt in line */
+	/** timeouts and opening the prompts next in their lanes */
 	void Update(uint64_t now);
 	bool Cancel(uint32_t id);
 	void Clear();
 	/** finished prompts since the last call, in order */
 	std::vector<PromptResult> TakeFinished();
-	/** ms left on the open prompt */
+	/** ms left on the oldest open prompt, or on this one */
 	uint32_t Remaining(uint64_t now) const;
-	/** bumped whenever the open prompt changes (opened, answered in part, its answerer changed, closed) */
+	uint32_t Remaining(uint32_t id, uint64_t now) const;
+	/** bumped whenever an open prompt changes (opened, answered in part, its answerer changed, closed) */
 	uint32_t Revision() const { return revision; }
 
 	static const char* StatusName(Status status);
@@ -171,14 +181,16 @@ private:
 		std::vector<uint8_t> asked;
 	};
 
+	static std::vector<uint8_t> Lane(const PromptActive& prompt);
+	void Pump(uint64_t now);
 	void Open(Pending pending, uint64_t now);
-	void Retarget();
-	void Finish(PromptOutcome outcome);
-	bool Decided() const;
+	void Retarget(PromptActive& prompt);
+	void Finish(size_t index, PromptOutcome outcome);
+	bool Decided(const PromptActive& prompt) const;
 
 	uint32_t nextID = 1;
 	uint32_t revision = 0;
-	PromptActive active;
+	std::vector<PromptActive> open;
 	std::deque<Pending> queue;
 	std::set<uint8_t> absent;
 	std::vector<PromptResult> finished;

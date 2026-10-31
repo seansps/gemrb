@@ -636,7 +636,10 @@ namespace GemRB {
 #define IE_DCC_NOCAST     317 // DCC::MagicBlock bits: no spells, no lay on hands, no turning, ...
 #define IE_DCC_LOHMOD     318 // lay on hands check modifier (disapproval 6)
 #define IE_DCC_MUTATION   319 // DCC::Mutation bits of the corruptions (the visual hooks and the record screen)
-#define IE_DCC_LAST       319
+// funnel risks (M2.10), kept in the CRE extension's CHAR record
+#define IE_DCC_WEIGHT     320 // body weight in pounds (0: not rolled, the race's average stands in); the load limits
+#define IE_DCC_PARTYAI    321 // DCC::PartyAI: what the DCC party AI script (DCCPARTY) lets a party member do on its own
+#define IE_DCC_LAST       321
 
 }
 

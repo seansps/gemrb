@@ -105,8 +105,7 @@ uint32_t PromptManager::AskSlots(std::vector<uint8_t> slots, PromptQuestion ques
 	for (uint8_t slot : slots) {
 		who += fmt::format("{}{}", who.empty() ? "" : ", ", slot);
 	}
-	const PromptActive* active = queue.Active();
-	Log(MESSAGE, "Prompt", "Prompt #{} '{}' for player slot(s) {}: '{}'{}.", id, tag, who, title, active && active->id == id ? "" : fmt::format(", waits behind #{}", active ? active->id : 0));
+	Log(MESSAGE, "Prompt", "Prompt #{} '{}' for player slot(s) {}: '{}'{}.", id, tag, who, title, queue.Find(id) ? ", open" : ", waits in its player's line");
 	UpdatePause();
 	return id;
 }
@@ -119,7 +118,7 @@ bool PromptManager::Cancel(uint32_t id)
 
 bool PromptManager::Busy() const
 {
-	if (IsClient()) return haveView;
+	if (IsClient()) return !remote.empty();
 	return queue.Busy();
 }
 
@@ -150,7 +149,7 @@ void PromptManager::Update()
 	for (const auto& result : queue.TakeFinished()) {
 		Finished(result);
 	}
-	// the prompts waiting behind the open one show as a count (Phase 3: never stacked)
+	// the prompts waiting behind an open one show as a count (never stacked)
 	if (queue.Revision() != sentRevision || queue.Queued() != sentQueued) {
 		sentRevision = queue.Revision();
 		sentQueued = queue.Queued();
@@ -267,17 +266,15 @@ void PromptManager::Finished(const PromptResult& result)
 	}
 }
 
-NetPrompt PromptManager::Message() const
+NetPrompt PromptManager::Message(const PromptActive& active) const
 {
 	NetPrompt msg;
-	const PromptActive* active = queue.Active();
-	if (!active) return msg;
-	msg.id = active->id;
+	msg.id = active.id;
 	msg.state = NetPrompt::OPEN;
-	msg.remaining = queue.Remaining(Now());
-	msg.queued = uint8_t(std::min<size_t>(queue.Queued(), 255));
-	msg.question = active->question;
-	for (const auto& voter : active->voters) {
+	msg.remaining = queue.Remaining(active.id, Now());
+	msg.queued = uint8_t(std::min<size_t>(queue.QueuedBehind(active.id), 255));
+	msg.question = active.question;
+	for (const auto& voter : active.voters) {
 		NetPromptVoter entry;
 		entry.slot = voter.slot;
 		entry.by = voter.by;
@@ -290,47 +287,97 @@ NetPrompt PromptManager::Message() const
 	return msg;
 }
 
-bool PromptManager::OpenMessage(NetPrompt& msg) const
+std::vector<NetPrompt> PromptManager::OpenMessages() const
 {
-	if (!queue.Active()) return false;
-	msg = Message();
-	return true;
+	std::vector<NetPrompt> msgs;
+	for (const auto& active : queue.Open()) {
+		msgs.push_back(Message(active));
+	}
+	return msgs;
 }
 
+// v13 (M2.10): every open prompt goes to everyone, each as its own message
 void PromptManager::Broadcast()
 {
 	NetSession* net = Host();
-	if (!net || !queue.Active()) return;
-	NetPrompt msg = Message();
-	net->SendPrompt(msg);
-	std::string list;
-	for (const auto& voter : msg.voters) {
-		list += fmt::format(" [slot {} answered by {}{}, {}]", voter.slot, voter.by, voter.away ? ", away" : "", voter.state == 0 ? "waiting" : voter.state == 1 ? "answered" : "defaulted");
+	if (!net) return;
+	for (const auto& active : queue.Open()) {
+		NetPrompt msg = Message(active);
+		net->SendPrompt(msg);
+		std::string list;
+		for (const auto& voter : msg.voters) {
+			list += fmt::format(" [slot {} answered by {}{}, {}]", voter.slot, voter.by, voter.away ? ", away" : "", voter.state == 0 ? "waiting" : voter.state == 1 ? "answered" : "defaulted");
+		}
+		Log(MESSAGE, "Prompt", "Prompt #{} '{}' sent to everyone, {} ms left, {} behind it:{}", msg.id, msg.question.tag, msg.remaining, msg.queued, list);
 	}
-	Log(MESSAGE, "Prompt", "Prompt #{} '{}' sent to everyone, {} ms left:{}", msg.id, msg.question.tag, msg.remaining, list);
 }
 
-// host and single player: what our own player sees of the open prompt
+// host and single player: what our own player sees of the open prompts
 void PromptManager::BuildView()
 {
-	const PromptActive* active = queue.Active();
-	if (!active) {
-		haveView = false;
-		view = View();
-		return;
+	std::vector<NetPrompt> msgs = OpenMessages();
+	std::vector<uint64_t> deadlines;
+	uint64_t now = Now();
+	for (const auto& msg : msgs) {
+		deadlines.push_back(now + msg.remaining);
 	}
-	bool vote = active->question.flags & PromptQuestion::VOTE;
+	ViewFrom(msgs, deadlines, PROMPT_LOCAL_SLOT);
+}
+
+// the oldest open prompt we answer is ours to see (the window); the others of ours wait behind it.
+// With none of ours, the oldest open prompt shows read only, waiting for everyone who decides
+void PromptManager::ViewFrom(const std::vector<NetPrompt>& prompts, const std::vector<uint64_t>& deadlines, uint8_t me)
+{
+	uint32_t was = haveView ? view.id : 0;
+	bool wasSent = haveView && view.sent;
 	view = View();
-	view.id = active->id;
-	view.question = active->question;
-	view.deadline = Now() + queue.Remaining(Now());
-	view.queued = queue.Queued();
-	for (const auto& voter : active->voters) {
-		if (voter.state != PromptVoter::State::Waiting || (vote && voter.away)) continue;
-		if (voter.by == PROMPT_LOCAL_SLOT) view.mine = true;
-		view.waitingFor += fmt::format("{}{}", view.waitingFor.empty() ? "" : ", ", Name(voter.by));
-		if (!vote && voter.by != voter.slot) view.askedName = Name(voter.slot);
+	haveView = false;
+	if (prompts.empty()) return;
+	auto waiting = [](const NetPromptVoter& voter, bool vote) {
+		return voter.state == uint8_t(PromptVoter::State::Waiting) && !(vote && voter.away);
+	};
+	auto ours = [&waiting, me, this](const NetPrompt& msg) {
+		bool vote = msg.question.flags & PromptQuestion::VOTE;
+		for (const auto& voter : msg.voters) {
+			if (waiting(voter, vote) && voter.by == me && !answered.count(msg.id)) return true;
+		}
+		return false;
+	};
+	size_t pick = prompts.size();
+	size_t mine = 0;
+	for (size_t i = 0; i < prompts.size(); ++i) {
+		if (!ours(prompts[i])) continue;
+		if (pick == prompts.size()) pick = i;
+		++mine;
 	}
+	bool isMine = pick < prompts.size();
+	if (!isMine) pick = 0;
+	const NetPrompt& msg = prompts[pick];
+	bool vote = msg.question.flags & PromptQuestion::VOTE;
+	view.id = msg.id;
+	view.question = msg.question;
+	view.deadline = deadlines[pick];
+	view.mine = isMine;
+	view.open = prompts.size();
+	view.queued = isMine ? (mine - 1) + msg.queued : msg.queued;
+	for (const auto& voter : msg.voters) {
+		if (!waiting(voter, vote)) continue;
+		if (!vote && voter.by != voter.slot) view.askedName = voter.name;
+	}
+	// who decides: this prompt's answerers, or (read only) everyone's
+	std::vector<std::string> names;
+	for (size_t i = 0; i < prompts.size(); ++i) {
+		if (isMine && i != pick) continue;
+		bool v = prompts[i].question.flags & PromptQuestion::VOTE;
+		for (const auto& voter : prompts[i].voters) {
+			if (!waiting(voter, v)) continue;
+			if (std::find(names.begin(), names.end(), voter.byName) == names.end()) names.push_back(voter.byName);
+		}
+	}
+	for (const auto& name : names) {
+		view.waitingFor += fmt::format("{}{}", view.waitingFor.empty() ? "" : ", ", name);
+	}
+	view.sent = isMine && view.id == was && wasSent;
 	haveView = true;
 }
 
@@ -341,29 +388,24 @@ void PromptManager::OnRemotePrompt(const NetPrompt& msg)
 	if (msg.state == NetPrompt::CLOSED) {
 		Log(MESSAGE, "Prompt", "Prompt #{} '{}' is over: {}", msg.id, msg.question.tag, msg.outcomeText);
 		ShowLine(msg.outcomeText);
-		if (haveView && view.id == msg.id) {
-			haveView = false;
-			view = View();
-			guiDirty = true;
-		}
-		return;
+		remote.erase(msg.id);
+		answered.erase(msg.id);
+	} else {
+		Remote& entry = remote[msg.id];
+		entry.msg = msg;
+		entry.deadline = Now() + msg.remaining;
 	}
-	uint8_t me = net->GetSlot();
-	bool vote = msg.question.flags & PromptQuestion::VOTE;
-	View next;
-	next.id = msg.id;
-	next.question = msg.question;
-	next.deadline = Now() + msg.remaining;
-	next.queued = msg.queued;
-	for (const auto& voter : msg.voters) {
-		if (voter.state != uint8_t(PromptVoter::State::Waiting) || (vote && voter.away)) continue;
-		if (voter.by == me) next.mine = true;
-		next.waitingFor += fmt::format("{}{}", next.waitingFor.empty() ? "" : ", ", voter.byName);
-		if (!vote && voter.by != voter.slot) next.askedName = voter.name;
+	std::vector<NetPrompt> msgs;
+	std::vector<uint64_t> deadlines;
+	for (const auto& entry : remote) {
+		msgs.push_back(entry.second.msg);
+		deadlines.push_back(entry.second.deadline);
 	}
-	Log(MESSAGE, "Prompt", "Prompt #{} '{}' from the host: '{}', {}, {} ms left.", msg.id, msg.question.tag, msg.question.title, next.mine ? "ours to answer" : fmt::format("waiting for {}", next.waitingFor), msg.remaining);
-	view = std::move(next);
-	haveView = true;
+	ViewFrom(msgs, deadlines, net->GetSlot());
+	if (msg.state != NetPrompt::CLOSED) {
+		Log(MESSAGE, "Prompt", "Prompt #{} '{}' from the host: '{}', {} ms left; we see #{} ({}), {} open, {} of ours waiting.", msg.id, msg.question.tag, msg.question.title, msg.remaining,
+		    view.id, view.mine ? "ours to answer" : fmt::format("waiting for {}", view.waitingFor), view.open, view.queued);
+	}
 	guiDirty = true;
 }
 
@@ -384,7 +426,7 @@ void PromptManager::OnRemoteAnswer(uint8_t slot, const NetPromptAnswer& msg)
 	std::string why = status == PromptQueue::Status::NotAsked ? "That isn't yours to decide." : status == PromptQueue::Status::Illegal ? "The host didn't take that answer." : "Too late, that was decided already.";
 	net->TellPlayer(slot, why);
 	// so a confused window gets the truth again
-	if (queue.Active() && queue.Active()->id == msg.id) Broadcast();
+	if (queue.Find(msg.id)) Broadcast();
 }
 
 void PromptManager::Reset()
@@ -392,6 +434,8 @@ void PromptManager::Reset()
 	bool had = haveView;
 	haveView = false;
 	view = View();
+	remote.clear();
+	answered.clear();
 	// the window goes now, while the game it is in is still there
 	if (had) Notify();
 }
@@ -437,10 +481,19 @@ bool PromptManager::AnswerLocal(uint32_t id, const std::vector<int32_t>& values)
 		answer.id = id;
 		answer.values = values;
 		if (!net->SendPromptAnswer(answer)) return false;
-		view.sent = true;
+		Log(MESSAGE, "Prompt", "Answered prompt #{}: {} (sent to the host).", id, PromptAnswerText(view.question, values));
+		// the next of ours (if any) shows meanwhile
+		answered.insert(id);
+		std::vector<NetPrompt> msgs;
+		std::vector<uint64_t> deadlines;
+		for (const auto& entry : remote) {
+			msgs.push_back(entry.second.msg);
+			deadlines.push_back(entry.second.deadline);
+		}
+		ViewFrom(msgs, deadlines, net->GetSlot());
+		if (haveView && view.id == id) view.sent = true;
 		keyGrace = true;
 		guiDirty = true;
-		Log(MESSAGE, "Prompt", "Answered prompt #{}: {} (sent to the host).", id, PromptAnswerText(view.question, values));
 		return true;
 	}
 	PromptQueue::Status status = queue.Answer(id, PROMPT_LOCAL_SLOT, values, Now());
@@ -756,11 +809,26 @@ bool PromptManager::RunTestOrder(const std::string& order)
 		}
 	} else if (what == "cancel") {
 		if (queue.Active()) Cancel(queue.Active()->id);
+	} else if (what == "open") {
+		// every open prompt, as the host has them or as the host sent them
+		std::vector<NetPrompt> msgs = IsClient() ? std::vector<NetPrompt>() : OpenMessages();
+		for (const auto& entry : remote) {
+			msgs.push_back(entry.second.msg);
+		}
+		std::string list;
+		for (const auto& msg : msgs) {
+			std::string who;
+			for (const auto& voter : msg.voters) {
+				if (voter.state == uint8_t(PromptVoter::State::Waiting)) who += fmt::format("{}{}", who.empty() ? "" : "+", voter.byName);
+			}
+			list += fmt::format(" #{} '{}' for {} ({} behind);", msg.id, msg.question.tag, who, msg.queued);
+		}
+		Log(MESSAGE, "Prompt", "Test hook: {} prompt(s) open:{}", msgs.size(), list);
 	} else if (what == "dump") {
 		if (!haveView) {
 			Log(MESSAGE, "Prompt", "Test hook: no prompt open.");
 		} else {
-			Log(MESSAGE, "Prompt", "Test hook: prompt #{} '{}' '{}', {}, waiting for {}{}, {} ms left, {} queued.", view.id, view.question.tag, view.question.title, view.mine ? (view.sent ? "ours, answer sent" : "ours to answer") : "read only", view.waitingFor, view.askedName.empty() ? "" : fmt::format(" (for {})", view.askedName), Remaining(), queue.Queued());
+			Log(MESSAGE, "Prompt", "Test hook: prompt #{} '{}' '{}', {}, waiting for {}{}, {} ms left, {} of ours waiting, {} open.", view.id, view.question.tag, view.question.title, view.mine ? (view.sent ? "ours, answer sent" : "ours to answer") : "read only", view.waitingFor, view.askedName.empty() ? "" : fmt::format(" (for {})", view.askedName), Remaining(), view.queued, view.open);
 		}
 	} else {
 		return false;

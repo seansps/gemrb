@@ -58,6 +58,38 @@ static int DCCModifier(int score)
 	return core->GetDCCAbilityBonus(STAT_DCC_MOD, score);
 }
 
+// encumbrance by body weight (M2.10) ------------------------------------------------
+
+int Actor::DCCBodyWeight() const
+{
+	if (BaseStats[IE_DCC_WEIGHT]) return int(BaseStats[IE_DCC_WEIGHT]);
+	const RulesData* rules = Rules();
+	return rules ? rules->body.Average(int(BaseStats[IE_RACE])) : BodyTable().Average(int(BaseStats[IE_RACE]));
+}
+
+int Actor::DCCRollBodyWeight()
+{
+	const RulesData* rules = Rules();
+	BodyTable fallback;
+	const BodyTable& table = rules ? rules->body : fallback;
+	int weight = table.Roll(int(BaseStats[IE_RACE]), [this](int sides) { return DCCDie(sides); });
+	SetBase(IE_DCC_WEIGHT, ieDword(Clamp(weight, 1, 0xffff)));
+	return weight;
+}
+
+LoadLimits Actor::DCCLoadLimits() const
+{
+	const RulesData* rules = Rules();
+	BodyTable fallback;
+	const BodyTable& table = rules ? rules->body : fallback;
+	return LimitsFor(DCCBodyWeight(), table.Row(int(BaseStats[IE_RACE])));
+}
+
+DCC::Load Actor::DCCLoad() const
+{
+	return LoadFor(inventory.GetWeight(), DCCLoadLimits());
+}
+
 bool Actor::IsDCCCharacter() const
 {
 	const RulesData* rules = Rules();

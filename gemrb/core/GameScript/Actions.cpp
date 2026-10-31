@@ -1332,6 +1332,19 @@ void GameScript::MoveToPoint(Scriptable* Sender, Holder<Action> parameters)
 
 	// give up if we can't move there (no path was found)
 	if (!actor->InMove()) {
+		// DCC (M2.10): in a party of 16 a bump can leave a walker short of its formation place
+		// (the place taken for a moment); it waits for the crowd to settle and tries again, every
+		// third of a second for up to two seconds
+		const Point& goal = parameters->pointParameter;
+		int near = std::max(parameters->int0Parameter, 24);
+		constexpr int SETTLE_TICKS = 30;
+		if (core->HasFeature(GFFlags::RULES_DCC) && actor->InParty && Sender->CurrentActionState < SETTLE_TICKS && SquaredDistance(actor->Pos, goal) > unsigned(near * near)) {
+			++Sender->CurrentActionState;
+			if (Sender->CurrentActionState % 5 == 0) {
+				actor->WalkTo(goal, parameters->int0Parameter);
+			}
+			return;
+		}
 		// we should probably instead keep retrying until we reach dest
 		actor->ClearPath();
 		Sender->ReleaseCurrentAction();
@@ -3117,7 +3130,8 @@ void GameScript::JoinParty(Scriptable* Sender, Holder<Action> parameters)
 		act->SetScript("DEFAULT", AI_SCRIPT_LEVEL, true);
 		act->SetScript(ResRef(), SCR_RACE, true);
 		act->SetScript(ResRef(), SCR_GENERAL, true);
-		act->SetScript("DPLAYER2", SCR_DEFAULT, false);
+		// DCC (M2.10): the funnel's party AI (what it does is each character's IE_DCC_PARTYAI)
+		act->SetScript(core->HasFeature(GFFlags::RULES_DCC) ? ResRef(DCC::PARTY_AI_SCRIPT) : ResRef("DPLAYER2"), SCR_DEFAULT, false);
 	}
 	AutoTable pdtable = gamedata->LoadTable("pdialog");
 	if (pdtable) {

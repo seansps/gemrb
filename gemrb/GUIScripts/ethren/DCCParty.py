@@ -7,7 +7,9 @@
 # when Luck burns on its own (DCCSetLuckPolicy), whether key rolls pause and ask, spellburn
 # (DCCSetSpellburn: wizards and elves only) and when Luck cancels a corruption. The host also
 # sets the game's prompt options (DCCSetPromptOptions): auto-resolve after N seconds with the
-# character's policy, and whether level-0 characters ask at all. Built from code, no CHU.
+# character's policy, and whether level-0 characters ask at all. M2.10: what each character does
+# on its own while the party AI is on (DCCSetPartyAI: defend, flee when hurt, passive, engage).
+# Built from code, no CHU.
 
 import GemRB
 from GUIDefines import *
@@ -21,6 +23,7 @@ OnColor = {'r': 140, 'g': 120, 'b': 60, 'a': 255}
 LUCK_POLICIES = [("Never", DCC_BURN_NEVER), ("Avoid death", DCC_BURN_AVOID_DISASTER), ("Misses too", DCC_BURN_MISS_TO_HIT)]
 SPELLBURN = [("Never", 0), ("Ask", 1), ("Preset", 2)]
 CORRUPTION = [("Never", 0), ("Greater", 1), ("Major+", 2), ("Always", 3)]
+PARTY_AI = [("Defend", DCC_AI_DEFEND), ("Flee hurt", DCC_AI_FLEE), ("Passive", DCC_AI_PASSIVE), ("Engage", DCC_AI_ENGAGE)]
 AUTO_SECONDS = [0, 5, 10, 20, 30]
 MISS_THRESHOLD = 10 # "misses too" keeps this much Luck (the M2.4 default)
 
@@ -73,6 +76,18 @@ def SetSpellburn (policy, corruption = None):
 	LastApplied["Spellburn"] = (policy, corruption, count)
 	return count
 
+def SetPartyAI (mode):
+	"""every character of ours: what it does on its own while the party AI is on"""
+	count = 0
+	for pc in Mine ():
+		stats = GemRB.GetDCCStats (pc)
+		if not stats:
+			continue
+		GemRB.DCCSetPartyAI (pc, mode)
+		count += 1
+	LastApplied["PartyAI"] = (mode, count)
+	return count
+
 def SetPromptOptions (seconds, level0Ask):
 	if not IsHost ():
 		return False
@@ -82,7 +97,7 @@ def OpenPartySettings ():
 	global SettingsWindow
 	if SettingsWindow:
 		ClosePartySettings ()
-	width, height = 520, 300
+	width, height = 520, 332
 	screen = GemRB.GetSystemVariable (SV_WIDTH), GemRB.GetSystemVariable (SV_HEIGHT)
 	frame = {'x': (screen[0] - width) // 2, 'y': (screen[1] - height) // 3, 'w': width, 'h': height}
 	win = GemRB.CreateView (96, 255, frame)
@@ -107,6 +122,10 @@ def OpenPartySettings ():
 	_Row (win, 0x10000004, y, "Luck vs corruption")
 	for i, (name, value) in enumerate (CORRUPTION):
 		_Button (win, 40 + i, 170 + i * 86, y, 82, 24, name, lambda v = value: (SetSpellburn (None, v), _Refresh ()))
+	y += 32
+	_Row (win, 0x10000007, y, "On its own (AI)")
+	for i, (name, value) in enumerate (PARTY_AI):
+		_Button (win, 60 + i, 170 + i * 86, y, 82, 24, name, lambda v = value: (SetPartyAI (v), _Refresh ()))
 	y += 40
 	host = IsHost ()
 	_Row (win, 0x10000005, y, "Auto-answer prompts")
@@ -179,3 +198,6 @@ def _Refresh ():
 		win.GetControl (30 + i).SetBackground (OnColor if burns == {value} else ButtonColor)
 	for i, (name, value) in enumerate (CORRUPTION):
 		win.GetControl (40 + i).SetBackground (OnColor if corruptions == {value} else ButtonColor)
+	modes = set (s.get ("PartyAI") for s in stats if s)
+	for i, (name, value) in enumerate (PARTY_AI):
+		win.GetControl (60 + i).SetBackground (OnColor if modes == {value} else ButtonColor)

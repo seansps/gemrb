@@ -470,6 +470,18 @@ int Game::JoinParty(Actor* actor, int join)
 		if (!size) {
 			Reputation = actor->GetStat(IE_REPUTATION);
 		}
+		if (core->HasFeature(GFFlags::RULES_DCC)) {
+			// DCC (M2.10): a body weight for the load limits, from its race (equipment.md)
+			if (!actor->GetBase(IE_DCC_WEIGHT)) {
+				actor->DCCRollBodyWeight();
+			}
+			// and the party AI, unless the character brings a default script of its own (a protagonist
+			// made without chargen has none; JoinParty() and chargen give DCCPARTY already)
+			ResRef script = actor->GetScript(SCR_DEFAULT);
+			if (script.IsEmpty() || script == "NONE" || script == "DPLAYER2" || script == "DPLAYER3") {
+				actor->SetScript(ResRef(DCC::PARTY_AI_SCRIPT), SCR_DEFAULT, false);
+			}
+		}
 		AddTrigger(TriggerEntry(trigger_joins, actor->GetGlobalID()));
 	}
 

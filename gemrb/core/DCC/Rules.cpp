@@ -129,6 +129,9 @@ bool RulesData::Load()
 	if (!table || !spellLists.Load(*table)) fail("dccspls");
 	table = gamedata->LoadTable("dccclesp");
 	if (!table || !clericSpells.Load(*table)) fail("dccclesp");
+	// encumbrance by body weight (M2.10)
+	table = gamedata->LoadTable("dccbody");
+	if (!table || !body.Load(*table)) fail("dccbody");
 	return ok;
 }
 

@@ -1399,9 +1399,8 @@ struct NetSession::Impl {
 			}
 			Log(MESSAGE, "Net", "Slot {} joined during dialog node #{} (player {} answers); sent it the conversation.", info.slot, dialog.seq, dialog.owner);
 		}
-		// and a prompt that is open, with the time it has left
-		NetPrompt prompt;
-		if (core->GetPrompts().OpenMessage(prompt)) {
+		// and the prompts that are open, with the time they have left (v13: several at once)
+		for (const NetPrompt& prompt : core->GetPrompts().OpenMessages()) {
 			Send(info.peer, prompt);
 			Log(MESSAGE, "Net", "Slot {} joined during prompt #{} '{}'; sent it, {} ms left.", info.slot, prompt.id, prompt.question.tag, prompt.remaining);
 		}
@@ -1614,6 +1613,10 @@ struct NetSession::Impl {
 			}
 			actor->UseExit(exit->GetGlobalID());
 			Log(MESSAGE, "Net", "Slot {} ({}): {} (id {}) may use exit '{}'.", info.slot, info.name, fmt::WideToChar { actor->GetShortName() }, cmd.actorID, exit->GetScriptName());
+			// DCC (M2.10): a click on a party exit brings the whole party, as on the host
+			if (core->HasFeature(GFFlags::RULES_DCC) && (exit->Flags & TRAVEL_PARTY)) {
+				actor->GetCurrentArea()->DCCGatherAtExit(exit, exit->Pos, false);
+			}
 			return;
 		}
 
@@ -4944,6 +4947,10 @@ except Exception as e:
 			}
 		}
 		gc->CommandSelectedMovement(exit->Pos);
+		// DCC (M2.10): as a click on the host, the rest of the party comes along to a party exit
+		if (mode == Mode::Host && core->HasFeature(GFFlags::RULES_DCC) && (exit->Flags & TRAVEL_PARTY)) {
+			game->GetCurrentArea()->DCCGatherAtExit(exit, exit->Pos, false);
+		}
 	}
 
 	// break the local state behind the host's back: a door locks or unlocks only here

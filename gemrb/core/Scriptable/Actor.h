@@ -23,6 +23,7 @@
 
 #include "Audio/Playback.h"
 #include "DCC/Augur.h"
+#include "DCC/Body.h"
 #include "DCC/Character.h"
 #include "DCC/Combat.h"
 #include "DCC/Deeds.h"
@@ -765,6 +766,14 @@ public:
 	int DCCLevelUp(int classID, const DCC::Roller* roller = nullptr);
 	/** a night's rest heals ability loss (Luck excepted): 1 point, 2 with bed rest */
 	void DCCRestHeal(bool bedRest);
+	// encumbrance by body weight (M2.10, equipment.md)
+	/** the body weight in pounds: IE_DCC_WEIGHT, the race's average while it isn't rolled */
+	int DCCBodyWeight() const;
+	/** rolls the body weight for its race (dccbody.2da) with the actor's dice and keeps it */
+	int DCCRollBodyWeight();
+	/** the load limits of its body weight, and what it carries now against them */
+	DCC::LoadLimits DCCLoadLimits() const;
+	DCC::Load DCCLoad() const;
 
 	// DCC combat (M2.3, ActorDCCCombat.cpp)
 	/** characters: their level; monsters: their HD (0 for less than 1) */

@@ -54,6 +54,14 @@ def ClassText (stats):
 		return "0-level"
 	return "%s %d" % (Words (stats["ClassName"]), stats["Level"])
 
+LoadWords = { 0: "normal speed", 1: "half speed", 2: "can't move" }
+PartyAIWords = { 0: "defend", 1: "flee when hurt", 2: "passive", 3: "engage" }
+
+def LoadText (stats):
+	"""the encumbrance line (M2.10): body weight, what it carries and what that does"""
+	return "Weight %d lb   Load %d lb: %s (half speed past %d, can't move past %d)" % (stats["BodyWeight"],
+		stats["Carried"], LoadWords.get (stats["Load"], "?"), stats["LoadHalf"], stats["LoadCap"])
+
 def Lines (pc):
 	"""the sheet as lines of text"""
 	stats = GemRB.GetDCCStats (pc)
@@ -89,6 +97,7 @@ def Lines (pc):
 	lines.append ("Luck %d of %d" % (stats["Luck"], stats["LuckMax"]))
 	lines.append ("")
 	lines.append ("AC %d   Init %s   Speed %d'" % (stats["AC"], Signed (stats["Init"]), stats["Speed"]))
+	lines.append (LoadText (stats))
 	lines.append ("Saves: Fort %s  Ref %s  Will %s" % (Signed (stats["Fort"]), Signed (stats["Ref"]), Signed (stats["Will"])))
 	lines.append ("Attack %s   Melee %s   Missile %s" % (AttackText (stats), Signed (stats["Melee"]), Signed (stats["Missile"])))
 	crit = Dice (stats["CritDice"], stats["CritDie"], stats["CritAdd"])
@@ -118,6 +127,7 @@ def Lines (pc):
 		lines.append ("")
 		lines.extend (magic)
 	lines.append ("")
+	lines.append ("On its own (party AI): " + PartyAIWords.get (stats["PartyAI"], "?"))
 	lines.append ("States: " + StateNames (stats["States"]))
 	return lines
 

@@ -48,6 +48,7 @@ constexpr ieDword FAKE_VARIABLE_OPCODE = 187;
 //   version 3 (M2.3b): 30 battle rage points, 31 combat options (DCC::CombatOption)
 //   version 4 (M2.5): 7 flags: 1 a DCC extension ("DCCX", DCC/Extension.h) follows the effects
 //   section (and variables), at its end: known spells, corruptions, spellburn, disapproval
+//   (M2.10: and the CHAR record, the body weight and the party AI mode, IE_DCC_WEIGHT and IE_DCC_PARTYAI)
 // Creatures without the block get Luck 10 (modifier 0), no augur and no loss; as monsters, their
 // IE level stands in for HD and attack bonus (HD 255 marks that). Version 1 blocks and creatures
 // without one get the default Luck and deed settings.
@@ -66,6 +67,8 @@ static void DefaultDCCSettings(Actor* act)
 	act->BaseStats[IE_DCC_NEXTDEED] = 0;
 	act->BaseStats[IE_DCC_RAGE] = 0;
 	act->BaseStats[IE_DCC_COMBATOPT] = 0;
+	act->BaseStats[IE_DCC_WEIGHT] = 0;
+	act->BaseStats[IE_DCC_PARTYAI] = static_cast<ieDword>(DCC::DEFAULT_PARTY_AI);
 }
 
 // returns whether a DCC extension follows the effects
@@ -1958,17 +1961,27 @@ void CREImporter::ReadDCCExtension(Actor* act)
 	if (str->Read(data.data() + DCC::EXT_HEADER_SIZE, size - DCC::EXT_HEADER_SIZE) != strret_t(size - DCC::EXT_HEADER_SIZE) ||
 	    !DCC::ReadExtension(data.data(), size, act->dccExt)) {
 		Log(WARNING, "CREImporter", "{}: bad DCC extension", act->GetScriptName());
+		return;
 	}
+	// the CHAR record lives in stats at run time
+	act->BaseStats[IE_DCC_WEIGHT] = act->dccExt.body.weight;
+	act->BaseStats[IE_DCC_PARTYAI] = static_cast<ieDword>(act->dccExt.body.partyAI);
+	act->dccExt.body = DCC::Body();
 }
 
 int CREImporter::GetStoredFileSize(const Actor* actor)
 {
 	int headersize = GetStoredFileSizeStock(actor);
 	dccExtension.clear();
-	if (headersize > 0 && core->HasFeature(GFFlags::RULES_DCC) && (actor->creVersion == CREVersion::V1_0 || actor->creVersion == CREVersion::V1_1) &&
-	    !actor->dccExt.Empty()) {
-		dccExtension = DCC::WriteExtension(actor->dccExt);
-		headersize += int(dccExtension.size());
+	if (headersize > 0 && core->HasFeature(GFFlags::RULES_DCC) && (actor->creVersion == CREVersion::V1_0 || actor->creVersion == CREVersion::V1_1)) {
+		// the stats of the CHAR record go back into it
+		DCC::CharacterExt ext = actor->dccExt;
+		ext.body.weight = static_cast<uint16_t>(std::min<ieDword>(actor->BaseStats[IE_DCC_WEIGHT], 0xffff));
+		ext.body.partyAI = DCC::PartyAI(std::min<ieDword>(actor->BaseStats[IE_DCC_PARTYAI], ieDword(DCC::PartyAI::count) - 1));
+		if (!ext.Empty()) {
+			dccExtension = DCC::WriteExtension(ext);
+			headersize += int(dccExtension.size());
+		}
 	}
 	return headersize;
 }

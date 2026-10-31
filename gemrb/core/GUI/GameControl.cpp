@@ -2488,6 +2488,11 @@ void GameControl::PerformSelectedAction(const Point& p)
 			while (i--) {
 				useExit(game->selected[i]);
 			}
+			// DCC (M2.10): the rest of the party comes along to a party exit (on the host)
+			const InfoPoint* exit = Scriptable::As<InfoPoint>(overMe);
+			if (core->HasFeature(GFFlags::RULES_DCC) && (exit->Flags & TRAVEL_PARTY) && !(net && net->IsReplica())) {
+				core->GetGame()->GetCurrentArea()->DCCGatherAtExit(exit, exit->Pos, false);
+			}
 		}
 		if (HandleActiveRegion(Scriptable::As<InfoPoint>(overMe), selectedActor, p)) {
 			core->SetEventFlag(EF_RESETTARGET);

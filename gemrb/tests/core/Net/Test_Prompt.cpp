@@ -168,12 +168,13 @@ TEST(NetPromptTest, AwayOwnerFallsBackToTheHost)
 TEST(NetPromptTest, OneAtATimeInOrder)
 {
 	PromptQueue queue;
-	uint32_t a = queue.Ask(YesNo(0, 1000), { 0 }, 0);
+	uint32_t a = queue.Ask(YesNo(0, 1000), { 1 }, 0);
 	uint32_t b = queue.Ask(LuckBurn(2, 1000), { 1 }, 500);
 	EXPECT_EQ(queue.Queued(), 1U);
 	EXPECT_EQ(queue.Active()->id, a);
+	EXPECT_EQ(queue.QueuedBehind(a), 1U);
 	EXPECT_EQ(queue.Answer(b, 1, { 1 }, 600), PromptQueue::Status::Closed);
-	EXPECT_EQ(queue.Answer(a, 0, { 1 }, 700), PromptQueue::Status::Accepted);
+	EXPECT_EQ(queue.Answer(a, 1, { 1 }, 700), PromptQueue::Status::Accepted);
 	// the next one opens on the next update, with its full time from then
 	queue.Update(800);
 	ASSERT_NE(queue.Active(), nullptr);
@@ -186,6 +187,87 @@ TEST(NetPromptTest, OneAtATimeInOrder)
 	EXPECT_EQ(done[1].id, b);
 	EXPECT_EQ(done[1].outcome, PromptOutcome::Cancelled);
 	EXPECT_FALSE(queue.Busy());
+}
+
+// M2.10: each player's prompts open alongside the others'; one at a time per player, in order
+TEST(NetPromptTest, OnePerPlayerAtOnce)
+{
+	PromptQueue queue;
+	uint32_t host = queue.Ask(YesNo(0, 1000), { 0 }, 0);
+	uint32_t one = queue.Ask(LuckBurn(2, 1000), { 1 }, 100);
+	uint32_t two = queue.Ask(YesNo(0, 1000), { 2 }, 200);
+	uint32_t oneAgain = queue.Ask(YesNo(1, 1000), { 1 }, 300);
+	ASSERT_EQ(queue.Open().size(), 3U);
+	EXPECT_EQ(queue.Open()[0].id, host);
+	EXPECT_EQ(queue.Open()[1].id, one);
+	EXPECT_EQ(queue.Open()[2].id, two);
+	EXPECT_EQ(queue.Queued(), 1U);
+	EXPECT_EQ(queue.QueuedBehind(one), 1U);
+	EXPECT_EQ(queue.QueuedBehind(two), 0U);
+	EXPECT_EQ(queue.QueuedFor(1), 1U);
+	EXPECT_EQ(queue.QueuedFor(2), 0U);
+	// each clock started when it opened
+	EXPECT_EQ(queue.Remaining(two, 500), 700U);
+	// player 2 answers its own while the others are still open; nobody answers another's
+	EXPECT_EQ(queue.Answer(one, 2, { 1 }, 400), PromptQueue::Status::NotAsked);
+	EXPECT_EQ(queue.Answer(two, 2, { 1 }, 400), PromptQueue::Status::Accepted);
+	EXPECT_EQ(queue.Open().size(), 2U);
+	// player 1's second waits for its first, then opens with its own full time
+	EXPECT_EQ(queue.Answer(oneAgain, 1, { 1 }, 450), PromptQueue::Status::Closed);
+	EXPECT_EQ(queue.Answer(one, 1, { 2 }, 500), PromptQueue::Status::Accepted);
+	queue.Update(600);
+	ASSERT_NE(queue.Find(oneAgain), nullptr);
+	EXPECT_EQ(queue.Remaining(oneAgain, 600), 1000U);
+	EXPECT_EQ(queue.Queued(), 0U);
+	// the host's timed out meanwhile
+	queue.Update(1000);
+	auto done = queue.TakeFinished();
+	ASSERT_EQ(done.size(), 3U);
+	EXPECT_EQ(done[0].id, two);
+	EXPECT_EQ(done[1].id, one);
+	EXPECT_EQ(done[1].Value(), 2);
+	EXPECT_EQ(done[2].id, host);
+	EXPECT_EQ(done[2].outcome, PromptOutcome::TimedOut);
+	EXPECT_TRUE(queue.Busy());
+	EXPECT_TRUE(queue.Cancel(oneAgain));
+	EXPECT_FALSE(queue.Busy());
+}
+
+TEST(NetPromptTest, LanesKeepTheirOrder)
+{
+	PromptQueue queue;
+	// a vote takes every voter's lane: it waits for player 1's open prompt, and player 2's next
+	// prompt waits behind the vote, not before it
+	uint32_t one = queue.Ask(YesNo(0, 1000), { 1 }, 0);
+	uint32_t vote = queue.Ask(Vote(1000), { 1, 2 }, 0);
+	uint32_t two = queue.Ask(YesNo(0, 1000), { 2 }, 0);
+	uint32_t three = queue.Ask(YesNo(0, 1000), { 3 }, 0);
+	ASSERT_EQ(queue.Open().size(), 2U);
+	EXPECT_EQ(queue.Open()[0].id, one);
+	EXPECT_EQ(queue.Open()[1].id, three);
+	EXPECT_EQ(queue.QueuedBehind(one), 1U); // the vote
+	EXPECT_EQ(queue.QueuedFor(2), 2U); // the vote, and player 2's own behind it
+	EXPECT_EQ(queue.Answer(one, 1, { 1 }, 10), PromptQueue::Status::Accepted);
+	queue.Update(20);
+	ASSERT_EQ(queue.Open().size(), 2U);
+	EXPECT_EQ(queue.Open()[1].id, vote);
+	EXPECT_EQ(queue.Find(two), nullptr);
+	EXPECT_EQ(queue.Answer(vote, 1, { 1 }, 30), PromptQueue::Status::Accepted);
+	EXPECT_EQ(queue.Answer(vote, 2, { 1 }, 40), PromptQueue::Status::Accepted);
+	queue.Update(50);
+	EXPECT_NE(queue.Find(two), nullptr);
+	// an owner who is away: the host answers that lane's prompt alongside its own
+	uint32_t hosts = queue.Ask(YesNo(0, 1000), { 0 }, 60);
+	queue.SetPresent(2, false);
+	EXPECT_EQ(queue.Find(two)->voters[0].by, PROMPT_LOCAL_SLOT);
+	EXPECT_EQ(queue.Answer(two, 0, { 1 }, 70), PromptQueue::Status::Accepted);
+	EXPECT_EQ(queue.Answer(hosts, 0, { 0 }, 80), PromptQueue::Status::Accepted);
+	auto done = queue.TakeFinished();
+	ASSERT_EQ(done.size(), 4U);
+	EXPECT_EQ(done[2].id, two);
+	EXPECT_EQ(done[2].outcome, PromptOutcome::HostAnswered);
+	EXPECT_EQ(done[3].id, hosts);
+	EXPECT_EQ(queue.Open().size(), 1U); // player 3's
 }
 
 TEST(NetPromptTest, Votes)
