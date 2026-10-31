@@ -463,9 +463,11 @@ int Actor::DCCCheckDie(const KnownSpell* known, int& natural)
 // ---------------------------------------------------------------------------
 // the check
 
-void Actor::DCCStampSpell(Spell& spl) const
+void Actor::DCCStampSpell(Spell& spl)
 {
 	if (!dccCast.total) return;
+	static const ieDword damageOp = ieDword(EffectQueue::ResolveEffect(fx_dcc_magic_damage_ref));
+	static const ieDword healOp = ieDword(EffectQueue::ResolveEffect(fx_dcc_heal_ref));
 	for (auto& header : spl.ext_headers) {
 		for (Effect& feature : header.features) {
 			feature.DCCSpellCheck = ieDword(dccCast.total);
@@ -474,11 +476,27 @@ void Actor::DCCStampSpell(Spell& spl) const
 			}
 		}
 	}
+	// damage and healing dice roll with the caster's dice (DCCForceDice), once per projectile, so
+	// every missile rolls its own; the spell damage augur adds to damage
+	SPLExtHeader* header = SpellHeader >= 0 && size_t(SpellHeader) < spl.ext_headers.size() ? &spl.ext_headers[size_t(SpellHeader)] : nullptr;
+	if (!header) return;
+	for (Effect& feature : header->features) {
+		if ((feature.Opcode != damageOp && feature.Opcode != healOp) || !feature.DiceThrown || !feature.DiceSides) continue;
+		int rolled = 0;
+		for (ieDword i = 0; i < feature.DiceThrown; ++i) {
+			rolled += DCCDie(int(feature.DiceSides));
+		}
+		if (feature.Opcode == damageOp) rolled += GetDCCAugurBonus(AugurRoll::SpellDamage);
+		feature.Parameter1 = ieDword(std::max(0, Signed(feature.Parameter1) + rolled));
+		feature.DiceThrown = 0;
+		feature.DiceSides = 0;
+	}
 }
 
 // the band's engine terms: DUR:dice[:unit] (the effects' duration, rolled once), REPEAT:dice (casts
 // in all), SPREAD:feet (the repeats go round the target and foes near it), TARGETS:n:feet (n-1 more
-// targets near the first), AREA:feet (every foe that near the target)
+// targets near the first), AREA:feet (every foe that near the target), ALLIES:feet (every ally of
+// the caster that near the target: auras)
 template<class CastState>
 static void BandTerms(CastState& cast, Actor* caster, const std::string& effects, int casterLevel, int spellLevel)
 {
@@ -513,6 +531,10 @@ static void BandTerms(CastState& cast, Actor* caster, const std::string& effects
 		} else if (key == "AREA") {
 			valid_signednumber(arg(1).c_str(), cast.radius);
 			cast.area = true;
+		} else if (key == "ALLIES") {
+			valid_signednumber(arg(1).c_str(), cast.radius);
+			cast.area = true;
+			cast.allies = true;
 		}
 	}
 }
@@ -541,6 +563,7 @@ ResRef Actor::DCCCastCheck(const ResRef& base, Scriptable* target, const Point& 
 	dccCast.targets = 0;
 	dccCast.radius = 0;
 	dccCast.area = false;
+	dccCast.allies = false;
 	dccCast.band.Reset();
 
 	DCCCastRecord record;
@@ -738,8 +761,9 @@ void Actor::DCCCastExtras(Scriptable* target, int level)
 		bool good = GetStat(IE_EA) <= EA_GOODCUTOFF;
 		std::vector<Actor*> near;
 		for (Actor* other : map->GetAllActorsInRadius(first->Pos, GA_NO_DEAD | GA_NO_UNSCHEDULED, unsigned(std::max(5, dccCast.radius)))) {
-			if (other == first || other == this) continue;
-			if ((other->GetStat(IE_EA) <= EA_GOODCUTOFF) == good) continue;
+			if (other == first) continue;
+			bool ally = (other->GetStat(IE_EA) <= EA_GOODCUTOFF) == good;
+			if (dccCast.allies ? !ally : (ally || other == this)) continue;
 			near.push_back(other);
 		}
 		std::sort(near.begin(), near.end(), [first](const Actor* a, const Actor* b) {
@@ -854,7 +878,7 @@ void Actor::DCCNatOne(const SpellInfo& info, const std::string& spell, bool burn
 	}
 }
 
-int Actor::DCCCorrupt(CorruptionTable table, int spellLevel, const std::string& spell, int roll)
+int Actor::DCCCorrupt(CorruptionTable table, int spellLevel, const std::string& spell, int roll, bool ask)
 {
 	const RulesData* rules = Rules();
 	if (!rules || table == CorruptionTable::Spell) return 0;
@@ -873,7 +897,7 @@ int Actor::DCCCorrupt(CorruptionTable table, int spellLevel, const std::string& 
 	corruption.spell = spell;
 	dccLastCast.corruptionTable = int(table);
 	dccLastCast.corruptionRow = corruption.row;
-	if (DCCOfferCorruptionBurn(corruption, spellLevel, entry->text)) dccLastCast.corruptionCancelled = true;
+	if (DCCOfferCorruptionBurn(corruption, spellLevel, entry->text, ask)) dccLastCast.corruptionCancelled = true;
 	return corruption.row;
 }
 
@@ -891,7 +915,7 @@ static const char16_t* TableName(CorruptionTable table)
 	}
 }
 
-bool Actor::DCCOfferCorruptionBurn(const Corruption& corruption, int spellLevel, const std::string& text)
+bool Actor::DCCOfferCorruptionBurn(const Corruption& corruption, int spellLevel, const std::string& text, bool askOwner)
 {
 	int luck = GetDCCLuck();
 	CorruptionBurn policy = dccExt.burn.corruption;
@@ -917,7 +941,7 @@ bool Actor::DCCOfferCorruptionBurn(const Corruption& corruption, int spellLevel,
 
 	LuckPolicy luckPolicy = GetDCCLuckPolicy();
 	const NetSession* net = core->GetNetSession();
-	bool ask = InParty && luck >= 1 && (luckPolicy.flags & LUCK_PAUSE) && !(net && !net->IsHost()) && core->GetGameControl();
+	bool ask = askOwner && InParty && luck >= 1 && (luckPolicy.flags & LUCK_PAUSE) && !(net && !net->IsHost()) && core->GetGameControl();
 	if (ask) {
 		PromptQuestion q;
 		q.kind = PromptKind::YesNo;
@@ -1309,15 +1333,16 @@ void Actor::DCCRestMagic()
 		changed = true;
 	}
 	// spellburn comes back 1 point a day on which there was no spellburn (Ethren decision: in all,
-	// not per ability; a night's rest is the day)
+	// not per ability; a night's rest ends the day, so the first rest after a burn brings nothing)
 	int index = SpellburnRecoveryIndex(dccExt.burn.points);
-	if (index >= 0 && dccExt.burn.lastBurnDay != uint32_t(Today())) {
+	if (index >= 0 && !dccExt.burn.lastBurnDay) {
 		--dccExt.burn.points[size_t(index)];
 		unsigned int loss = LossStat(static_cast<Ability>(index));
 		if (BaseStats[loss] > 0) SetBase(loss, BaseStats[loss] - 1);
 		Feedback(fmt::format(u"{} recovers 1 {} of spellburn ({} still burned)", GetName(), AbilityShort(index), dccExt.burn.Total()));
 		changed = true;
 	}
+	if (dccExt.burn.lastBurnDay) changed = true;
 	dccExt.burn.lastBurnDay = 0;
 	dccLaidHands.clear();
 	// "until tomorrow": the DCC:Magic effects until the next rest; Table 5-7 11 ends on a Will save DC 15

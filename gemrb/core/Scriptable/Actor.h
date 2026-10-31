@@ -640,6 +640,7 @@ private:
 		int targets = 0; // TARGETS: up to this many more targets near the first
 		int radius = 0; // feet around the target for TARGETS
 		bool area = false; // AREA: every foe within radius
+		bool allies = false; // ALLIES: every ally (of the caster) within radius instead
 		ResRef band;
 		ieDword castRound = 0; // the IE round of the last check, for the second action die
 		int castsThisRound = 0;
@@ -649,7 +650,7 @@ private:
 	void DCCNatOne(const DCC::SpellInfo& info, const std::string& spell, bool burning);
 	void DCCDisapproval(int natural, const std::string& spell);
 	void DCCMercurialAfter(const DCC::SpellInfo& info, DCC::KnownSpell* known, bool success);
-	bool DCCOfferCorruptionBurn(const DCC::Corruption& corruption, int spellLevel, const std::string& text);
+	bool DCCOfferCorruptionBurn(const DCC::Corruption& corruption, int spellLevel, const std::string& text, bool ask = true);
 	/* DCC combat completion (M2.3b, ActorDCCCombat.cpp), not saved */
 	ieDword dccCombatTime = 0; // game time this actor last attacked or was attacked: it's in a fight
 	std::map<ieDword, ieDword> dccEngaged; // foes in melee with it: global ID -> game time of the last swing
@@ -805,6 +806,8 @@ public:
 	int DCCGrapple(Actor* target);
 	/** walking away from foes it's in melee with gives them a free attack each (DoStep) */
 	void DCCCheckWithdrawal();
+	/** DCC: a forced move (fling, push) ends its melee engagements without a withdrawal */
+	void DCCDisengage();
 	/** a monster's or NPC's morale check (combat.md, d20 + Will vs dc): false if it flees. Party
 	 * members only check with pcs (a dragon's terrible crit), and are stunned for a round on a failure */
 	bool DCCCheckMorale(const Scriptable* from, int dc, const String& why, bool pcs = false);
@@ -876,7 +879,7 @@ public:
 	 * to cast (empty: nothing to cast). The check total becomes the DC of its effects */
 	ResRef DCCCastCheck(const ResRef& base, Scriptable* target, const Point& targetPos);
 	/** the band SPL's effects as cast: the check total as their DC, a rolled duration */
-	void DCCStampSpell(class Spell& spl) const;
+	void DCCStampSpell(class Spell& spl);
 	/** the extra casts of a band (more missiles, more targets) after the main one */
 	void DCCCastExtras(Scriptable* target, int level);
 	/** the end of a DCC cast: the extras, then the check total stops being a DC */
@@ -891,7 +894,7 @@ public:
 	void DCCAddCorruption(const DCC::Corruption& corruption, int spellLevel);
 	/** rolls a generic corruption (Table 5-3/5-4/5-5 by table, 1d10 - level + Luck mod, or a fixed
 	 * roll) and offers the Luck burn; returns the row */
-	int DCCCorrupt(DCC::CorruptionTable table, int spellLevel, const std::string& spell, int roll = 0);
+	int DCCCorrupt(DCC::CorruptionTable table, int spellLevel, const std::string& spell, int roll = 0, bool ask = true);
 	/** cleric: lay on hands (classes.md); returns the hp healed, -1 if it couldn't be tried */
 	int DCCLayOnHands(Actor* target, int natural = 0);
 	/** cleric: turn unholy (combat.md Table 4-4) on the unholy creatures around; returns the number turned

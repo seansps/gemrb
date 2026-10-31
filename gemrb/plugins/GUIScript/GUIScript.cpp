@@ -7808,11 +7808,11 @@ static PyObject* GemRB_DCCSetSpellState(PyObject* /*self*/, PyObject* args)
 PyDoc_STRVAR(GemRB_DCCCorrupt__doc,
 	     "===== DCCCorrupt =====\n\
 \n\
-**Prototype:** GemRB.DCCCorrupt (globalID, table, level[, roll])\n\
+**Prototype:** GemRB.DCCCorrupt (globalID, table, level[, roll[, ask]])\n\
 \n\
 **Description:** Tests and scripts: a corruption on Table 5-3 (table 1), 5-4 (2) or 5-5 (3) for \n\
 a spell of that level (roll: a fixed row instead of 1d10 - level + Luck mod), with the Luck \n\
-offer. Host or single player only.\n\
+offer (ask 0: the policy decides, no prompt). Host or single player only.\n\
 \n\
 **Return value:** the row");
 
@@ -7822,11 +7822,12 @@ static PyObject* GemRB_DCCCorrupt(PyObject* /*self*/, PyObject* args)
 	int table;
 	int level;
 	int roll = 0;
-	PARSE_ARGS(args, "iii|i", &globalID, &table, &level, &roll);
+	int ask = 1;
+	PARSE_ARGS(args, "iii|ii", &globalID, &table, &level, &roll, &ask);
 	GET_GAME();
 	GET_ACTOR_GLOBAL();
 	if (table < 1 || table > 3) return RuntimeError("Bad corruption table!");
-	return PyLong_FromLong(actor->DCCCorrupt(static_cast<DCC::CorruptionTable>(table), level, "", roll));
+	return PyLong_FromLong(actor->DCCCorrupt(static_cast<DCC::CorruptionTable>(table), level, "", roll, ask != 0));
 }
 
 PyDoc_STRVAR(GemRB_SetPlayerStat__doc,

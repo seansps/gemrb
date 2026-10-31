@@ -6735,8 +6735,9 @@ void Actor::DoStep(unsigned int newWalkScale, ieDword time)
 		return;
 	}
 	Movable::DoStep(newWalkScale, time);
-	// DCC: walking out of a melee gives the foes a free attack (combat.md "Withdrawal")
-	if (core->HasFeature(GFFlags::RULES_DCC) && !dccEngaged.empty()) {
+	// DCC: walking out of a melee gives the foes a free attack (combat.md "Withdrawal"), but only a
+	// move the creature chose: an action of its own, not a bump out of another's way or a push
+	if (core->HasFeature(GFFlags::RULES_DCC) && !dccEngaged.empty() && !IsBumped() && GetCurrentAction()) {
 		DCCCheckWithdrawal();
 	}
 }
