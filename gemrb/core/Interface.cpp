@@ -21,6 +21,7 @@
 #include "DisplayMessage.h"
 #include "EffectQueue.h"
 #include "Factory.h"
+#include "ImageWriter.h"
 #include "FontManager.h"
 #include "KeyMap.h"
 #include "Map.h"
@@ -1080,7 +1081,9 @@ void Interface::Main()
 				FixedClock += oneTick;
 			}
 
-			for (auto it = timers.begin(); it != timers.end();) {
+			// the timers there were when the pass began: one an action adds waits for the next pass
+			size_t count = timers.size();
+			for (auto it = timers.begin(); count && it != timers.end(); --count) {
 				if (it->IsRunning()) {
 					it->Update(time);
 					++it;
@@ -2042,6 +2045,22 @@ void Interface::UpdateUndrawnFrame() const
 		area->UpdateDrawingStates();
 		RNG::getInstance().SetState(dice);
 	}
+}
+
+bool Interface::WriteScreenshot(const path_t& path, const Actor* center) const
+{
+	Window* gameWin = winmgr ? winmgr->GetGameWindow() : nullptr;
+	if (!gameWin) return false;
+	if (center && gamectrl) {
+		gamectrl->MoveViewportTo(center->Pos, true);
+	}
+	Holder<Sprite2D> shot = winmgr->GetScreenshot(gameWin);
+	PluginHolder<ImageWriter> writer = MakePluginHolder<ImageWriter>(PLUGIN_IMAGE_WRITER_BMP);
+	FileStream out;
+	if (!shot || !writer || !out.Create(path)) return false;
+	writer->PutImage(&out, std::move(shot));
+	Log(MESSAGE, "Core", "Screenshot written to {}.", path);
+	return true;
 }
 
 // AutotestScenario=fight,gate: AT_ONLY, AT_FIGHT and AT_GATE are set, which the autotests

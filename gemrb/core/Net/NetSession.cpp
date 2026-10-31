@@ -4774,6 +4774,10 @@ except Exception as e:
 			if (!door) return;
 			door->SetDoorLocked(false, true);
 			door->SetDoorOpen(!door->IsOpen(), true, 0);
+		} else if (verb == "shot") {
+			// M2.11: the game window, centred on Player1, to <SavePath>/coop_<host|client>_<name>.bmp
+			path_t path = PathJoin(core->config.SavePath, fmt::format("coop_{}_{}.bmp", mode == Mode::Host ? "host" : "client", arg));
+			core->WriteScreenshot(path, game->FindPC(1));
 		} else if (verb == "jump") {
 			// JumpToPoint, for actors that can't walk (the demo's CHMB1 animation has no walk cycle)
 			Actor* actor = game->FindPC(unsigned(atoi(arg1.c_str())));

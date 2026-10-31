@@ -13,8 +13,6 @@
 #include "Game.h"
 #include "GameData.h"
 #include "Interface.h"
-#include "ImageWriter.h"
-#include "PluginMgr.h"
 #include "Item.h"
 #include "KeyMap.h"
 #include "Map.h"
@@ -6968,6 +6966,7 @@ static PyObject* GemRB_GetDCCStats(PyObject* /*self*/, PyObject* args)
 	PyDict_SetItemString(dict, "BeardOverlay", DecRef(PyString_FromString, looks ? looks->GetBeardRef().c_str() : ""));
 	DictInt(dict, "Stance", actor->GetStance());
 	DictInt(dict, "Engaged", actor->DCCEngaged());
+	DictInt(dict, "GameTicks", core->GetGame()->GameTime); // for tests that time things in ticks
 
 	const DCC::LevelRow* row = rules->classes.Row(cls, level);
 	DictInt(dict, "SpellsKnown", row ? row->spellsKnown : 0);
@@ -7098,32 +7097,30 @@ static PyObject* GemRB_DCCLevelUp(PyObject* /*self*/, PyObject* args)
 PyDoc_STRVAR(GemRB_SaveScreenshot__doc,
 	     "===== SaveScreenshot =====\n\
 \n\
-**Prototype:** GemRB.SaveScreenshot (path)\n\
+**Prototype:** GemRB.SaveScreenshot (path[, globalID])\n\
 \n\
 **Description:** Draws the game window (the area, without the GUI) and writes it to a BMP file, \n\
 so autotests can look at sprites and colours. For tests.\n\
 \n\
 **Parameters:**\n\
   * path - the file to write\n\
+  * globalID - party ID or global ID of an actor to centre the view on first\n\
 \n\
 **Return value:** True if it was written");
 
 static PyObject* GemRB_SaveScreenshot(PyObject* /*self*/, PyObject* args)
 {
 	const char* cpath = nullptr;
-	PARSE_ARGS(args, "s", &cpath);
-	path_t path = cpath;
-	WindowManager* wm = core->GetWindowManager();
-	Window* gameWin = wm ? wm->GetGameWindow() : nullptr;
-	if (!gameWin) return RuntimeError("No game window!");
-	Holder<Sprite2D> shot = wm->GetScreenshot(gameWin);
-	PluginHolder<ImageWriter> writer = MakePluginHolder<ImageWriter>(PLUGIN_IMAGE_WRITER_BMP);
-	FileStream out;
-	if (!shot || !writer || !out.Create(path)) {
+	int globalID = 0;
+	PARSE_ARGS(args, "s|i", &cpath, &globalID);
+	const Actor* center = nullptr;
+	const Game* game = core->GetGame();
+	if (globalID && game) {
+		center = globalID > 1000 ? game->GetActorByGlobalID(globalID) : game->FindPC(globalID);
+	}
+	if (!core->WriteScreenshot(path_t(cpath), center)) {
 		Py_RETURN_FALSE;
 	}
-	writer->PutImage(&out, std::move(shot));
-	Log(MESSAGE, "GUIScript", "Screenshot written to {}.", path);
 	Py_RETURN_TRUE;
 }
 

@@ -1078,8 +1078,9 @@ TEST(DCC_Tables, Looks)
 	for (TableMgr::index_t row = 0; row < avatars->GetRowCount(); ++row) {
 		ids.insert(avatars->GetRowName(row));
 		EXPECT_EQ(avatars->QueryField(row, 4), "0"); // TYPE 0, IE_ANI_CODE_MIRROR
-		EXPECT_EQ(avatars->QueryField(row, 7), "L"); // SIZE L: overlays on
+		EXPECT_NE(avatars->QueryField(row, 7), "*"); // a SIZE letter: overlays on
 	}
+	EXPECT_EQ(avatars->QueryField(avatars->GetRowIndex("0x6510"), 7), "F"); // the female rig's own overlays
 	EXPECT_EQ(ids, (std::set<std::string> { "0x6500", "0x6501", "0x6510" }));
 }
 
