@@ -7477,7 +7477,7 @@ spellburn and the cleric's disapproval range.\n\
 **Return value:** dict with CasterKind (0 none, 1 wizard or elf, 2 cleric), CasterLevel, \n\
 MaxSpell, ArmorPenalty, SpellMod, Blocks, Spells (list of dicts: Spell, Name, Level, Lost, \n\
 Lucky, Penalty, Mercurial, MercurialText, Manifestation, ManifestationText, Casts), \n\
-Corruptions (dicts: Table, Row, Sub, Spell, Text), Mutations (bits), MutationNames, \n\
+Corruptions (dicts: Table, Row, Sub, Spell, Text, Effects), Mutations (bits), MutationNames, \n\
 Spellburn (Points, Policy, Preset, Corruption, LastDay, Flavour), Disapproval, NoReset, Revision");
 
 static PyObject* GemRB_GetDCCMagic(PyObject* /*self*/, PyObject* args)
@@ -7545,17 +7545,27 @@ static PyObject* GemRB_GetDCCMagic(PyObject* /*self*/, PyObject* args)
 		PyDict_SetItemString(entry, "Spell", spell);
 		Py_DecRef(spell);
 		std::string text;
+		std::string effects;
 		if (corruption.table == DCC::CorruptionTable::Spell) {
 			const DCC::SpellInfo* info = rules->Spell(corruption.spell);
 			const DCC::SpellEntry* row = info ? DCC::EntryFor(info->corruption, corruption.row) : nullptr;
-			if (row) text = row->text;
+			if (row) {
+				text = row->text;
+				effects = row->effects;
+			}
 		} else {
 			const DCC::MagicEntry* row = rules->magic.corruption[static_cast<size_t>(corruption.table) - 1].Lookup(corruption.row);
-			if (row) text = row->text;
+			if (row) {
+				text = row->text;
+				effects = row->effects;
+			}
 		}
 		PyObject* words = PyUnicode_FromString(text.c_str());
 		PyDict_SetItemString(entry, "Text", words);
 		Py_DecRef(words);
+		PyObject* terms = PyUnicode_FromString(effects.c_str());
+		PyDict_SetItemString(entry, "Effects", terms);
+		Py_DecRef(terms);
 		PyList_Append(corruptions, entry);
 		Py_DecRef(entry);
 	}

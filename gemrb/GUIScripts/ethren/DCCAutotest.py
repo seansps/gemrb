@@ -1283,6 +1283,27 @@ def _Magic_ ():
 	_Check ("declined: the force stone stays", [len (m["Corruptions"]), "an orbiting stone" in m["MutationNames"]], [3, True])
 	GemRB.DCCForceDice (zed, [])
 
+	# the record screen and the spellbook window
+	import DCCMagic, DCCSheet, GUIREC
+	slot = _Party ()["dctzed"]
+	lines = DCCSheet.Lines (slot)
+	_Check ("sheet: zed's spells", any ("Magic Missile (1)" in line for line in lines), True)
+	_Check ("sheet: zed's horns and what they do", any ("horns start to grow (major): cosmetic" in line for line in lines), True)
+	_Check ("sheet: the white eyes", any ("the eyes go chalk white (the spell's own)" in line for line in lines), True)
+	GUIREC.OpenRecordsWindow (slot)
+	win = DCCMagic.OpenSpellsWindow (slot)
+	_Check ("spellbook window", win is not None, True)
+	DCCMagic.SetSpellburn (2)
+	_Check ("spellbook: preset policy", _Magic (zed)["Spellburn"]["Policy"], 2)
+	DCCMagic.SetSpellburn (-1, 3)
+	_Check ("spellbook: preset 3", _Magic (zed)["Spellburn"]["Preset"], 3)
+	DCCMagic.SetSpellburn (0, 0)
+	DCCMagic.OpenSpellsWindow (clem)
+	_Check ("clem's sheet lines", any ("Disapproval range 1-2" in line for line in DCCMagic.Lines (clem)), True)
+	DCCMagic.Close ()
+	GUIREC.CloseRecordsWindow ()
+	yield
+
 	# amnesia (a crit injury): no spells at all
 	GemRB.ApplyEffect (zed, "DCC:Combat", DCC_INJ_AMNESIA, COMBAT_INJURY | COMBAT_UNTIL_HEALED, "", "", "", "", AFTER_BONUSES)
 	yield
