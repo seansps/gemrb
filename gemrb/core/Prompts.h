@@ -58,6 +58,7 @@ public:
 		std::string waitingFor; // who decides, eg. "client-one" or "client-one, client-two"
 		std::string askedName; // whose decision it is, when the host answers for someone who is away
 		uint64_t deadline = 0; // local clock (ms)
+		size_t queued = 0; // prompts waiting behind this one (Phase 3: one at a time, never stacked)
 	};
 
 	PromptManager() = default;
@@ -146,6 +147,7 @@ private:
 	PromptQueue queue;
 	std::map<uint32_t, Asked> asked;
 	uint32_t sentRevision = 0;
+	size_t sentQueued = 0;
 	View view;
 	bool haveView = false;
 	bool guiDirty = false;

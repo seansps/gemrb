@@ -1164,9 +1164,8 @@ bool Actor::DCCOfferCorruptionBurn(const Corruption& corruption, int spellLevel,
 	String what = fmt::format(u"{} ({})", Widen(text), TableName(corruption.table));
 	Feedback(fmt::format(u"{} is corrupted: {}", GetName(), what));
 
-	LuckPolicy luckPolicy = GetDCCLuckPolicy();
 	const NetSession* net = core->GetNetSession();
-	bool ask = askOwner && InParty && luck >= 1 && (luckPolicy.flags & LUCK_PAUSE) && !(net && !net->IsHost()) && core->GetGameControl();
+	bool ask = askOwner && InParty && luck >= 1 && DCCPausesOnKeyRolls() && !(net && !net->IsHost()) && core->GetGameControl();
 	if (ask) {
 		PromptQuestion q;
 		q.kind = PromptKind::YesNo;

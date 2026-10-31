@@ -808,7 +808,7 @@ public:
 	 * Returns 1 pinned, 0 failed, -1 not possible */
 	int DCCGrapple(Actor* target);
 	/** walking away from foes it's in melee with gives them a free attack each (DoStep) */
-	void DCCCheckWithdrawal();
+	void DCCCheckWithdrawal(const Point& before);
 	/** DCC: a forced move (fling, push) ends its melee engagements without a withdrawal */
 	void DCCDisengage();
 	/** a monster's or NPC's morale check (combat.md, d20 + Will vs dc): false if it flees. Party
@@ -832,6 +832,9 @@ public:
 	// DCC Luck burn and Mighty Deeds (M2.4, ActorDCCLuck.cpp)
 	/** the character's burn policy, threshold and flags (IE_DCC_BURNPOLICY, BURNMIN, LUCKFLAGS) */
 	DCC::LuckPolicy GetDCCLuckPolicy() const;
+	/** whether its owner is asked on key rolls (LUCK_PAUSE): never for level-0 characters unless
+	 * the game says so (DCC_PROMPT_LOUD0; Phase 3: a funnel of 16 doesn't stall on prompts) */
+	bool DCCPausesOnKeyRolls() const;
 	/** what a point of this character's Luck adds to its own roll */
 	DCC::BurnValue GetDCCBurnValue() const;
 	/** the current Luck score (after loss and burns) */

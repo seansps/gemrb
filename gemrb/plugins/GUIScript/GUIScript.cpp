@@ -4053,6 +4053,7 @@ static PyObject* GemRB_GetPrompt(PyObject* /*self*/, PyObject* /*args*/)
 	PyDictSet(dict, "Waiting", NetPyString(view->waitingFor));
 	PyDictSet(dict, "For", NetPyString(view->askedName));
 	PyDictSet(dict, "Remaining", PyLong_FromLong(long(prompts.Remaining())));
+	PyDictSet(dict, "Queued", PyLong_FromLong(long(view->queued)));
 	return dict;
 }
 
@@ -7727,6 +7728,107 @@ static PyObject* GemRB_DCCConfirmSpells(PyObject* /*self*/, PyObject* args)
 	std::string pick = lucky ? lucky : "";
 	if (!NetForward(NetGuiOp::DCCConfirmSpells, { globalID }, pick)) Py_RETURN_TRUE;
 	RETURN_BOOL(actor->DCCConfirmSpells(pick));
+}
+
+PyDoc_STRVAR(GemRB_DCCSetPromptOptions__doc,
+	     "===== DCCSetPromptOptions =====\n\
+\n\
+**Prototype:** GemRB.DCCSetPromptOptions (autoSeconds, level0Ask)\n\
+\n\
+**Description:** The host's prompt options, kept with the game (globals DCC_PROMPT_AUTO and \n\
+DCC_PROMPT_LOUD0): autoSeconds answers any prompt about a character with its policy's \n\
+answer once that many seconds pass unanswered (0: the usual timeouts); level0Ask 1 lets \n\
+level-0 characters pause and ask on key rolls too (by default the funnel's peasants follow \n\
+their Luck policy without asking). Host or single player only.\n\
+\n\
+**Return value:** bool");
+
+static PyObject* GemRB_DCCSetPromptOptions(PyObject* /*self*/, PyObject* args)
+{
+	int autoSeconds;
+	int loud = 0;
+	PARSE_ARGS(args, "i|i", &autoSeconds, &loud);
+	GET_GAME();
+	const NetSession* net = core->GetNetSession();
+	if (net && !net->IsHost()) Py_RETURN_FALSE;
+	game->locals["DCC_PROMPT_AUTO"] = ieDword(std::min(std::max(autoSeconds, 0), 600));
+	game->locals["DCC_PROMPT_LOUD0"] = loud ? 1 : 0;
+	Py_RETURN_TRUE;
+}
+
+PyDoc_STRVAR(GemRB_GameControlMoveSelected__doc,
+	     "===== GameControlMoveSelected =====\n\
+\n\
+**Prototype:** GemRB.GameControlMoveSelected (x, y[, formation=1])\n\
+\n\
+**Description:** Orders the selected characters to a point as a click on the ground does: \n\
+in formation (the party's formation, formatio.2da) unless formation is 0. In co-op a client's \n\
+order goes to the host like a click's. For scripts and tests (the funnel's party of 16).\n\
+\n\
+**Return value:** N/A");
+
+static PyObject* GemRB_GameControlMoveSelected(PyObject* /*self*/, PyObject* args)
+{
+	int x;
+	int y;
+	int formation = 1;
+	PARSE_ARGS(args, "ii|i", &x, &y, &formation);
+	GET_GAME();
+	GET_GAMECONTROL();
+	gc->CommandSelectedMovement(Point(x, y), formation != 0);
+	Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(GemRB_GetActorPosition__doc,
+	     "===== GetActorPosition =====\n\
+\n\
+**Prototype:** GemRB.GetActorPosition (globalID)\n\
+\n\
+**Description:** Where an actor is: its area, position, destination and whether it walks. \n\
+For scripts and tests.\n\
+\n\
+**Return value:** dict: Area, X, Y, DestX, DestY, Moving");
+
+static PyObject* GemRB_GetActorPosition(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	PARSE_ARGS(args, "i", &globalID);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	PyObject* dict = PyDict_New();
+	const Map* map = actor->GetCurrentArea();
+	PyDict_SetItemString(dict, "Area", DecRef(PyUnicode_FromString, map ? map->GetScriptRef().c_str() : ""));
+	DictInt(dict, "X", actor->Pos.x);
+	DictInt(dict, "Y", actor->Pos.y);
+	DictInt(dict, "DestX", actor->Destination.x);
+	DictInt(dict, "DestY", actor->Destination.y);
+	DictInt(dict, "Moving", actor->InMove());
+	return dict;
+}
+
+PyDoc_STRVAR(GemRB_DCCWalk__doc,
+	     "===== DCCWalk =====\n\
+\n\
+**Prototype:** GemRB.DCCWalk (globalID, x, y)\n\
+\n\
+**Description:** Walks an actor to a point without an action of its own, the way a scripted \n\
+move walks on after its action is released or a party member follows the formation. For the \n\
+withdrawal tests (a voluntary move provokes, Phase 3). Host or single player only.\n\
+\n\
+**Return value:** N/A");
+
+static PyObject* GemRB_DCCWalk(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int x;
+	int y;
+	PARSE_ARGS(args, "iii", &globalID, &x, &y);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	const NetSession* net = core->GetNetSession();
+	if (net && !net->IsHost()) Py_RETURN_NONE;
+	actor->WalkTo(Point(x, y), 0, 0);
+	Py_RETURN_NONE;
 }
 
 PyDoc_STRVAR(GemRB_GetDCCFunnel__doc,
@@ -14853,6 +14955,10 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(DCCReplaceSpell, METH_VARARGS),
 	METHOD(DCCConfirmSpells, METH_VARARGS),
 	METHOD(GetDCCFunnel, METH_VARARGS),
+	METHOD(DCCWalk, METH_VARARGS),
+	METHOD(GameControlMoveSelected, METH_VARARGS),
+	METHOD(GetActorPosition, METH_VARARGS),
+	METHOD(DCCSetPromptOptions, METH_VARARGS),
 	METHOD(DCCSetFunnel, METH_VARARGS),
 	METHOD(DCCCast, METH_VARARGS),
 	METHOD(GetDCCLastCast, METH_VARARGS),

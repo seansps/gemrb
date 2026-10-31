@@ -52,6 +52,7 @@
 #include "Logging/Logging.h"
 #include "Scriptable/Actor.h"
 
+#include <cmath>
 #include <deque>
 
 namespace GemRB {
@@ -753,7 +754,7 @@ bool Actor::DCCAskAttackBurn(const std::shared_ptr<DCCAttackState>& state, DCCSw
 {
 	// only party members are asked, if they pause on key rolls and can burn at all
 	LuckPolicy policy = GetDCCLuckPolicy();
-	if (!InParty || !IsDCCCharacter() || !(policy.flags & LUCK_PAUSE)) return false;
+	if (!InParty || !IsDCCCharacter() || !DCCPausesOnKeyRolls()) return false;
 	int luck = GetDCCLuck();
 	if (luck <= 0) return false;
 
@@ -2213,7 +2214,19 @@ void Actor::DCCDisengage()
 	dccEngaged.clear();
 }
 
-void Actor::DCCCheckWithdrawal()
+// whether mover standing at a point would be within reach feet of foe (WithinPersonalRange from there)
+static bool InReachFrom(const Actor* foe, const Actor* mover, const Point& at, int reach)
+{
+	float_t angle = AngleFromPoints(foe->Pos, at);
+	long dx = at.x - foe->Pos.x;
+	long dy = at.y - foe->Pos.y;
+	// PersonalDistance's circle sizes (its DistanceFactor of 4)
+	double distance = std::hypot(dx, dy) - (foe->CircleSize2Radius() + mover->CircleSize2Radius()) * 4.0;
+	return std::max(0.0, distance) <= Feet2Pixels(reach, angle);
+}
+
+// a voluntary step (Actor::DoStep): before is where the step started
+void Actor::DCCCheckWithdrawal(const Point& before)
 {
 	if (dccEngaged.empty() || !Rules()) return;
 	const Game* game = core->GetGame();
@@ -2230,6 +2243,8 @@ void Actor::DCCCheckWithdrawal()
 		}
 		int reach = std::max<int>(foe->GetWeaponRange(false), MELEE_REACH);
 		bool inReach = WithinPersonalRange(foe, this, reach);
+		// displaced out of reach (a push, a fling, a teleport) before this step: not a withdrawal
+		bool wasInReach = inReach || InReachFrom(foe, this, before, reach);
 		bool canAttack = !(foe->weaponInfo[0].wflags & WEAPON_RANGED) && !foe->IsDCCHeld() && !foe->Immobile() && !foe->GetStat(IE_DCC_NOATTACK) &&
 				 !foe->GetStat(IE_DCC_PRONE) && !(foe->GetStat(IE_STATE_ID) & STATE_PANIC);
 		// still in reach, or walking towards the foe (around it, after it): no withdrawal yet
@@ -2241,7 +2256,7 @@ void Actor::DCCCheckWithdrawal()
 		// it left the foe's reach on its own feet: one free attack (combat.md "Withdrawal")
 		it = dccEngaged.erase(it);
 		foe->dccEngaged.erase(GetGlobalID());
-		if (WithdrawalProvokes(true, true, false, canAttack)) {
+		if (WithdrawalProvokes(true, wasInReach, false, canAttack)) {
 			foe->DCCFreeAttack(this, fmt::format(u"{} withdraws", Name(this)));
 		}
 	}

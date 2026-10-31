@@ -85,6 +85,13 @@ std::vector<uint8_t> PromptManager::Players()
 uint32_t PromptManager::AskSlots(std::vector<uint8_t> slots, PromptQuestion question, Callback done)
 {
 	if (!question.timeout) question.timeout = uint32_t(Clamp<int>(core->config.PromptTimeout, 1000, int(PROMPT_MAX_TIMEOUT)));
+	// the host's auto-resolve (Phase 3, DCC_PROMPT_AUTO seconds): a prompt about a character answers
+	// itself with its default, the character's policy, if nobody does sooner
+	const Game* game = core->GetGame();
+	ieDword autoSeconds = game ? game->GetGlobal("DCC_PROMPT_AUTO", 0) : 0;
+	if (autoSeconds && question.actorID && !(question.flags & PromptQuestion::VOTE)) {
+		question.timeout = std::min<uint32_t>(question.timeout, std::max<uint32_t>(1000, uint32_t(std::min<ieDword>(autoSeconds, 600)) * 1000));
+	}
 	UpdatePresence();
 	std::string tag = question.tag;
 	std::string title = question.title;
@@ -143,8 +150,10 @@ void PromptManager::Update()
 	for (const auto& result : queue.TakeFinished()) {
 		Finished(result);
 	}
-	if (queue.Revision() != sentRevision) {
+	// the prompts waiting behind the open one show as a count (Phase 3: never stacked)
+	if (queue.Revision() != sentRevision || queue.Queued() != sentQueued) {
 		sentRevision = queue.Revision();
+		sentQueued = queue.Queued();
 		BuildView();
 		Broadcast();
 		guiDirty = true;
@@ -266,6 +275,7 @@ NetPrompt PromptManager::Message() const
 	msg.id = active->id;
 	msg.state = NetPrompt::OPEN;
 	msg.remaining = queue.Remaining(Now());
+	msg.queued = uint8_t(std::min<size_t>(queue.Queued(), 255));
 	msg.question = active->question;
 	for (const auto& voter : active->voters) {
 		NetPromptVoter entry;
@@ -314,6 +324,7 @@ void PromptManager::BuildView()
 	view.id = active->id;
 	view.question = active->question;
 	view.deadline = Now() + queue.Remaining(Now());
+	view.queued = queue.Queued();
 	for (const auto& voter : active->voters) {
 		if (voter.state != PromptVoter::State::Waiting || (vote && voter.away)) continue;
 		if (voter.by == PROMPT_LOCAL_SLOT) view.mine = true;
@@ -343,6 +354,7 @@ void PromptManager::OnRemotePrompt(const NetPrompt& msg)
 	next.id = msg.id;
 	next.question = msg.question;
 	next.deadline = Now() + msg.remaining;
+	next.queued = msg.queued;
 	for (const auto& voter : msg.voters) {
 		if (voter.state != uint8_t(PromptVoter::State::Waiting) || (vote && voter.away)) continue;
 		if (voter.by == me) next.mine = true;

@@ -414,6 +414,9 @@ def _Dead (actor):
 def _Logged (text):
 	return any (text in line for line in GemRB.GetDCCCombatLog ())
 
+def _LogCount (text):
+	return sum (1 for line in GemRB.GetDCCCombatLog () if text in line)
+
 def _Pending (actor):
 	return GemRB.GetDCCStats (actor)["AttackPending"]
 
@@ -691,6 +694,38 @@ def _FightCompletion ():
 	GemRB.DCCForceDice (thug3, [])
 	_Check ("log: withdrawal", _Logged ("Thug 3 gets a free attack: Tank withdraws"), True)
 	_Check ("log: the free attack", _Logged ("Thug 3 free attack on Tank: d20 15"), True)
+	GemRB.ExecuteString ("JumpToPoint([1180.1000])", tank)
+	for i in range (3):
+		yield
+
+	# Phase 3: a scripted move without an action of its own (a formation follow, a move after its
+	# action was released) is voluntary too: walking out of reach gives thug 3 its free attack
+	GemRB.ClearActions (tank)
+	GemRB.ExecuteString ("JumpToPoint([1180.1000])", tank)
+	for i in range (3):
+		yield
+	_Attack (tank, thug3, [1, 2])
+	freeAttacks = _LogCount ("Thug 3 gets a free attack: Tank withdraws")
+	GemRB.DCCForceDice (thug3, [15, 3])
+	GemRB.DCCWalk (tank, 1180, 800)
+	yield from _Wait (lambda: _LogCount ("Thug 3 gets a free attack: Tank withdraws") > freeAttacks, 30)
+	GemRB.DCCForceDice (thug3, [])
+	_Check ("scripted move without an action: withdrawal", _LogCount ("Thug 3 gets a free attack: Tank withdraws"), freeAttacks + 1)
+	# displaced out of reach (a teleport here, a push or fling alike) and walking on: no free attack
+	GemRB.ClearActions (tank)
+	GemRB.ExecuteString ("JumpToPoint([1180.1000])", tank)
+	for i in range (3):
+		yield
+	_Attack (tank, thug3, [1, 2])
+	GemRB.ExecuteString ("JumpToPoint([1180.880])", tank)
+	yield
+	where = GemRB.GetActorPosition (tank)
+	_Check ("tank displaced out of reach", [where["X"], where["Y"]], [1180, 880])
+	GemRB.DCCWalk (tank, 1180, 760)
+	for i in range (12):
+		yield
+	_Check ("displaced, then walking on: no withdrawal", _LogCount ("Thug 3 gets a free attack: Tank withdraws"), freeAttacks + 1)
+	GemRB.ClearActions (tank)
 	GemRB.ExecuteString ("JumpToPoint([1180.1000])", tank)
 	for i in range (3):
 		yield

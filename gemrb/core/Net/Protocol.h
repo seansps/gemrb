@@ -873,6 +873,7 @@ struct GEM_EXPORT NetPrompt {
 	uint32_t id = 0;
 	uint8_t state = OPEN;
 	uint32_t remaining = 0; // ms, as the host sent it
+	uint8_t queued = 0; // prompts waiting behind this one (v12)
 	PromptQuestion question; // actorID as a network ID
 	std::vector<NetPromptVoter> voters; // at most PROMPT_MAX_VOTERS
 	uint8_t outcome = 0; // CLOSED: PromptOutcome

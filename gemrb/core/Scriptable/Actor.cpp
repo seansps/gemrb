@@ -6737,11 +6737,14 @@ void Actor::DoStep(unsigned int newWalkScale, ieDword time)
 	if (Immobile()) {
 		return;
 	}
+	Point before = Pos;
 	Movable::DoStep(newWalkScale, time);
 	// DCC: walking out of a melee gives the foes a free attack (combat.md "Withdrawal"), but only a
-	// move the creature chose: an action of its own, not a bump out of another's way or a push
-	if (core->HasFeature(GFFlags::RULES_DCC) && !dccEngaged.empty() && !IsBumped() && GetCurrentAction()) {
-		DCCCheckWithdrawal();
+	// voluntary move: its own walking (an order, a script, following the formation), not a bump out
+	// of another's way; a push, fling or knockback moves it without a step, so the step after that
+	// starts out of reach and doesn't count (Phase 3)
+	if (core->HasFeature(GFFlags::RULES_DCC) && !dccEngaged.empty() && !IsBumped()) {
+		DCCCheckWithdrawal(before);
 	}
 }
 

@@ -1178,6 +1178,7 @@ void NetPrompt::Write(NetWriter& w) const
 	w.U32(id);
 	w.U8(state);
 	w.U32(remaining);
+	w.U8(queued);
 	w.U8(uint8_t(question.kind));
 	w.U8(question.flags);
 	w.Str(question.tag);
@@ -1219,6 +1220,7 @@ bool NetPrompt::Read(NetReader& r)
 	id = r.U32();
 	state = r.U8();
 	remaining = r.U32();
+	queued = r.U8();
 	uint8_t kind = r.U8();
 	if (kind >= uint8_t(PromptKind::count) || state > CLOSED) r.Fail();
 	question.kind = PromptKind(kind);

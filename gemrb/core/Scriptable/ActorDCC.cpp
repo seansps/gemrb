@@ -387,7 +387,7 @@ bool Actor::DCCAskSaveBurn(const Effect& fx, ieDword type, const RollResult& rol
 		return true;
 	}
 	LuckPolicy policy = GetDCCLuckPolicy();
-	if (!InParty || !IsDCCCharacter() || !(policy.flags & LUCK_PAUSE)) return false;
+	if (!InParty || !IsDCCCharacter() || !DCCPausesOnKeyRolls()) return false;
 	const NetSession* net = core->GetNetSession();
 	if ((net && !net->IsHost()) || !core->GetGameControl()) return false;
 	int luck = GetDCCLuck();

@@ -216,7 +216,16 @@ def OpenSpellsWindow (pc = None):
 		_Button (win, 41, 150, y, 140, 28, "Lay on hands", LayOnHands)
 		_Button (win, 42, 298, y, 150, 28, "Turn unholy", TurnUnholy)
 		y += 34
+	# Phase 3: spells from the last level-up the player hasn't confirmed yet
+	if magic and magic["Fresh"]:
+		_Button (win, 51, 12, height - 38, 160, 28, "New spells...", OpenLearn, True)
 	close = _Button (win, 50, Width - 112, height - 38, 100, 28, "Close", Close)
 	close.MakeEscape ()
 	win.Focus ()
 	return win
+
+def OpenLearn ():
+	pc = Shown
+	Close ()
+	import DCCLearn
+	DCCLearn.OpenLearnWindow (pc)
