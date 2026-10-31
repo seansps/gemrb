@@ -7044,13 +7044,16 @@ PyDoc_STRVAR(GemRB_DCCLevelUp__doc,
 **Description:** Gives a DCC character its next level: at level 0 classID picks the class \n\
 (dwarves, elves and halflings must take their own), later it must be the current class. \n\
 Rolls the class hit die + Stamina modifier (+ the bountiful harvest augur), at least 1. \n\
-It doesn't check the XP; see CanLevelUp in GetDCCStats. Host or single player only for now.\n\
+It doesn't check the XP; see CanLevelUp in GetDCCStats.\n\
 \n\
 **Parameters:**\n\
   * globalID - party ID or global ID of the actor to use\n\
   * classID - IE_CLASS of the class (class.ids)\n\
 \n\
-**Return value:** the hit points gained, -1 if refused\n\
+Wizards, elves and clerics then learn their spells (DCCLearnSpell, see GetDCCMagic's \n\
+LearnNotes and Choices; DCCReplaceSpell, DCCConfirmSpells). Routed to the host in co-op.\n\
+\n\
+**Return value:** the hit points gained, -1 if refused, -2 sent to the host\n\
 \n\
 **See also:** [GetDCCStats](GetDCCStats.md)");
 
@@ -7062,12 +7065,8 @@ static PyObject* GemRB_DCCLevelUp(PyObject* /*self*/, PyObject* args)
 	GET_GAME();
 	GET_ACTOR_GLOBAL();
 
-	// the level-up GUI (M2.8) will forward this from co-op clients
-	const NetSession* net = core->GetNetSession();
-	if (net && !net->IsHost()) {
-		Log(WARNING, "GUIScript", "DCCLevelUp is not available to co-op clients yet.");
-		return PyLong_FromLong(-1);
-	}
+	// co-op: the host rolls it for the owner (v12), the client gets the new numbers back
+	if (!NetForward(NetGuiOp::DCCLevelUp, { globalID, classID })) return PyLong_FromLong(-2);
 	return PyLong_FromLong(actor->DCCLevelUp(classID));
 }
 
@@ -7510,6 +7509,9 @@ static PyObject* GemRB_GetDCCMagic(PyObject* /*self*/, PyObject* args)
 		DictInt(entry, "Lost", (known.flags & DCC::SPELL_LOST) != 0);
 		DictInt(entry, "Lucky", (known.flags & DCC::SPELL_LUCKY) != 0);
 		DictInt(entry, "Penalty", (known.flags & DCC::SPELL_PENALTY) != 0);
+		DictInt(entry, "Fresh", (known.flags & DCC::SPELL_FRESH) != 0);
+		DictInt(entry, "Replaced", (known.flags & DCC::SPELL_REPLACED) != 0);
+		DictInt(entry, "LuckyMod", known.luckyMod);
 		DictInt(entry, "Casts", known.casts);
 		PyObject* mercurial = PyList_New(0);
 		std::vector<std::string> mercurialText;
@@ -7599,17 +7601,65 @@ static PyObject* GemRB_GetDCCMagic(PyObject* /*self*/, PyObject* args)
 	Py_DecRef(burn);
 	DictInt(dict, "Disapproval", actor->dccExt.disapproval.range);
 	DictInt(dict, "NoReset", (actor->dccExt.disapproval.flags & DCC::DISAPPROVAL_NO_RESET) != 0);
+
+	// Phase 3: spells known by count, and what the learn window may offer
+	DCC::CasterKind kind = actor->GetDCCCasterKind();
+	PyObject* allowed = PyList_New(0);
+	PyObject* counted = PyList_New(0);
+	PyObject* choices = PyList_New(0);
+	for (int level = 1; level <= DCC::SPELL_LEVELS; ++level) {
+		int levelAllowed = kind == DCC::CasterKind::Wizard ? (level == 1 ? actor->DCCSpellsAllowed(0) : 0) : actor->DCCSpellsAllowed(level);
+		int levelCounted = kind == DCC::CasterKind::Wizard ? (level == 1 ? actor->DCCSpellsCounted(0) : 0) : actor->DCCSpellsCounted(level);
+		PyList_Append(allowed, DecRef(PyLong_FromLong, levelAllowed));
+		PyList_Append(counted, DecRef(PyLong_FromLong, levelCounted));
+		PyObject* levelChoices = PyList_New(0);
+		for (const auto& entry : rules->spellLists.List(kind, level)) {
+			if (entry.spell.empty() || actor->dccExt.FindSpell(entry.spell)) continue;
+			const DCC::SpellInfo* info = rules->Spell(entry.spell);
+			if (!info || info->kind != kind) continue;
+			PyObject* choice = PyDict_New();
+			PyDict_SetItemString(choice, "Spell", DecRef(PyUnicode_FromString, entry.spell.c_str()));
+			PyDict_SetItemString(choice, "Name", DecRef(PyUnicode_FromString, info->name.c_str()));
+			DictInt(choice, "Row", entry.row);
+			PyList_Append(levelChoices, choice);
+			Py_DecRef(choice);
+		}
+		PyList_Append(choices, levelChoices);
+		Py_DecRef(levelChoices);
+	}
+	// wizards and elves count all their spells together (Allowed[0], Counted[0])
+	PyDict_SetItemString(dict, "Allowed", allowed);
+	PyDict_SetItemString(dict, "Counted", counted);
+	PyDict_SetItemString(dict, "Choices", choices);
+	Py_DecRef(allowed);
+	Py_DecRef(counted);
+	Py_DecRef(choices);
+	PyObject* notes = DCCStringList(actor->dccLearnNotes);
+	PyDict_SetItemString(dict, "LearnNotes", notes);
+	Py_DecRef(notes);
+	int fresh = 0;
+	int replaced = 0;
+	for (const auto& known : actor->dccExt.spells) {
+		if (!(known.flags & DCC::SPELL_FRESH)) continue;
+		++fresh;
+		if (known.flags & DCC::SPELL_REPLACED) ++replaced;
+	}
+	DictInt(dict, "Fresh", fresh);
+	// how many more fresh spells the player may swap (clerics: all of them, they choose)
+	DictInt(dict, "Swaps", kind == DCC::CasterKind::Cleric ? fresh : std::max(0, DCC::ReplaceableSpells(fresh) - replaced));
+	DictInt(dict, "PicksLucky", actor->GetStat(IE_CLASS) == static_cast<ieDword>(DCC::ClassID::Elf) && actor->GetStat(IE_LEVEL) == 1);
 	return dict;
 }
 
 PyDoc_STRVAR(GemRB_DCCLearnSpell__doc,
 	     "===== DCCLearnSpell =====\n\
 \n\
-**Prototype:** GemRB.DCCLearnSpell (globalID, spell[, rolls])\n\
+**Prototype:** GemRB.DCCLearnSpell (globalID, spell[, rolls[, force]])\n\
 \n\
 **Description:** A DCC caster learns a DCC spell (a base spell of dccspell.2da): wizards and \n\
-elves roll mercurial magic, everyone the manifestation (rolls 0: neither). Host or single \n\
-player only.\n\
+elves roll mercurial magic, everyone the manifestation (rolls 0: neither). A DCC character \n\
+learns only its class's spells, of a level it can cast, up to its spells known (Phase 3); \n\
+force 1 skips those checks (scripts, scrolls of story). Host or single player only.\n\
 \n\
 **Return value:** the first mercurial magic result (0 for none), -1 if it can't be learned");
 
@@ -7618,12 +7668,151 @@ static PyObject* GemRB_DCCLearnSpell(PyObject* /*self*/, PyObject* args)
 	int globalID;
 	char* spell = nullptr;
 	int rolls = 1;
-	PARSE_ARGS(args, "is|i", &globalID, &spell, &rolls);
+	int force = 0;
+	PARSE_ARGS(args, "is|ii", &globalID, &spell, &rolls, &force);
 	GET_GAME();
 	GET_ACTOR_GLOBAL();
 	const NetSession* net = core->GetNetSession();
 	if (net && !net->IsHost()) return PyLong_FromLong(-1);
-	return PyLong_FromLong(actor->DCCLearnSpell(ResRef(spell), rolls != 0));
+	return PyLong_FromLong(actor->DCCLearnSpell(ResRef(spell), rolls != 0, force != 0));
+}
+
+PyDoc_STRVAR(GemRB_DCCReplaceSpell__doc,
+	     "===== DCCReplaceSpell =====\n\
+\n\
+**Prototype:** GemRB.DCCReplaceSpell (globalID, oldSpell, newSpell)\n\
+\n\
+**Description:** The learn window after a level-up: swaps a spell learned at that level-up \n\
+for another of the same level from its class's list. Clerics choose freely (the god's list); \n\
+wizards and elves may swap up to half their new spells (the book's optional rule), and the \n\
+new one rolls its own mercurial magic. Routed to the host in co-op (the owner only).\n\
+\n\
+**Return value:** True if swapped (or sent to the host), False if refused");
+
+static PyObject* GemRB_DCCReplaceSpell(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	char* oldSpell = nullptr;
+	char* newSpell = nullptr;
+	PARSE_ARGS(args, "iss", &globalID, &oldSpell, &newSpell);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	if (!NetForward(NetGuiOp::DCCReplaceSpell, { globalID }, fmt::format("{} {}", oldSpell, newSpell))) Py_RETURN_TRUE;
+	String why;
+	if (!actor->DCCReplaceSpell(oldSpell, newSpell, &why)) {
+		Log(MESSAGE, "GUIScript", "DCCReplaceSpell refused: {}.", fmt::WideToChar { why });
+		Py_RETURN_FALSE;
+	}
+	Py_RETURN_TRUE;
+}
+
+PyDoc_STRVAR(GemRB_DCCConfirmSpells__doc,
+	     "===== DCCConfirmSpells =====\n\
+\n\
+**Prototype:** GemRB.DCCConfirmSpells (globalID[, lucky])\n\
+\n\
+**Description:** Closes the learn window: the new spells are kept for good. An elf of level 1 \n\
+names its lucky spell (its Luck modifier now is added to that spell's checks, frozen); \n\
+"" or no lucky keeps the default (the first spell learned). Routed to the host in co-op.\n\
+\n\
+**Return value:** bool");
+
+static PyObject* GemRB_DCCConfirmSpells(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	char* lucky = nullptr;
+	PARSE_ARGS(args, "i|s", &globalID, &lucky);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	std::string pick = lucky ? lucky : "";
+	if (!NetForward(NetGuiOp::DCCConfirmSpells, { globalID }, pick)) Py_RETURN_TRUE;
+	RETURN_BOOL(actor->DCCConfirmSpells(pick));
+}
+
+PyDoc_STRVAR(GemRB_GetDCCFunnel__doc,
+	     "===== GetDCCFunnel =====\n\
+\n\
+**Prototype:** GemRB.GetDCCFunnel (globalID)\n\
+\n\
+**Description:** A character's 0-level occupation and its place in the funnel (the CRE \n\
+extension's OCCU and FUNL records, Phase 3).\n\
+\n\
+**Return value:** dict: Occupation (Id, Sub, TradeGood, Weapon, LastWeapon, Skills: list of \n\
+tag names, SkillBits), Funnel (Status: 0 none, 1 alive, 2 dead, 3 chosen, 4 reserve; StatusName, \n\
+Order, Player (-1 none), ClassPending, Recovered, DiedAt, DiedIn)");
+
+static PyObject* GemRB_GetDCCFunnel(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	PARSE_ARGS(args, "i", &globalID);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	const DCC::Occupation& occ = actor->dccExt.occupation;
+	const DCC::Funnel& funnel = actor->dccExt.funnel;
+	PyObject* occupation = PyDict_New();
+	DictInt(occupation, "Id", occ.id);
+	DictInt(occupation, "Sub", occ.sub);
+	PyDict_SetItemString(occupation, "TradeGood", DecRef(PyUnicode_FromString, occ.tradeGood.c_str()));
+	PyDict_SetItemString(occupation, "Weapon", DecRef(PyUnicode_FromString, occ.weapon.c_str()));
+	PyDict_SetItemString(occupation, "LastWeapon", DecRef(PyUnicode_FromString, occ.lastWeapon.c_str()));
+	std::vector<std::string> skills;
+	for (int bit = 0; bit < DCC::OCCUPATION_SKILL_COUNT; ++bit) {
+		if (occ.skills & (1u << bit)) skills.emplace_back(DCC::OccupationSkillName(bit));
+	}
+	PyObject* skillList = DCCStringList(skills);
+	PyDict_SetItemString(occupation, "Skills", skillList);
+	Py_DecRef(skillList);
+	DictInt(occupation, "SkillBits", long(occ.skills));
+	PyObject* place = PyDict_New();
+	DictInt(place, "Status", static_cast<int>(funnel.status));
+	PyDict_SetItemString(place, "StatusName", DecRef(PyUnicode_FromString, DCC::FunnelStatusName(funnel.status)));
+	DictInt(place, "Order", funnel.order);
+	DictInt(place, "Player", funnel.player == DCC::FUNNEL_NO_PLAYER ? -1 : funnel.player);
+	DictInt(place, "ClassPending", (funnel.flags & DCC::FUNNEL_CLASS_PENDING) != 0);
+	DictInt(place, "Recovered", (funnel.flags & DCC::FUNNEL_RECOVERED) != 0);
+	DictInt(place, "DiedAt", long(funnel.diedAt));
+	PyDict_SetItemString(place, "DiedIn", DecRef(PyUnicode_FromString, funnel.diedIn.c_str()));
+	PyObject* dict = PyDict_New();
+	PyDict_SetItemString(dict, "Occupation", occupation);
+	PyDict_SetItemString(dict, "Funnel", place);
+	Py_DecRef(occupation);
+	Py_DecRef(place);
+	return dict;
+}
+
+PyDoc_STRVAR(GemRB_DCCSetFunnel__doc,
+	     "===== DCCSetFunnel =====\n\
+\n\
+**Prototype:** GemRB.DCCSetFunnel (globalID, status[, order[, player[, flags]]])\n\
+\n\
+**Description:** Sets a character's place in the funnel (FUNL): status 0 none, 1 alive, \n\
+2 dead, 3 chosen, 4 reserve; order its roster place (1-16, -1 keeps it); player the co-op \n\
+player it was dealt to (-1 none, -2 keeps it); flags 1 class pick pending, 2 recovered \n\
+(-1 keeps them). Host or single player only (the funnel's own screens, scripts, tests).\n\
+\n\
+**Return value:** bool");
+
+static PyObject* GemRB_DCCSetFunnel(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int status;
+	int order = -1;
+	int player = -2;
+	int flags = -1;
+	PARSE_ARGS(args, "ii|iii", &globalID, &status, &order, &player, &flags);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	const NetSession* net = core->GetNetSession();
+	if (net && !net->IsHost()) Py_RETURN_FALSE;
+	if (status < 0 || status >= static_cast<int>(DCC::FunnelStatus::count)) Py_RETURN_FALSE;
+	DCC::Funnel& funnel = actor->dccExt.funnel;
+	funnel.status = static_cast<DCC::FunnelStatus>(status);
+	if (order >= 0) funnel.order = static_cast<uint8_t>(std::min(order, 255));
+	if (player == -1) funnel.player = DCC::FUNNEL_NO_PLAYER;
+	else if (player >= 0) funnel.player = static_cast<uint8_t>(std::min(player, 254));
+	if (flags >= 0) funnel.flags = static_cast<uint8_t>(flags);
+	actor->DCCExtChanged();
+	Py_RETURN_TRUE;
 }
 
 PyDoc_STRVAR(GemRB_DCCCast__doc,
@@ -14661,6 +14850,10 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(DCCGrapple, METH_VARARGS),
 	METHOD(GetDCCMagic, METH_VARARGS),
 	METHOD(DCCLearnSpell, METH_VARARGS),
+	METHOD(DCCReplaceSpell, METH_VARARGS),
+	METHOD(DCCConfirmSpells, METH_VARARGS),
+	METHOD(GetDCCFunnel, METH_VARARGS),
+	METHOD(DCCSetFunnel, METH_VARARGS),
 	METHOD(DCCCast, METH_VARARGS),
 	METHOD(GetDCCLastCast, METH_VARARGS),
 	METHOD(DCCSetSpellburn, METH_VARARGS),

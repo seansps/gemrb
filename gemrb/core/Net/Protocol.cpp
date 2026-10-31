@@ -44,6 +44,20 @@ void NetWriter::U64(uint64_t value)
 	U32(uint32_t(value >> 32));
 }
 
+void NetWriter::VarU32(uint32_t value)
+{
+	while (value >= 0x80) {
+		U8(uint8_t(value | 0x80));
+		value >>= 7;
+	}
+	U8(uint8_t(value));
+}
+
+void NetWriter::VarI32(int32_t value)
+{
+	VarU32((uint32_t(value) << 1) ^ uint32_t(value >> 31));
+}
+
 void NetWriter::Str(const std::string& value)
 {
 	size_t len = std::min(value.size(), NET_MAX_STRING);
@@ -104,6 +118,30 @@ uint32_t NetReader::U32()
 	uint32_t lo = U16();
 	uint32_t hi = U16();
 	return lo | (hi << 16);
+}
+
+uint32_t NetReader::VarU32()
+{
+	uint32_t value = 0;
+	for (int shift = 0; shift < 35; shift += 7) {
+		uint8_t byte = U8();
+		if (!ok) return 0;
+		// the fifth byte only has 4 bits left; anything longer or wider is malformed
+		if (shift == 28 && byte > 0x0f) {
+			ok = false;
+			return 0;
+		}
+		value |= uint32_t(byte & 0x7f) << shift;
+		if (!(byte & 0x80)) return value;
+	}
+	ok = false;
+	return 0;
+}
+
+int32_t NetReader::VarI32()
+{
+	uint32_t zz = VarU32();
+	return int32_t((zz >> 1) ^ (~(zz & 1) + 1));
 }
 
 int32_t NetReader::I32()
@@ -811,23 +849,29 @@ bool NetInventory::Read(NetReader& r)
 void NetActorStats::Write(NetWriter& w) const
 {
 	w.U32(netID);
+	w.U8(flags);
 	size_t count = WriteCount(w, stats.size(), NET_MAX_STATS);
 	for (size_t i = 0; i < count; ++i) {
-		w.U16(stats[i].stat);
-		w.U32(stats[i].base);
-		w.U32(stats[i].modified);
+		const NetStatEntry& entry = stats[i];
+		bool same = entry.base == entry.modified;
+		w.U16(uint16_t(entry.stat | (same ? SAME : 0)));
+		w.VarI32(int32_t(entry.base));
+		if (!same) w.VarI32(int32_t(entry.modified));
 	}
 }
 
 bool NetActorStats::Read(NetReader& r)
 {
 	netID = r.U32();
+	flags = r.U8();
+	if (flags & ~FULL) r.Fail();
 	stats.resize(ReadCount(r, NET_MAX_STATS));
 	for (auto& entry : stats) {
-		entry.stat = r.U16();
+		uint16_t raw = r.U16();
+		entry.stat = uint16_t(raw & ~SAME);
 		if (entry.stat >= NET_MAX_STATS) r.Fail();
-		entry.base = r.U32();
-		entry.modified = r.U32();
+		entry.base = uint32_t(r.VarI32());
+		entry.modified = (raw & SAME) ? entry.base : uint32_t(r.VarI32());
 	}
 	return r.Ok();
 }

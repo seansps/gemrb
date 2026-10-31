@@ -22,6 +22,7 @@
 #include "DCC/Classes.h"
 #include "DCC/CombatTables.h"
 #include "DCC/Deeds.h"
+#include "DCC/Learning.h"
 #include "DCC/Magic.h"
 
 #include <array>
@@ -78,6 +79,8 @@ public:
 	CombatTables combat;
 	DeedTable deeds;
 	MagicTables magic;
+	SpellLists spellLists; // Tables 5-8 and 5-9 (dccspls.2da), Phase 3's level-1 class pick
+	ClericSpellsTable clericSpells; // Table 1-5's spells known (dccclesp.2da)
 
 	/** loads every table through gamedata; logs and returns false if one is missing or bad */
 	bool Load();

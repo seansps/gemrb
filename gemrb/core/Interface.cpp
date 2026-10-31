@@ -326,8 +326,8 @@ Interface::Interface(CoreSettings&& cfg)
 	if (!config.KeepCache) DelTree(config.CachePath, false);
 
 	vars = std::move(config.vars);
-	// for simple GUIScript access
-	vars.Set("MaxPartySize", config.MaxPartySize);
+	// for simple GUIScript access (set again once gemrb.ini is read, see LoadGemRBINI)
+	vars.Set("MaxPartySize", config.MaxPartySize ? config.MaxPartySize : 6);
 
 	LoadPlugins();
 	InitVideo();
@@ -1624,6 +1624,17 @@ void Interface::LoadGemRBINI()
 		if (HasFeature(GFFlags::RULES_3ED)) {
 			Log(WARNING, "Core", "Both DCCRules and 3EdRules are set; the 3rd edition paths will run too.");
 		}
+	}
+
+	// the party limit: the cfg's, else the game type's; stock games keep 1-10 (6 by default),
+	// DCC games may go up to 16 for the level-0 funnel (gemrb.ini MaxPartySize)
+	if (!config.MaxPartySize) {
+		config.MaxPartySize = HasFeature(GFFlags::RULES_DCC) ? ini->GetKeyAsInt("resources", "MaxPartySize", 6) : 6;
+	}
+	config.MaxPartySize = Clamp(config.MaxPartySize, 1, HasFeature(GFFlags::RULES_DCC) ? MAX_PARTY_SIZE_DCC : MAX_PARTY_SIZE_STOCK);
+	vars.Set("MaxPartySize", config.MaxPartySize);
+	if (config.MaxPartySize > MAX_PARTY_SIZE_STOCK) {
+		Log(MESSAGE, "Core", "Parties of up to {} characters.", config.MaxPartySize);
 	}
 
 	// see note in voodooconst.h

@@ -1,0 +1,11 @@
+2DA V1.0
+0
+# ethren: formations for parties of up to 16 (the level-0 funnel); 20 places each, the first row
+# is the default. X across, Y back (the engine rotates them to face the move and squashes Y for the
+# isometric view); 36 px is a body. Rows: a block four wide, a column of twos, single file, threes, a wedge
+ X1 Y1 X2 Y2 X3 Y3 X4 Y4 X5 Y5 X6 Y6 X7 Y7 X8 Y8 X9 Y9 X10 Y10 X11 Y11 X12 Y12 X13 Y13 X14 Y14 X15 Y15 X16 Y16 X17 Y17 X18 Y18 X19 Y19 X20 Y20
+BLOCK -32 0 32 0 -96 0 96 0 -32 56 32 56 -96 56 96 56 -32 112 32 112 -96 112 96 112 -32 168 32 168 -96 168 96 168 -32 224 32 224 -96 224 96 224
+COLUMN -32 0 32 0 -32 56 32 56 -32 112 32 112 -32 168 32 168 -32 224 32 224 -32 280 32 280 -32 336 32 336 -32 392 32 392 -32 448 32 448 -32 504 32 504
+LINE 0 0 0 44 0 88 0 132 0 176 0 220 0 264 0 308 0 352 0 396 0 440 0 484 0 528 0 572 0 616 0 660 0 704 0 748 0 792 0 836
+THREES 0 0 -64 0 64 0 0 56 -64 56 64 56 0 112 -64 112 64 112 0 168 -64 168 64 168 0 224 -64 224 64 224 0 280 -64 280 64 280 0 336 -64 336
+WEDGE 0 0 -32 56 32 56 -64 112 0 112 64 112 -96 168 -32 168 32 168 96 168 -128 224 -64 224 0 224 64 224 128 224 -160 280 -96 280 -32 280 32 280 96 280

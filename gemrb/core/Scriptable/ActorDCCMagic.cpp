@@ -42,6 +42,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <set>
 
 namespace GemRB {
 
@@ -170,13 +171,74 @@ void Actor::DCCExtChanged()
 	DCCSyncSpellbook();
 }
 
-int Actor::DCCLearnSpell(const ResRef& base, bool rolls)
+int Actor::DCCSpellsAllowed(int spellLevel) const
+{
+	const RulesData* rules = Rules();
+	CasterKind kind = GetDCCCasterKind();
+	if (!rules || kind == CasterKind::None) return 0;
+	int level = Signed(BaseStats[IE_LEVEL]);
+	if (kind == CasterKind::Wizard) {
+		// Table 1-12/1-16 + Table 1-1's Int adjustment (the natural score; elves too: Ethren decision)
+		const LevelRow* row = rules->classes.Row(BaseStats[IE_CLASS], level);
+		int score = Signed(BaseStats[IE_INT]);
+		bool canCast = core->GetDCCAbilityBonus(STAT_DCC_MAX_SPELL_LEVEL, score) > 0;
+		return ArcaneSpellsKnown(row ? row->spellsKnown : 0, core->GetDCCAbilityBonus(STAT_DCC_WIZARD_SPELLS, score), canCast);
+	}
+	// clerics: Table 1-5, only up to the level Personality allows (no adjustment to the count)
+	if (spellLevel < 1 || spellLevel > Signed(GetStat(IE_DCC_MAXSPELL))) return 0;
+	return rules->clericSpells.Known(level, spellLevel);
+}
+
+int Actor::DCCSpellsCounted(int spellLevel) const
+{
+	const RulesData* rules = Rules();
+	CasterKind kind = GetDCCCasterKind();
+	if (!rules || kind == CasterKind::None) return 0;
+	int count = 0;
+	bool pair = false;
+	bool elf = Signed(BaseStats[IE_CLASS]) == static_cast<int>(ClassID::Elf);
+	for (const auto& known : dccExt.spells) {
+		const SpellInfo* info = rules->Spell(known.spell);
+		if (!info || info->kind != kind) continue;
+		if (kind == CasterKind::Cleric && info->level != spellLevel) continue;
+		// invoke patron and patron bond share one slot (an elf's are free)
+		const SpellListEntry* entry = rules->spellLists.Find(CasterKind::Wizard, known.spell);
+		if (kind == CasterKind::Wizard && entry && (entry->flags & LIST_PATRON_PAIR)) {
+			if (elf || pair) continue;
+			pair = true;
+		}
+		++count;
+	}
+	return count;
+}
+
+bool Actor::DCCCanLearn(const SpellInfo& info, String* why) const
+{
+	auto refuse = [why](const char16_t* text) {
+		if (why) *why = text;
+		return false;
+	};
+	CasterKind kind = GetDCCCasterKind();
+	if (kind == CasterKind::None) return refuse(u"doesn't cast spells");
+	if (info.kind != kind) return refuse(kind == CasterKind::Wizard ? u"can't learn cleric spells" : u"can't learn wizard spells");
+	if (info.level > Signed(GetStat(IE_DCC_MAXSPELL))) return refuse(u"can't learn spells of that level yet");
+	if (DCCSpellsCounted(info.level) >= DCCSpellsAllowed(info.level)) return refuse(u"knows as many spells as it may");
+	return true;
+}
+
+int Actor::DCCLearnSpell(const ResRef& base, bool rolls, bool force)
 {
 	const RulesData* rules = Rules();
 	const SpellInfo* info = rules ? rules->Spell(base.c_str()) : nullptr;
 	if (!info) return -1;
 	std::string name = Lower(base.c_str());
 	if (dccExt.FindSpell(name)) return -1;
+	// spells known are counted (Phase 3): a DCC character learns within its class's limits
+	String why;
+	if (!force && IsDCCCharacter() && !DCCCanLearn(*info, &why)) {
+		Log(MESSAGE, "DCC", "{} can't learn {}: {}.", fmt::WideToChar { GetName() }, info->name, fmt::WideToChar { why });
+		return -1;
+	}
 
 	if (!spellbook.KnowSpell(base)) {
 		const Spell* spl = gamedata->GetSpell(base, true);
@@ -230,6 +292,164 @@ int Actor::DCCLearnSpell(const ResRef& base, bool rolls)
 	}
 	Feedback(std::move(line));
 	return first;
+}
+
+// the level-1 class pick and every level after (Phase 3): fill the open slots
+std::vector<LearnPick> Actor::DCCLearnLevelSpells(const Roller* roller)
+{
+	std::vector<LearnPick> picks;
+	dccLearnNotes.clear();
+	const RulesData* rules = Rules();
+	CasterKind kind = GetDCCCasterKind();
+	if (!rules || kind == CasterKind::None) return picks;
+	Roller dice = roller ? *roller : Roller([this](int sides) { return DCCDie(sides); });
+	auto available = [rules, kind](const std::string& spell) {
+		const SpellInfo* info = rules->Spell(spell);
+		return info && info->kind == kind;
+	};
+	std::set<std::string> known;
+	for (const auto& spell : dccExt.spells) {
+		known.insert(spell.spell);
+	}
+	int maxLevel = std::min(SPELL_LEVELS, Signed(GetStat(IE_DCC_MAXSPELL)));
+	int level = Signed(BaseStats[IE_LEVEL]);
+	bool elf = Signed(BaseStats[IE_CLASS]) == static_cast<int>(ClassID::Elf);
+	auto note = [this](const std::string& text) {
+		dccLearnNotes.push_back(text);
+		Log(MESSAGE, "DCC", "{} learning: {}", fmt::WideToChar { GetName() }, text);
+	};
+
+	if (kind == CasterKind::Wizard) {
+		// an elf knows invoke patron and patron bond from level 1, for free
+		if (elf && level == 1) {
+			for (const auto& entry : rules->spellLists.List(CasterKind::Wizard, 1)) {
+				if (!(entry.flags & LIST_PATRON_PAIR)) continue;
+				if (!entry.spell.empty() && available(entry.spell)) {
+					if (DCCLearnSpell(ResRef(entry.spell), true, true) >= 0) known.insert(entry.spell);
+				} else {
+					note(fmt::format("the elf's free {} has no content yet (patrons come with M2.6)", entry.name));
+				}
+			}
+		}
+		int open = DCCSpellsAllowed(0) - DCCSpellsCounted(0);
+		// the book lets the wizard choose the level (up to its maximum); the default is the highest
+		// (Ethren decision), the learn window can swap within a level
+		if (open > 0 && maxLevel > 0) {
+			picks = RollArcaneSpells(rules->spellLists, maxLevel, open, known, available, false, dice);
+		}
+	} else {
+		for (int spellLevel = 1; spellLevel <= maxLevel; ++spellLevel) {
+			int open = DCCSpellsAllowed(spellLevel) - DCCSpellsCounted(spellLevel);
+			if (open <= 0) continue;
+			auto more = PickClericSpells(rules->spellLists, spellLevel, open, known, available, dice);
+			for (const auto& pick : more) {
+				known.insert(pick.spell);
+			}
+			picks.insert(picks.end(), more.begin(), more.end());
+		}
+	}
+
+	bool lucky = false;
+	for (const auto& spell : dccExt.spells) {
+		lucky = lucky || (spell.flags & SPELL_LUCKY);
+	}
+	int learned = 0;
+	int owed = 0;
+	for (const auto& pick : picks) {
+		note(pick.note);
+		if (pick.spell.empty()) {
+			++owed;
+			continue;
+		}
+		if (DCCLearnSpell(ResRef(pick.spell), true, true) < 0) continue;
+		KnownSpell* spell = dccExt.FindSpell(pick.spell);
+		if (!spell) continue;
+		spell->flags |= SPELL_FRESH;
+		++learned;
+		// the elf's lucky spell: the first by default, the learn window may name another
+		if (elf && level == 1 && !lucky) {
+			spell->flags |= SPELL_LUCKY;
+			spell->luckyMod = int8_t(GetDCCAbilityMod(Ability::Luck));
+			lucky = true;
+		}
+	}
+	if (owed) {
+		note(fmt::format("{} slot(s) stay open until more spells have content", owed));
+		Feedback(fmt::format(u"{} has {} spell slot(s) without a spell yet (more spells come with M2.6)", GetName(), owed));
+	}
+	if (learned || owed) DCCExtChanged();
+	return picks;
+}
+
+bool Actor::DCCReplaceSpell(const std::string& oldSpell, const std::string& newSpell, String* why)
+{
+	auto refuse = [why](const char16_t* text) {
+		if (why) *why = text;
+		return false;
+	};
+	const RulesData* rules = Rules();
+	CasterKind kind = GetDCCCasterKind();
+	if (!rules || kind == CasterKind::None) return refuse(u"doesn't cast spells");
+	KnownSpell* old = dccExt.FindSpell(oldSpell);
+	if (!old || !(old->flags & SPELL_FRESH)) return refuse(u"only a spell of the last level-up can be swapped");
+	const SpellInfo* oldInfo = rules->Spell(old->spell);
+	const SpellInfo* newInfo = rules->Spell(newSpell);
+	if (!oldInfo || !newInfo || newInfo->kind != kind) return refuse(u"not a spell of its class");
+	if (newInfo->level != oldInfo->level) return refuse(u"only for a spell of the same level");
+	if (dccExt.FindSpell(newSpell)) return refuse(u"knows that one already");
+	if (!rules->spellLists.Find(kind, newSpell)) return refuse(u"not on its class's list");
+	if (kind == CasterKind::Wizard && !(old->flags & SPELL_REPLACED)) {
+		// the book's optional rule: up to half the random spells may be dropped for a choice
+		int fresh = 0;
+		int replaced = 0;
+		for (const auto& spell : dccExt.spells) {
+			if (!(spell.flags & SPELL_FRESH)) continue;
+			++fresh;
+			if (spell.flags & SPELL_REPLACED) ++replaced;
+		}
+		if (replaced >= ReplaceableSpells(fresh)) return refuse(u"may only choose up to half of the new spells");
+	}
+	bool wasLucky = old->flags & SPELL_LUCKY;
+	int8_t luckyMod = old->luckyMod;
+	std::string oldName = old->spell;
+	spellbook.RemoveSpell(ResRef(oldName), false);
+	dccExt.spells.erase(std::remove_if(dccExt.spells.begin(), dccExt.spells.end(), [&oldName](const KnownSpell& spell) { return spell.spell == oldName; }), dccExt.spells.end());
+	if (DCCLearnSpell(ResRef(newSpell), true, true) < 0) {
+		DCCExtChanged();
+		return refuse(u"couldn't learn it");
+	}
+	KnownSpell* spell = dccExt.FindSpell(newSpell);
+	spell->flags |= SPELL_FRESH | SPELL_REPLACED;
+	if (wasLucky) {
+		spell->flags |= SPELL_LUCKY;
+		spell->luckyMod = luckyMod;
+	}
+	DCCExtChanged();
+	Feedback(fmt::format(u"{} chooses {} instead of {}", GetName(), Widen(newInfo->name), Widen(oldInfo->name)));
+	return true;
+}
+
+bool Actor::DCCConfirmSpells(const std::string& lucky)
+{
+	if (!lucky.empty()) {
+		// the elf's pick at level 1: its Luck modifier now, frozen (classes.md)
+		if (Signed(BaseStats[IE_CLASS]) != static_cast<int>(ClassID::Elf) || Signed(BaseStats[IE_LEVEL]) != 1) return false;
+		KnownSpell* pick = dccExt.FindSpell(lucky);
+		if (!pick) return false;
+		for (auto& spell : dccExt.spells) {
+			spell.flags &= uint8_t(~SPELL_LUCKY);
+			spell.luckyMod = 0;
+		}
+		pick->flags |= SPELL_LUCKY;
+		pick->luckyMod = int8_t(GetDCCAbilityMod(Ability::Luck));
+		const SpellInfo* info = Rules() ? Rules()->Spell(pick->spell) : nullptr;
+		Feedback(fmt::format(u"{}'s lucky spell is {} ({:+} Luck to its checks)", GetName(), info ? Widen(info->name) : Widen(pick->spell), int(pick->luckyMod)));
+	}
+	for (auto& spell : dccExt.spells) {
+		spell.flags &= uint8_t(~(SPELL_FRESH | SPELL_REPLACED));
+	}
+	DCCExtChanged();
+	return true;
 }
 
 void Actor::DCCSyncSpellbook()

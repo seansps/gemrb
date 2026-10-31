@@ -42,10 +42,13 @@
 namespace GemRB {
 
 constexpr uint8_t FORMATIONSIZE = 10;
-using formation_t = std::array<Point, FORMATIONSIZE>;
+// DCC games: parties of up to 16 (the level-0 funnel) read up to this many places from formatio.2da
+constexpr uint8_t FORMATIONSIZE_DCC = 20;
+using formation_t = std::array<Point, FORMATIONSIZE_DCC>;
 
 class Formations {
 	std::vector<formation_t> formations;
+	uint8_t size = FORMATIONSIZE;
 
 	Formations() noexcept
 	{
@@ -59,22 +62,37 @@ class Formations {
 			formations.emplace_back();
 			return;
 		}
+		// DCC: as many places as the table has (formatio.2da has 20), so 16 don't share the last one
+		if (core->HasFeature(GFFlags::RULES_DCC)) {
+			size = static_cast<uint8_t>(Clamp<TableMgr::index_t>(tab->GetColumnCount() / 2, FORMATIONSIZE, FORMATIONSIZE_DCC));
+		}
 		auto formationcount = tab->GetRowCount();
 		formations.resize(formationcount);
 		for (unsigned int i = 0; i < formationcount; i++) {
-			for (uint8_t j = 0; j < FORMATIONSIZE; j++) {
+			for (uint8_t j = 0; j < size; j++) {
 				Point p(tab->QueryFieldSigned<int>(i, j * 2), tab->QueryFieldSigned<int>(i, j * 2 + 1));
 				formations[i][j] = p;
 			}
 		}
 	}
 
+	static const Formations& Get() noexcept
+	{
+		static const Formations formations;
+		return formations;
+	}
+
 public:
 	static const formation_t& GetFormation(size_t formation) noexcept
 	{
-		static const Formations formations;
+		const Formations& formations = Get();
 		formation = std::min(formation, formations.formations.size() - 1);
 		return formations.formations[formation];
+	}
+	// the places a formation has (FORMATIONSIZE, more in DCC games)
+	static uint8_t Size() noexcept
+	{
+		return Get().size;
 	}
 };
 
@@ -148,7 +166,7 @@ GameControl::~GameControl()
 //pos: the actor's slot ID
 Point GameControl::GetFormationOffset(size_t formation, uint8_t pos) const
 {
-	pos = std::min<uint8_t>(pos, FORMATIONSIZE - 1);
+	pos = std::min<uint8_t>(pos, Formations::Size() - 1);
 	return Formations::GetFormation(formation)[pos];
 }
 
@@ -170,7 +188,7 @@ Point GameControl::GetFormationPoint(const Point& origin, size_t pos, float_t an
 	/* Correct for the innate orientation of the points.  */
 	angle += M_PI_2;
 
-	if (pos < FORMATIONSIZE) {
+	if (pos < Formations::Size()) {
 		// calculate new coordinates by rotating formation around (0,0)
 		vec = RotatePoint(formation[pos], angle);
 		stepVec.y = radius;
@@ -178,7 +196,7 @@ Point GameControl::GetFormationPoint(const Point& origin, size_t pos, float_t an
 		// create a line formation perpendicular to the formation start point and beginning at the last point
 		// of the formation table. Alternate between +90 degrees and -90 degrees to keep it balanced
 		// the formation table is created along the x axis starting at (0,0)
-		Point p = formation[FORMATIONSIZE - 1];
+		Point p = formation[Formations::Size() - 1];
 		vec = RotatePoint(p, angle);
 		stepVec.x = radius * direction;
 	}

@@ -2084,6 +2084,13 @@ void Actor::DCCOnDeath()
 	if (!IsDCCCharacter()) return;
 	BaseStats[IE_DCC_DIEDAT] = game ? std::max<ieDword>(game->GameTime, 1) : 1;
 	BaseStats[IE_DCC_BODY] = 0;
+	// the funnel (Phase 3): a peasant in it is now one of its dead, with the time and place
+	if (dccExt.funnel.status == DCC::FunnelStatus::Alive) {
+		dccExt.funnel.status = DCC::FunnelStatus::Dead;
+		dccExt.funnel.diedAt = BaseStats[IE_DCC_DIEDAT];
+		const Map* map = GetCurrentArea();
+		dccExt.funnel.diedIn = map ? std::string(map->GetScriptRef().c_str()) : std::string();
+	}
 }
 
 bool Actor::DCCBodyRecoverable() const
@@ -2122,6 +2129,12 @@ int Actor::DCCRecoverBody(const Actor* ally, int natural)
 	hour.dice.add = 1;
 	ApplyCombat(CombatEffect::RollMod, BODY_RECOVERY_PENALTY, hour, this, this);
 	BaseStats[IE_DCC_DIEDAT] = 0;
+	if (dccExt.funnel.status == DCC::FunnelStatus::Dead) {
+		dccExt.funnel.status = DCC::FunnelStatus::Alive;
+		dccExt.funnel.flags |= DCC::FUNNEL_RECOVERED;
+		dccExt.funnel.diedAt = 0;
+		dccExt.funnel.diedIn.clear();
+	}
 	Feedback(line + fmt::format(u"alive at 1 hp, -1 {} for good, {} to all rolls for an hour", names[which], BODY_RECOVERY_PENALTY), FT_COMBAT);
 	return 1;
 }

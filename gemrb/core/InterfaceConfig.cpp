@@ -176,7 +176,8 @@ CoreSettings LoadFromDictionary(InterfaceConfig cfg)
 	CONFIG_INT("Height", config.Height);
 	CONFIG_INT("KeepCache", config.KeepCache);
 	CONFIG_INT("MaxPartySize", config.MaxPartySize);
-	config.MaxPartySize = std::min(std::max(1, config.MaxPartySize), 10);
+	// clamped once the game type is known (1-10, DCC games 1-16: Interface::LoadGemRBINI)
+	config.MaxPartySize = std::min(std::max(0, config.MaxPartySize), MAX_PARTY_SIZE_DCC);
 	CONFIG_INT("MouseFeedback", config.MouseFeedback);
 	CONFIG_INT("MultipleQuickSaves", config.MultipleQuickSaves);
 	CONFIG_INT("UseAsLibrary", config.UseAsLibrary);

@@ -1405,19 +1405,31 @@ struct NetSession::Impl {
 			Send(info.peer, prompt);
 			Log(MESSAGE, "Net", "Slot {} joined during prompt #{} '{}'; sent it, {} ms left.", info.slot, prompt.id, prompt.question.tag, prompt.remaining);
 		}
-		// what a save loads the client's own way (effects), as the host has it
+		// what a save loads the client's own way (effects), as the host has it; v12: only the
+		// stats that aren't 0, compactly, so a party of 16 doesn't send ~80 KB of stats
 		const Game* g = core->GetGame();
+		size_t burstBytes = 0;
+		size_t burstStats = 0;
+		int burstPCs = 0;
 		for (int pcSlot = 1; g && pcSlot <= g->GetPartySize(false); ++pcSlot) {
 			const Actor* pc = g->FindPC(pcSlot);
 			if (!pc) continue;
 			NetActorStats full;
 			full.netID = pc->GetGlobalID();
-			full.stats = NetStatsDiff({}, ActorStats(pc), SNAPSHOT_STATS);
+			full.flags = NetActorStats::FULL;
+			full.stats = NetStatsFull(ActorStats(pc), SNAPSHOT_STATS);
+			burstBytes += NetEncode(full).size();
+			burstStats += full.stats.size();
+			++burstPCs;
 			Send(info.peer, full);
 			// the equipped slot is worked out again on load, not always the same way
-			Send(info.peer, InventoryMessage(pc));
-			Send(info.peer, SpellbookMessage(pc));
+			NetInventory inv = InventoryMessage(pc);
+			NetSpellbook book = SpellbookMessage(pc);
+			burstBytes += NetEncode(inv).size() + NetEncode(book).size();
+			Send(info.peer, inv);
+			Send(info.peer, book);
 		}
+		Log(MESSAGE, "Net", "Slot {} join burst: {} party member(s), {} stats in {} bytes of stats, inventories and spellbooks.", info.slot, burstPCs, burstStats, burstBytes);
 		const Game* game = core->GetGame();
 		for (uint32_t netID : ready.unmatched) {
 			const Actor* actor = game ? game->GetActorByGlobalID(netID) : nullptr;
@@ -1985,6 +1997,17 @@ struct NetSession::Impl {
 			case NetGuiOp::SetMapnote:
 				args.push_back(PyString(call.text));
 				break;
+			case NetGuiOp::DCCReplaceSpell:
+				{
+					// "old new": two resrefs
+					auto space = call.text.find(' ');
+					args.push_back(PyString(call.text.substr(0, space)));
+					args.push_back(PyString(space == std::string::npos ? std::string() : call.text.substr(space + 1)));
+					break;
+				}
+			case NetGuiOp::DCCConfirmSpells:
+				args.push_back(PyString(call.text));
+				break;
 			default:
 				break;
 		}
@@ -2310,7 +2333,13 @@ struct NetSession::Impl {
 			auto known = stats.find(id);
 			NetActorStats msg;
 			msg.netID = id;
-			msg.stats = NetStatsDiff(known == stats.end() ? std::vector<NetStatEntry>() : known->second, now, SNAPSHOT_STATS);
+			if (known == stats.end()) {
+				// first time: the whole actor, only what isn't 0 (v12)
+				msg.flags = NetActorStats::FULL;
+				msg.stats = NetStatsFull(now, SNAPSHOT_STATS);
+			} else {
+				msg.stats = NetStatsDiff(known->second, now, SNAPSHOT_STATS);
+			}
 			stats[id] = std::move(now);
 			if (send && !msg.stats.empty()) {
 				SendEvent(msg, true);
@@ -2530,9 +2559,9 @@ struct NetSession::Impl {
 			}
 			state.players.push_back(std::move(entry));
 		}
-		// before the game runs there are six slots to hand out, BG style
+		// before the game runs there are MaxPartySize slots to hand out (six, BG style; 16 in DCC games)
 		const Game* game = core->GetGame();
-		int slots = game && game->GetPartySize(false) ? game->GetPartySize(false) : NET_PARTY_SLOTS;
+		int slots = game && game->GetPartySize(false) ? game->GetPartySize(false) : core->GetMaxPartySize();
 		for (int slot = 1; slot <= slots && slot <= NET_PARTY_SLOTS; ++slot) {
 			NetLobbySlot entry;
 			entry.partySlot = uint8_t(slot);
@@ -4134,7 +4163,9 @@ struct NetSession::Impl {
 		Actor* actor = LocalActor(msg.netID);
 		if (!actor) return;
 		auto& known = hostStats[actor->GetGlobalID()];
-		for (const auto& entry : msg.stats) {
+		// v12: a FULL message leaves out the stats that are 0 on the host
+		const std::vector<NetStatEntry>& entries = msg.flags & NetActorStats::FULL ? NetStatsExpand(msg.stats, MAX_STATS, SNAPSHOT_STATS) : msg.stats;
+		for (const auto& entry : entries) {
 			known[entry.stat] = { entry.base, entry.modified };
 		}
 		EnforceStats(actor, known);

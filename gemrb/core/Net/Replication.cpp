@@ -373,6 +373,33 @@ std::vector<NetStatEntry> NetStatsDiff(const std::vector<NetStatEntry>& before, 
 	return changed;
 }
 
+std::vector<NetStatEntry> NetStatsFull(const std::vector<NetStatEntry>& now, const std::vector<uint16_t>& skip)
+{
+	std::vector<NetStatEntry> listed;
+	for (const auto& entry : now) {
+		if (!entry.base && !entry.modified) continue;
+		if (std::find(skip.begin(), skip.end(), entry.stat) != skip.end()) continue;
+		listed.push_back(entry);
+	}
+	return listed;
+}
+
+std::vector<NetStatEntry> NetStatsExpand(const std::vector<NetStatEntry>& listed, size_t count, const std::vector<uint16_t>& skip)
+{
+	std::vector<NetStatEntry> all;
+	std::vector<bool> have(count, false);
+	for (const auto& entry : listed) {
+		if (entry.stat < count) have[entry.stat] = true;
+	}
+	all.reserve(count);
+	for (size_t stat = 0; stat < count; ++stat) {
+		if (have[stat] || std::find(skip.begin(), skip.end(), uint16_t(stat)) != skip.end()) continue;
+		all.push_back(NetStatEntry { uint16_t(stat), 0, 0 });
+	}
+	all.insert(all.end(), listed.begin(), listed.end());
+	return all;
+}
+
 NetGuiOpInfo NetGuiInfo(NetGuiOp op)
 {
 	switch (op) {
@@ -442,6 +469,13 @@ NetGuiOpInfo NetGuiInfo(NetGuiOp op)
 			return { 0, 2, NetPermission::Control, "DCCLayOnHands", true };
 		case NetGuiOp::DCCTurnUnholy:
 			return { 0, 1, NetPermission::Control, "DCCTurnUnholy", true };
+		// Phase 3 (v12): the level-up and its spells (the hit die and the picks are host rolls)
+		case NetGuiOp::DCCLevelUp:
+			return { 0, 2, NetPermission::Control, "DCCLevelUp", true };
+		case NetGuiOp::DCCReplaceSpell:
+			return { 0, 1, NetPermission::Control, "DCCReplaceSpell", true, true };
+		case NetGuiOp::DCCConfirmSpells:
+			return { 0, 1, NetPermission::Control, "DCCConfirmSpells", true, true };
 		default:
 			return {};
 	}

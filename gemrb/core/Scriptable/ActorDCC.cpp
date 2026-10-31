@@ -488,6 +488,16 @@ int Actor::DCCLevelUp(int classID, const Roller* roller)
 	SetBase(IE_HITPOINTS, BaseStats[IE_HITPOINTS] + hp);
 	CreateDerivedStatsDCC();
 	RefreshEffects();
+	// the funnel's class pick is made (Phase 3)
+	if (dccExt.funnel.flags & FUNNEL_CLASS_PENDING) {
+		dccExt.funnel.flags &= uint8_t(~FUNNEL_CLASS_PENDING);
+		DCCExtChanged();
+	}
+	// casters learn their spells: random on Table 5-8 for wizards and elves, the god's list for
+	// clerics (Phase 3; the learn window shows them and lets the player choose where the rules allow)
+	if (GetDCCCasterKind() != CasterKind::None) {
+		DCCLearnLevelSpells(roller);
+	}
 	return hp;
 }
 

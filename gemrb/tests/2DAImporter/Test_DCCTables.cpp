@@ -971,3 +971,83 @@ TEST(DCC_Tables, ArmorCheckPenalty)
 
 }
 }
+
+namespace GemRB {
+namespace DCC {
+
+// Phase 3: Tables 5-8 and 5-9 (spell-format.md), with the starter set's content, and Table 1-5's
+// spells known (magic.md)
+TEST(DCC_Tables, SpellListsAndClericSpellsKnown)
+{
+	auto table = Open2DA("dccspls");
+	ASSERT_TRUE(table);
+	SpellLists lists;
+	ASSERT_TRUE(lists.Load(*table));
+	const int wizardRows[] = { 27, 24, 24, 6, 5 };
+	const int clericRows[] = { 11, 11, 7, 4, 3 };
+	for (int level = 1; level <= SPELL_LEVELS; ++level) {
+		EXPECT_EQ(lists.List(CasterKind::Wizard, level).size(), size_t(wizardRows[level - 1])) << "Table 5-8 level " << level;
+		EXPECT_EQ(lists.List(CasterKind::Cleric, level).size(), size_t(clericRows[level - 1])) << "Table 5-9 level " << level;
+		int row = 1;
+		for (const auto& entry : lists.List(CasterKind::Wizard, level)) {
+			EXPECT_EQ(entry.row, row++);
+		}
+	}
+	const auto& w1 = lists.List(CasterKind::Wizard, 1);
+	EXPECT_EQ(w1[12].name, "Flaming hands");
+	EXPECT_EQ(w1[12].spell, "dwflam");
+	EXPECT_EQ(w1[15].spell, "dwmmis");
+	EXPECT_EQ(w1[22].spell, "dwslee");
+	EXPECT_EQ(w1[14].flags, LIST_PATRON_PAIR); // invoke patron
+	EXPECT_EQ(w1[18].flags, LIST_PATRON_PAIR); // patron bond
+	EXPECT_EQ(w1[26].flags, LIST_PATRON_SPELL);
+	EXPECT_EQ(w1[7].flags, LIST_CLERIC_SPELL); // detect magic
+	EXPECT_EQ(lists.List(CasterKind::Wizard, 3)[14].spell, "dcpara"); // paralysis, a cleric spell
+	EXPECT_EQ(lists.List(CasterKind::Wizard, 3)[14].flags, LIST_CLERIC_SPELL);
+	const auto& c1 = lists.List(CasterKind::Cleric, 1);
+	EXPECT_EQ(c1[0].spell, "dcbles");
+	EXPECT_EQ(c1[6].spell, "dcpara");
+	EXPECT_EQ(c1[10].spell, "dcword");
+	EXPECT_EQ(c1[10].name, "Word of command");
+	int content = 0;
+	for (CasterKind kind : { CasterKind::Wizard, CasterKind::Cleric }) {
+		for (int level = 1; level <= SPELL_LEVELS; ++level) {
+			for (const auto& entry : lists.List(kind, level)) {
+				content += entry.spell.empty() ? 0 : 1;
+			}
+		}
+	}
+	EXPECT_EQ(content, 7); // the six starter spells, paralysis on both lists
+
+	table = Open2DA("dccclesp");
+	ASSERT_TRUE(table);
+	ClericSpellsTable cleric;
+	ASSERT_TRUE(cleric.Load(*table));
+	const int expected[10][5] = { { 4, 0, 0, 0, 0 }, { 5, 0, 0, 0, 0 }, { 5, 3, 0, 0, 0 }, { 6, 4, 0, 0, 0 }, { 6, 5, 2, 0, 0 },
+				      { 7, 5, 3, 0, 0 }, { 7, 6, 4, 1, 0 }, { 8, 6, 5, 2, 0 }, { 8, 7, 5, 3, 1 }, { 9, 7, 6, 4, 2 } };
+	for (int level = 1; level <= 10; ++level) {
+		for (int spellLevel = 1; spellLevel <= SPELL_LEVELS; ++spellLevel) {
+			EXPECT_EQ(cleric.Known(level, spellLevel), expected[level - 1][spellLevel - 1]) << "cleric " << level << " L" << spellLevel;
+		}
+	}
+}
+
+// Phase 3: the formations for parties of 16 (formatio.2da): 20 places each, none shared
+TEST(DCC_Tables, Formations)
+{
+	auto table = Open2DA("formatio");
+	ASSERT_TRUE(table);
+	EXPECT_EQ(table->GetColumnCount(), 40U);
+	ASSERT_GE(table->GetRowCount(), 1U);
+	EXPECT_EQ(table->GetRowName(0), "BLOCK");
+	for (TableMgr::index_t row = 0; row < table->GetRowCount(); ++row) {
+		std::set<std::pair<int, int>> places;
+		for (TableMgr::index_t i = 0; i < 16; ++i) {
+			places.emplace(table->QueryFieldSigned<int>(row, i * 2), table->QueryFieldSigned<int>(row, i * 2 + 1));
+		}
+		EXPECT_EQ(places.size(), 16U) << table->GetRowName(row);
+	}
+}
+
+}
+}

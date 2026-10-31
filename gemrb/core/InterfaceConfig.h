@@ -34,6 +34,10 @@ public:
 
 using variables_t = StringMap<int32_t>;
 
+// party limits: stock games 1-10 (6 by default), DCC games up to 16 (the level-0 funnel)
+constexpr int MAX_PARTY_SIZE_STOCK = 10;
+constexpr int MAX_PARTY_SIZE_DCC = 16;
+
 struct CoreSettings {
 	path_t GamePath = ".";
 	path_t GameDataPath = "data";
@@ -89,7 +93,8 @@ struct CoreSettings {
 	bool Logging = true;
 	int LogColor = -1; // -1 is to automatically determine
 	bool CheatFlag = true; /** Cheats enabled? */
-	int MaxPartySize = 6;
+	// 0: unset, the game type's (gemrb.ini MaxPartySize for DCC games, else 6); see Interface::LoadGemRBINI
+	int MaxPartySize = 0;
 	int GUIEnhancements = 23;
 
 	bool KeepCache = false;
