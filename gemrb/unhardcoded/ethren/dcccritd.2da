@@ -1,0 +1,33 @@
+2DA V1.0
+*
+     DICE   EFFECTS                                          SAVE        TEXT
+1    1d6    *                                                *           raked_by_its_spiny_hide
+2    *      STUN:1,INITBOTTOM:1T                             *           head_crushed_in_its_jaws
+3    *      PRONE:1,SPEED:-5:HEAL                            *           legs_smashed
+4    *      HALFDMG,?DISARM:3d10x10                          STR:10:L    weapon_snatched_and_hurled
+5    *      SHIELD|DMG:1d6                                   *           shield_arm_struck
+6    2d6    DELAYDMG:1d6:1                                   *           spine_lodged_in_the_chest
+7    1d8    TODO:BREATH_WEAPON_SIDE_EFFECTS                  *           breath_weapon_splash
+8    1d12   DISARM|NONE,INJURY:ARM:PERM                      *           arm_ripped_from_its_socket
+9    *      FLING:3d6x10:RANDOM:FALL                         *           tail-slung_away
+10   *      EXTRA                                            *           combination_strike
+11   *      MUTE:HEAL,STUN:1                                 *           claw_through_the_throat
+12   1d10   SPEED:HALF:HEAL                                  *           kneecap_smashed
+13   1d12   MORALECHECK:11,?ATK:-2:1                         WILL:10:L   awe-inspiring_blow
+14   *      TODO:HALF_BREATH_WEAPON_HIT                      *           breath_weapon_combo
+15   2d12   STUCK:AGI:16                                     *           impaled_on_a_spine
+16   3d6    FLING:2d4x10                                     *           head-butted_away
+17   2d6    SPEED:HALF:HEAL                                  *           leg_snapped
+18   1d6    EXTRA:4                                          *           pinned_and_clawed
+19   1d16   ?UNCON:1d6                                       FORT:15:L   rag_doll_smash
+20   *      DOUBLEDMG,ABILTO:STR:1,ABILTO:AGI:1,WOUND:1d8    *           spines_through_the_body
+21   2d8    STUN:1d4                                         *           lift_and_smash
+22   1d8    STUCK:STR:10:L,TODO:SUFFOCATION_SAVE_EACH_ROUND  *           constricted_by_the_tail
+23   *      LIMBS:1d3+1                                      *           limbs_torn_off
+24   1d16   STUN:1,DIEIN:1d4+1,MORALECHECK:20                *           disembowelled
+25   *      BLIND:PERM                                       *           eyes_plucked_out
+26   *      STUCK:STR:22,WOUND:3d8                           *           swallowed_whole
+27   *      DIE                                              *           cut_in_three
+28   *      TODO:FULL_BREATH_WEAPON_HIT                      *           reverse_breath
+29   *      DIE,RAMPAGE:20:1                                 *           heart_torn_out
+30   *      DIE,MORALECHECK:25:PCS,RAMPAGE:20:10             *           head_shattered

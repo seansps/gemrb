@@ -5,7 +5,7 @@
 1    *      *                                 *         a_plain_miss
 2    *      ?PRONE:1                          REF:10    stumbles
 3    *      NEXTATK:-2                        *         off_balance
-4    *      TODO:WEAPON_USELESS_FOR_10_MINUTES *        weapon_fouled
+4    *      FOUL:1T                           *         weapon_fouled
 5    *      PRONE:1                           *         trips_and_falls
 6    *      NOATTACK:1,AC:-1:1T@ARMORED|NONE  *         tangled_in_own_gear
 7    *      DISARMSELF                        *         drops_its_weapon
@@ -17,4 +17,4 @@
 13   *      SELF:1d3,PRONE:1                  *         falls_hard
 14   *      PRONE:1                           *         ends_up_on_the_ground
 15   *      SELFHIT                           *         hits_itself
-16   *      SELFHIT:1,PRONE:2,TODO:AGI_CHECK_DC_16_TO_STAND *  hits_itself_and_falls
+16   *      SELFHIT:1,DOWNED:16               *         hits_itself_and_falls

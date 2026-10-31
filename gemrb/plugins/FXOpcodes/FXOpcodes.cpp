@@ -1862,7 +1862,8 @@ int fx_morale_modifier(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 		return FX_NOT_APPLIED;
 	}
 
-	if (target->ShouldModifyMorale()) {
+	// DCC: no stock morale, but morale effects (a rallying deed) still add to the morale check
+	if (target->ShouldModifyMorale() || core->HasFeature(GFFlags::RULES_DCC)) {
 		STAT_MOD(IE_MORALE);
 	}
 	return FX_APPLIED;
@@ -8754,6 +8755,70 @@ int fx_dcc_combat(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 		case CombatEffect::RollMod:
 			STAT_ADD(IE_DCC_ROLLMOD, value);
 			break;
+		// M2.3b
+		case CombatEffect::Injury:
+			STAT_SET(IE_DCC_INJURY, STAT_GET(IE_DCC_INJURY) | fx->Parameter1);
+			break;
+		case CombatEffect::ActionLimit:
+			STAT_SET(IE_DCC_ACTLIMIT, STAT_GET(IE_DCC_ACTLIMIT) | fx->Parameter1);
+			break;
+		case CombatEffect::Fouled:
+			STAT_SET(IE_DCC_FOULED, fx->Parameter1);
+			break;
+		case CombatEffect::Fleeing:
+			if (over) {
+				// the flight is over: back to the fight
+				target->SetBaseBit(IE_STATE_ID, STATE_PANIC, false);
+				return FX_NOT_APPLIED;
+			}
+			break;
+		case CombatEffect::Subdued:
+			if (fx->FirstApply) target->SetStance(IE_ANI_SLEEP);
+			if (over) {
+				// wakes at 1 hp
+				if (static_cast<ieDwordSigned>(target->GetBase(IE_HITPOINTS)) < 1) target->SetBase(IE_HITPOINTS, 1);
+				target->SetStance(IE_ANI_GET_UP);
+				return FX_NOT_APPLIED;
+			}
+			STAT_SET(IE_DCC_SUBDUED, 1);
+			STAT_SET(IE_HELD, 1);
+			STATE_SET(STATE_HELPLESS | STATE_SLEEP);
+			target->Modified[IE_EXTSTATE_ID] |= EXTSTATE_DOESNT_AWAKEN_ON_DAMAGE;
+			break;
+		case CombatEffect::StandCheck:
+		case CombatEffect::Wound:
+		case CombatEffect::Choke:
+		case CombatEffect::Numb:
+		case CombatEffect::Pinned:
+			{
+				if (over) {
+					if (fx->Parameter2 == ieDword(CombatEffect::StandCheck) && (fx->Parameter1 & DCC::STAND_PRONE)) target->SetStance(IE_ANI_GET_UP);
+					return FX_NOT_APPLIED;
+				}
+				// the round's work (an ability check, the wound's damage, ...) once a round, from the next one on
+				ieDword now = core->GetGame()->GameTime;
+				if (fx->FirstApply || !fx->Parameter3) {
+					fx->Parameter3 = now + core->Time.round_size;
+					if (fx->Parameter2 == ieDword(CombatEffect::StandCheck) && (fx->Parameter1 & DCC::STAND_PRONE)) target->SetStance(IE_ANI_SLEEP);
+				} else if (now >= fx->Parameter3) {
+					fx->Parameter3 = now + core->Time.round_size;
+					if (!target->DCCRoundEffect(*fx)) return FX_NOT_APPLIED;
+				}
+				if (fx->Parameter2 == ieDword(CombatEffect::StandCheck)) {
+					STAT_SET(IE_DCC_STAND, fx->Parameter1 & 0xff);
+					if (fx->Parameter1 & DCC::STAND_PRONE) {
+						STAT_SET(IE_DCC_PRONE, 1);
+					} else {
+						STAT_SET(IE_HELD, 1);
+						STATE_SET(STATE_HELPLESS);
+					}
+				} else if (fx->Parameter2 == ieDword(CombatEffect::Pinned)) {
+					STAT_SET(IE_DCC_PINNED, fx->Parameter1);
+					STAT_SET(IE_HELD, 1);
+					STATE_SET(STATE_HELPLESS);
+				}
+				break;
+			}
 		default:
 			return FX_NOT_APPLIED;
 	}

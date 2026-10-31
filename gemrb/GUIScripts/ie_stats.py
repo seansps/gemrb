@@ -411,6 +411,14 @@ IE_DCC_BURNMIN                  = 301 # policy 2: Luck never goes below this
 IE_DCC_LUCKFLAGS                = 302 # DCC_LUCK_* bits
 IE_DCC_DEED                     = 303 # the signature deed (DCC_DEED_*)
 IE_DCC_NEXTDEED                 = 304 # a one-off deed for the next attack (DCC_DEED_*)
+IE_DCC_INJURY                   = 305 # lasting injuries (DCC_INJ_* bits)
+IE_DCC_ACTLIMIT                 = 306 # fewer actions: 1 halved, 2 one action
+IE_DCC_FOULED                   = 307 # inventory slot + 1 of a fouled weapon
+IE_DCC_STAND                    = 308 # down or stuck until a check against this DC
+IE_DCC_PINNED                   = 309 # held in a grapple by this global ID
+IE_DCC_SUBDUED                  = 310 # knocked out by subdual damage
+IE_DCC_RAGE                     = 311 # battle rage: Per/Int points to spend
+IE_DCC_COMBATOPT                = 312 # DCC_OPT_* bits
 
 # DCC states at 0 (IE_DCC_STATE bits)
 DCC_STATE_IMMOBILE = 1
@@ -435,6 +443,20 @@ DCC_DEED_TRIP = 4
 DCC_DEED_PRECISION = 5
 DCC_DEED_RALLY = 6
 DCC_DEED_DEFEND = 7
+
+# combat options (IE_DCC_COMBATOPT, M2.3b)
+DCC_OPT_CHARGE = 1 # the next melee attack is a charge
+DCC_OPT_GRAPPLE = 2 # the next melee attack is a grapple
+DCC_OPT_SUBDUAL = 4 # subdual blows where the weapon allows
+
+# lasting injuries (IE_DCC_INJURY bits)
+DCC_INJ_WEAPON_HAND = 1
+DCC_INJ_WEAPON_ARM = 2
+DCC_INJ_ARM_USELESS = 4
+DCC_INJ_SHIELD_ARM = 8
+DCC_INJ_EYE = 16
+DCC_INJ_SMELL = 32
+DCC_INJ_AMNESIA = 64
 
 #these stats exist only in PC's (but we access only PCs anyway)
 # make sure EXTRASETTINGS matches GUIScript.cpp

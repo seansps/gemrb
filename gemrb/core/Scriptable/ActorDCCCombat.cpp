@@ -48,6 +48,7 @@
 #include "DCC/Rules.h"
 #include "DCC/Stats.h"
 #include "GUI/GameControl.h"
+#include "GameScript/GSUtils.h"
 #include "Logging/Logging.h"
 #include "Scriptable/Actor.h"
 
@@ -71,6 +72,8 @@ static EffectRef fx_dcc_death_ref = { "Death", -1 };
 static EffectRef fx_dcc_push_ref = { "WingBuffet", -1 };
 static EffectRef fx_dcc_morale_ref = { "MoraleModifier", -1 };
 static EffectRef fx_dcc_dmgmod_ref = { "DamageBonusModifier", -1 };
+static EffectRef fx_dcc_slowsleep_ref = { "State:Sleep", -1 };
+static EffectRef fx_dcc_miscast_ref = { "MiscastMagicModifier", -1 };
 
 // "until healed" crit injuries end with the next night's rest (DCCRestHeal), permanent ones never
 static const ResRef UntilHealedSource = "DCCHEAL";
@@ -80,6 +83,9 @@ static const RulesData* Rules()
 {
 	return core->GetDCCRules();
 }
+
+static String ApplyCombat(CombatEffect kind, int value, const Duration& duration, Actor* who, Actor* caster, Duration* rolled = nullptr);
+static void DirectDamage(Actor* who, int damage, Actor* hitter);
 
 static int Signed(ieDword value)
 {
@@ -171,14 +177,16 @@ void Actor::DCCForceDice(std::vector<int> dice)
 
 int Actor::DCCNumberOfAttacks() const
 {
-	if (!IsDCCCharacter()) return GetStat(IE_NUMBEROFATTACKS);
+	// fewer actions (Crit Table II): halved, or one action
+	int limit = GetStat(IE_DCC_ACTLIMIT);
+	if (!IsDCCCharacter()) return limit ? LimitedAttacks(GetStat(IE_NUMBEROFATTACKS), limit) : GetStat(IE_NUMBEROFATTACKS);
 	// one attack per action die; a wizard only attacks with the first (classes.md)
 	int dice = 0;
 	for (unsigned int stat : { IE_DCC_ACTDIE1, IE_DCC_ACTDIE2, IE_DCC_ACTDIE3 }) {
 		if (GetStat(stat)) ++dice;
 	}
 	if (BaseStats[IE_CLASS] == static_cast<ieDword>(ClassID::Wizard)) dice = std::min(dice, 1);
-	return 2 * std::max(dice, 1);
+	return LimitedAttacks(2 * std::max(dice, 1), limit);
 }
 
 // the action die of the attack with this index in the round
@@ -211,6 +219,18 @@ void Actor::InitRoundDCC(ieDword gameTime)
 	// the deed die: once per round, for every attack in it (open-questions.md)
 	int deedDie = GetStat(IE_DCC_DEEDDIE);
 	dccDeedRoll = deedDie ? DCCDie(deedDie) : 0;
+
+	// injuries that hurt with exertion: grave boils (1 damage), a caved-in chest (DC 6 Fort or -1 Sta for good)
+	uint32_t injuries = GetDCCInjuries();
+	if (injuries & INJ_BOILS) {
+		DirectDamage(this, 1, this);
+		Feedback(fmt::format(u"{}'s boils burst: 1 damage", Name(this)), FT_COMBAT);
+	}
+	if (injuries & INJ_CHEST) {
+		RollResult roll = DCCRollSave(Save::Fort, 0, 6, DCCDie(20));
+		if (!roll.success) SetBase(IE_CON, std::max(0, Signed(BaseStats[IE_CON]) - 1));
+		Feedback(fmt::format(u"{} strains its crushed chest: Fort save {} vs DC 6: {}", Name(this), roll.total, roll.success ? u"saved" : u"-1 Sta for good"), FT_COMBAT);
+	}
 }
 
 int Actor::DCCInitiativeDelay() const
@@ -236,6 +256,11 @@ struct Actor::DCCSwing {
 	int deed = 0; // deed die + its fixed part, added to the roll and the damage
 	int damageBonus = 0; // everything flat on the damage
 	DiceExpr extraOnHit; // a free attack's bonus damage (Crit Table I, 16)
+	DiceExpr damageDice; // instead of the weapon's (shield bash, subdual, backstab); none: the weapon's
+	bool subdual = false; // knocks out instead of killing at 0 hp
+	bool backstab = false;
+	bool bash = false; // the dwarf's shield bash
+	bool intoMelee = false; // a missile into a melee: a miss may hit an ally instead
 	bool offHandFumble = true;
 	AttackRecord record;
 	int damage = 0;
@@ -274,6 +299,50 @@ static const CREItem* ArmorItem(const Actor* actor)
 	return actor->inventory.GetSlotItem(Inventory::GetArmorSlot());
 }
 
+// sides for M2.3b's foes and allies: good, neutral, evil (the goblins in dcctest are neutral)
+static int Side(const Actor* actor)
+{
+	ieDword ea = actor->GetStat(IE_EA);
+	if (ea <= EA_GOODCUTOFF) return 0;
+	return ea >= EA_EVILCUTOFF ? 2 : 1;
+}
+
+static bool OutOfFight(const Actor* actor)
+{
+	return (actor->GetStat(IE_STATE_ID) & STATE_DEAD) || (actor->GetInternalFlag() & IF_REALLYDIED) || (actor->GetDCCStates() & STATE_DYING) ||
+		actor->GetStat(IE_DCC_SUBDUED);
+}
+
+// "adjacent", "in the melee": within this many feet, between the creatures' circles
+constexpr int MELEE_REACH = 5;
+
+// a creature of the attacker's side (not the attacker) in melee with the target
+static bool InMelee(const Actor* attacker, const Actor* target)
+{
+	const Map* map = attacker->GetCurrentArea();
+	if (!map) return false;
+	for (const Actor* other : map->GetAllActorsInRadius(target->Pos, GA_NO_DEAD | GA_NO_UNSCHEDULED | GA_NO_LOS, MELEE_REACH + 10)) {
+		if (other == attacker || other == target || Side(other) != Side(attacker) || OutOfFight(other)) continue;
+		if (WithinPersonalRange(other, target, MELEE_REACH)) return true;
+	}
+	return false;
+}
+
+// another creature (not in the melee around the target) on the line of fire: cover (Ethren decision)
+static bool BehindCover(const Actor* attacker, const Actor* target)
+{
+	const Map* map = attacker->GetCurrentArea();
+	if (!map) return false;
+	unsigned int length = Distance(attacker, target);
+	for (const Actor* other : map->GetAllActorsInRadius(target->Pos, GA_NO_DEAD | GA_NO_UNSCHEDULED | GA_NO_LOS, length / 12 + 5)) {
+		if (other == attacker || other == target || OutOfFight(other)) continue;
+		if (WithinPersonalRange(other, target, MELEE_REACH)) continue; // that's the melee
+		float_t t = 0;
+		if (PersonalLineDistance(attacker->Pos, target->Pos, other, &t) == 0 && t > 0 && t < 1) return true;
+	}
+	return false;
+}
+
 // Table 4-1 conditions the engine can tell
 static uint32_t AttackConditionsFor(const Actor* attacker, const Actor* target, bool missile, unsigned int range)
 {
@@ -288,6 +357,13 @@ static uint32_t AttackConditionsFor(const Actor* attacker, const Actor* target, 
 	} else if (target->Immobile() || (state & (STATE_HELPLESS | STATE_SLEEP)) || target->IsDCCHeld()) {
 		conditions |= DEF_HELPLESS;
 	}
+	// M2.3b: higher ground (the area's height map), a missile into a melee, cover
+	const Map* map = attacker->GetCurrentArea();
+	if (!missile && map && HigherGround(map->GetHeight(attacker->Pos), map->GetHeight(target->Pos))) {
+		conditions |= ATK_HIGHER;
+	}
+	if (missile && InMelee(attacker, target)) conditions |= ATK_INTO_MELEE;
+	if (missile && BehindCover(attacker, target)) conditions |= DEF_COVER;
 	if (missile && range) {
 		// the IE range is the long range; the thirds are short, medium and long (equipment.md)
 		if (!WithinPersonalRange(attacker, target, 2 * range / 3)) {
@@ -322,6 +398,101 @@ static int WeaponItemType(const Actor* actor, const WeaponInfo& wi)
 	return type;
 }
 
+// the DCC weapon an item is (dccweap.2da), nullptr if none matches
+static const WeaponRow* WeaponRowFor(const Actor* actor, const WeaponInfo& wi)
+{
+	const RulesData* rules = Rules();
+	if (!rules) return nullptr;
+	const CREItem* item = actor->inventory.GetSlotItem(wi.slot);
+	std::string resref = item ? item->ItemResRef.c_str() : "";
+	return rules->combat.weapons.Lookup(resref, static_cast<int>(wi.itemtype), wi.itemflags & IE_INV_ITEM_TWOHANDED);
+}
+
+bool Actor::DCCTrainedWith(const WeaponInfo& wi) const
+{
+	// level 0 is trained in its occupation's weapon and the last one it fought with (funnel.md)
+	if (!IsDCCCharacter() || BaseStats[IE_LEVEL] == 0) return true;
+	WeaponClass column = WeaponClassFor(static_cast<ClassID>(BaseStats[IE_CLASS]), AlignmentFromIE(GetStat(IE_ALIGNMENT)));
+	const WeaponRow* row = WeaponRowFor(this, wi);
+	// weapons the table doesn't know count as trained (Ethren decision)
+	return !row || column == WeaponClass::count || row->Trained(column);
+}
+
+bool Actor::DCCBuildSwing(DCCSwing& swing, int hand, const Actor* target, int index, bool bash)
+{
+	bool character = IsDCCCharacter();
+	swing.hand = hand;
+	swing.wi = &weaponInfo[bash ? 0 : hand];
+	const ITMExtHeader* header = swing.wi->extHeader;
+	if (!header) return false;
+	swing.bash = bash;
+	swing.missile = !bash && (swing.wi->wflags & WEAPON_RANGED);
+	bool fists = !bash && inventory.FistsEquipped();
+
+	uint32_t augurFlags = swing.missile ? AF_MISSILE : AF_MELEE;
+	if (fists) augurFlags |= AF_UNARMED;
+	swing.abilityMod = character ? GetDCCAbilityMod(swing.missile ? Ability::Agi : Ability::Str) : 0;
+	int deedDie = GetStat(IE_DCC_DEEDDIE);
+	swing.deed = deedDie ? dccDeedRoll + Signed(GetStat(IE_DCC_DEEDADD)) : 0;
+	int augur = character ? GetDCCAugurBonus(AugurRoll::Attack, augurFlags) : 0;
+
+	// stock to-hit effects and magic weapons count as flat bonuses
+	int effects = ToHit.GetFxBonus() + Signed(GetStat(IE_HITBONUS));
+	if (!bash) effects += header->THAC0Bonus + swing.wi->launcherTHAC0Bonus;
+	effects += Signed(GetStat(swing.missile ? IE_MISSILEHITBONUS : (fists ? IE_FISTHIT : IE_MELEETOHIT)));
+	effects += Signed(GetStat(IE_DCC_ATKMOD)) + Signed(GetStat(IE_DCC_ROLLMOD));
+
+	uint32_t conditions = AttackConditionsFor(this, target, swing.missile, bash ? 0 : GetWeaponRange(hand));
+	// M2.3b: an untrained weapon is a die lower (the shield bash is the dwarf's own)
+	const WeaponRow* row = bash ? nullptr : WeaponRowFor(this, *swing.wi);
+	bool trained = bash || DCCTrainedWith(*swing.wi);
+	if (UntrainedSteps(character, Signed(BaseStats[IE_LEVEL]), trained)) conditions |= ATK_UNTRAINED;
+	swing.intoMelee = conditions & ATK_INTO_MELEE;
+	Situational situational = SituationalModifiers(conditions, swing.missile);
+	// lasting injuries: fighting with the other hand, one eye
+	Situational injured = InjuryModifiers(GetDCCInjuries(), swing.missile, swing.wi->itemflags & IE_INV_ITEM_TWOHANDED);
+
+	swing.in.actionDie = bash ? SHIELD_BASH_DIE : ActionDie(this, index);
+	swing.in.dieSteps = situational.dieSteps + injured.dieSteps;
+	swing.in.modifier = Signed(GetStat(IE_DCC_ATTACK)) + swing.abilityMod + swing.deed + augur + situational.flat + injured.flat + effects;
+	swing.in.targetAC = Signed(target->GetStat(IE_DCC_AC));
+	swing.in.threat = Signed(GetStat(IE_DCC_THREAT));
+	swing.in.cursed = GetDCCStates() & STATE_CURSED;
+
+	// damage: the weapon's dice + Str (melee and thrown) + deed + augur + magic + effects
+	bool strength = !swing.missile || (swing.wi->wflags & (WEAPON_USESTRENGTH | WEAPON_USESTRENGTH_DMG));
+	int damageAugur = character ? GetDCCAugurBonus(AugurRoll::Damage, augurFlags) : 0;
+	int strMod = character && strength ? GetDCCAbilityMod(Ability::Str) : 0;
+	swing.damageBonus = strMod + swing.deed + damageAugur + Signed(GetStat(IE_DAMAGEBONUS));
+	if (bash) {
+		// 1d3 (spiked or magic shields may do more: TODO)
+		swing.damageDice.count = 1;
+		swing.damageDice.sides = SHIELD_BASH_DAMAGE;
+		return true;
+	}
+	swing.damageBonus += header->DamageBonus + swing.wi->launcherDmgBonus;
+	// subdual blows: fists and the blackjack always, the stance with a sword, axe, club, spear or staff
+	Subdual subdual = row ? row->subdual : Subdual::Never;
+	bool chosen = GetDCCCombatOptions() & OPT_SUBDUAL;
+	if (!swing.missile && SubdualBlow(subdual, chosen, trained)) {
+		swing.subdual = true;
+		if (subdual == Subdual::Possible) {
+			swing.damageDice = WeaponDice(header);
+			swing.damageDice.add = 0;
+			swing.damageDice.sides = SubdualDie(swing.damageDice.sides, subdual);
+		}
+	}
+	return true;
+}
+
+// the backstab bonus of a thief (Table 1-9, by path and level)
+static int BackstabBonus(const Actor* thief)
+{
+	const RulesData* rules = Rules();
+	if (!rules) return 0;
+	return rules->thiefSkills.Bonus(AlignmentFromIE(thief->GetStat(IE_ALIGNMENT)), Signed(thief->GetBase(IE_LEVEL)), ThiefSkill::Backstab);
+}
+
 void Actor::DCCAttack(Actor* target, bool viaProjectile)
 {
 	const RulesData* rules = Rules();
@@ -334,9 +505,24 @@ void Actor::DCCAttack(Actor* target, bool viaProjectile)
 	dccLastAttack.clear();
 	++dccAttackSerial;
 
-	// immobile, witless, unconscious, dying, prone or a crit's "can't attack"
-	if (IsDCCHeld() || Immobile() || GetStat(IE_DCC_NOATTACK) || GetStat(IE_DCC_PRONE)) {
+	// immobile, witless, unconscious, dying, prone, a crit's "can't attack", no arms left
+	uint32_t injuries = GetDCCInjuries();
+	if (IsDCCHeld() || Immobile() || GetStat(IE_DCC_NOATTACK) || GetStat(IE_DCC_PRONE) || (injuries & INJ_BOTH_ARMS)) {
 		Feedback(fmt::format(u"{} can't attack", Name(this)), FT_COMBAT);
+		return;
+	}
+	// a fouled weapon (fumble 4) is useless until it's seen to; another one works
+	ieDword fouled = GetStat(IE_DCC_FOULED);
+	if (fouled && fouled == ieDword(weaponInfo[0].slot + 1)) {
+		Feedback(fmt::format(u"{} can't attack: its weapon is fouled", Name(this)), FT_COMBAT);
+		return;
+	}
+	bool melee = !(weaponInfo[0].wflags & WEAPON_RANGED);
+	// a grapple declared for the next melee attack takes its place
+	uint32_t options = GetDCCCombatOptions();
+	if ((options & OPT_GRAPPLE) && melee) {
+		SetBase(IE_DCC_COMBATOPT, options & ~OPT_GRAPPLE);
+		DCCGrapple(target);
 		return;
 	}
 	// the deed die: scripted attacks roll their own; a real round rolled it in InitRoundDCC, unless
@@ -347,11 +533,18 @@ void Actor::DCCAttack(Actor* target, bool viaProjectile)
 	}
 
 	bool character = IsDCCCharacter();
-	bool twoWeapons = IsDualWielding() && weaponInfo[1].extHeader;
+	bool twoWeapons = IsDualWielding() && weaponInfo[1].extHeader && !InjuryBlocksTwoWeapons(injuries);
 	bool halfling = character && BaseStats[IE_CLASS] == static_cast<ieDword>(ClassID::Halfling) && BaseStats[IE_LEVEL] > 0;
 	int index = viaProjectile ? std::max(0, int(attacksperround) - int(attackcount) - 1) : 0;
 	TwoWeaponDice twoDice;
 	if (twoWeapons) twoDice = rules->combat.twoWeapons.Lookup(Signed(GetStat(IE_DEX)), halfling);
+
+	// M2.3b: is the target in a fight already, does it notice us (surprise, the thief's backstab)
+	const Game* game = core->GetGame();
+	ieDword now = game ? ieDword(game->GameTime) : 0;
+	ieDword window = 2 * core->Time.attack_round_size;
+	bool targetInFight = target->dccCombatTime && now <= target->dccCombatTime + window;
+	bool aware = CanSee(target, this, true, GA_NO_DEAD | GA_NO_HIDDEN);
 
 	auto state = std::make_shared<DCCAttackState>();
 	state->targetID = target->GetGlobalID();
@@ -360,34 +553,7 @@ void Actor::DCCAttack(Actor* target, bool viaProjectile)
 	swings.resize(twoWeapons ? 2 : 1);
 	for (int hand = 0; hand < int(swings.size()); ++hand) {
 		DCCSwing& swing = swings[hand];
-		swing.hand = hand;
-		swing.wi = &weaponInfo[hand];
-		const ITMExtHeader* header = swing.wi->extHeader;
-		if (!header) return;
-		swing.missile = swing.wi->wflags & WEAPON_RANGED;
-		bool fists = inventory.FistsEquipped();
-
-		uint32_t augurFlags = swing.missile ? AF_MISSILE : AF_MELEE;
-		if (fists) augurFlags |= AF_UNARMED;
-		swing.abilityMod = character ? GetDCCAbilityMod(swing.missile ? Ability::Agi : Ability::Str) : 0;
-		int deedDie = GetStat(IE_DCC_DEEDDIE);
-		swing.deed = deedDie ? dccDeedRoll + Signed(GetStat(IE_DCC_DEEDADD)) : 0;
-		int augur = character ? GetDCCAugurBonus(AugurRoll::Attack, augurFlags) : 0;
-
-		// stock to-hit effects and magic weapons count as flat bonuses
-		int effects = ToHit.GetFxBonus() + Signed(GetStat(IE_HITBONUS)) + header->THAC0Bonus + swing.wi->launcherTHAC0Bonus;
-		effects += Signed(GetStat(swing.missile ? IE_MISSILEHITBONUS : (fists ? IE_FISTHIT : IE_MELEETOHIT)));
-		effects += Signed(GetStat(IE_DCC_ATKMOD)) + Signed(GetStat(IE_DCC_ROLLMOD));
-
-		uint32_t conditions = AttackConditionsFor(this, target, swing.missile, GetWeaponRange(hand));
-		Situational situational = SituationalModifiers(conditions, swing.missile);
-
-		swing.in.actionDie = ActionDie(this, index);
-		swing.in.dieSteps = situational.dieSteps;
-		swing.in.modifier = Signed(GetStat(IE_DCC_ATTACK)) + swing.abilityMod + swing.deed + augur + situational.flat + effects;
-		swing.in.targetAC = Signed(target->GetStat(IE_DCC_AC));
-		swing.in.threat = Signed(GetStat(IE_DCC_THREAT));
-		swing.in.cursed = GetDCCStates() & STATE_CURSED;
+		if (!DCCBuildSwing(swing, hand, target, index, false)) return;
 		if (twoWeapons) {
 			swing.in.dieSteps += hand ? twoDice.offSteps : twoDice.primarySteps;
 			swing.in.critRule = hand ? twoDice.offCrit : twoDice.primaryCrit;
@@ -395,12 +561,68 @@ void Actor::DCCAttack(Actor* target, bool viaProjectile)
 			// halflings only fumble when both dice show 1 (classes.md); decided after both rolls
 			swing.in.fumbles = !halfling;
 		}
+	}
 
-		// damage: the weapon's dice + Str (melee and thrown) + deed + augur + magic + effects
-		bool strength = !swing.missile || (swing.wi->wflags & (WEAPON_USESTRENGTH | WEAPON_USESTRENGTH_DMG));
-		int damageAugur = character ? GetDCCAugurBonus(AugurRoll::Damage, augurFlags) : 0;
-		int strMod = character && strength ? GetDCCAbilityMod(Ability::Str) : 0;
-		swing.damageBonus = strMod + swing.deed + damageAugur + header->DamageBonus + swing.wi->launcherDmgBonus + Signed(GetStat(IE_DAMAGEBONUS));
+	// the thief's backstab: from behind a foe busy with another, or against an unaware one; the
+	// backstab bonus, and a hit is a crit (with a melee weapon: no fists, no missiles)
+	DCCSwing& main = swings[0];
+	bool thief = character && BaseStats[IE_CLASS] == static_cast<ieDword>(ClassID::Thief);
+	// from behind: the target is fighting another foe in melee right now
+	bool busyElsewhere = false;
+	for (const auto& foe : target->dccEngaged) {
+		if (foe.first != GetGlobalID() && now <= foe.second + window) busyElsewhere = true;
+	}
+	bool fromBehind = targetInFight && IsBehind(target) && busyElsewhere;
+	bool unaware = Surprised(targetInFight, aware);
+	if (melee && !inventory.FistsEquipped() && BackstabApplies(thief, Signed(BaseStats[IE_LEVEL]), fromBehind, unaware, target->GetStat(IE_DISABLEBACKSTAB))) {
+		main.backstab = true;
+		main.in.autoCrit = true;
+		main.in.modifier += BackstabBonus(this);
+		const WeaponRow* row = WeaponRowFor(this, *main.wi);
+		if (row && !row->backstab.IsNone() && !main.subdual) main.damageDice = row->backstab;
+		Feedback(fmt::format(u"{} backstabs {} ({}): {:+} to hit, a hit is a crit", Name(this), Name(target), fromBehind ? u"from behind" : u"unaware",
+				     BackstabBonus(this)),
+			 FT_COMBAT);
+	}
+
+	// a charge (declared): +2 to hit and -2 AC for a round, with a run-up of half the speed
+	if ((options & OPT_CHARGE) && melee) {
+		SetBase(IE_DCC_COMBATOPT, options & ~OPT_CHARGE);
+		float_t angle = AngleFromPoints(dccChargeFrom, Pos);
+		int moved = static_cast<int>(Distance(dccChargeFrom, this) / std::max<float_t>(1, Feet2Pixels(1, angle)));
+		int speed = Signed(GetStat(IE_DCC_SPEED));
+		if (ChargeRunUp(moved, speed)) {
+			for (auto& swing : swings) {
+				swing.in.modifier += CHARGE_ATTACK;
+			}
+			Duration round;
+			round.dice.add = 1;
+			ApplyCombat(CombatEffect::ACMod, CHARGE_AC, round, this, this);
+			Feedback(fmt::format(u"{} charges {} ({}' run-up): {:+} to hit, {:+} AC for a round", Name(this), Name(target), moved, CHARGE_ATTACK, CHARGE_AC), FT_COMBAT);
+		} else {
+			Feedback(fmt::format(u"{} has no room to charge ({}' of the {}' run-up)", Name(this), moved, (speed + 1) / 2), FT_COMBAT);
+		}
+	}
+
+	// the dwarf's shield bash: one a round on top of the action dice, d14 + deed die, 1d3
+	bool dwarf = character && BaseStats[IE_CLASS] == static_cast<ieDword>(ClassID::Dwarf) && BaseStats[IE_LEVEL] > 0;
+	if (dwarf && melee && ShieldItem(this) && !InjuryBlocksShield(injuries) && (!viaProjectile || index == 0)) {
+		DCCSwing bash;
+		if (DCCBuildSwing(bash, 2, target, 0, true)) swings.push_back(bash);
+	}
+
+	// surprise: a creature not yet in a fight that doesn't notice its attacker loses its first round
+	if (unaware && !OutOfFight(target)) {
+		Duration round;
+		round.dice.add = 1;
+		ApplyCombat(CombatEffect::NoAttack, 1, round, target, this);
+		Feedback(fmt::format(u"{} is caught by surprise: no action this round", Name(target)), FT_COMBAT);
+	}
+	// both are in a fight now; a melee swing in reach engages them (withdrawal)
+	dccCombatTime = target->dccCombatTime = now;
+	if (melee && WithinPersonalRange(this, target, std::max<int>(GetWeaponRange(false), MELEE_REACH))) {
+		dccEngaged[target->GetGlobalID()] = now;
+		target->dccEngaged[GetGlobalID()] = now;
 	}
 
 	// the Mighty Deed is declared before the roll: a queued one-off (used up now, whatever
@@ -416,7 +638,7 @@ void Actor::DCCAttack(Actor* target, bool viaProjectile)
 	fxqueue.RemoveAllEffectsWithParam(fx_dcc_combat_ref, static_cast<ieDword>(CombatEffect::NextAttack));
 	target->fxqueue.RemoveAllEffectsWithParam(fx_dcc_combat_ref, static_cast<ieDword>(CombatEffect::NextDefense));
 
-	// roll both dice together, so the halfling double-1 rule can see them
+	// roll the dice together, so the halfling double-1 rule can see them
 	for (auto& swing : swings) {
 		swing.record.natural = DCCDie(AttackDie(swing.in.actionDie, swing.in.dieSteps));
 	}
@@ -449,10 +671,14 @@ bool Actor::DCCContinueAttack(const std::shared_ptr<DCCAttackState>& state)
 	int totalDamage = 0;
 	int hitHand = -1;
 	for (const auto& swing : state->swings) {
-		if (swing.record.hit) {
-			totalDamage += swing.damage;
-			if (hitHand < 0) hitHand = swing.hand;
+		if (!swing.record.hit) continue;
+		// subdual blows and the shield bash land at once (no projectile)
+		if (swing.subdual || swing.bash) {
+			DCCApplySwingDamage(target, swing, swing.damage);
+			continue;
 		}
+		totalDamage += swing.damage;
+		if (hitHand < 0) hitHand = swing.hand;
 	}
 
 	// the damage: on the weapon's projectile like a stock attack, or at once
@@ -466,12 +692,22 @@ bool Actor::DCCContinueAttack(const std::shared_ptr<DCCAttackState>& state)
 			UseItem(wi.slot, header, target, (crit ? UI_CRITICAL : 0) | UI_NOAURA, totalDamage);
 		}
 	} else if (hitHand >= 0) {
-		const ITMExtHeader* header = weaponInfo[hitHand].extHeader;
-		auto fx = EffectQueue::CreateEffect(fx_dcc_damage_ref, totalDamage, ConvertDamageType(header ? header->DamageType : 0) << 16, FX_DURATION_INSTANT_LIMITED);
-		fx->Target = FX_TARGET_PRESET;
-		core->ApplyEffect(std::move(fx), target, this);
+		DCCApplySwingDamage(target, state->swings[hitHand], totalDamage);
 	}
 	return true;
+}
+
+void Actor::DCCApplySwingDamage(Actor* target, const DCCSwing& swing, int damage)
+{
+	if (damage <= 0 || !target) return;
+	const ITMExtHeader* header = swing.wi ? swing.wi->extHeader : nullptr;
+	ieDword type = swing.bash ? DAMAGE_CRUSHING : ConvertDamageType(header ? header->DamageType : 0);
+	auto fx = EffectQueue::CreateEffect(fx_dcc_damage_ref, damage, type << 16, FX_DURATION_INSTANT_LIMITED);
+	fx->Target = FX_TARGET_PRESET;
+	// a subdual blow that takes the target to 0 hp knocks it out (DCCStartBleeding)
+	target->dccSubdualHit = swing.subdual;
+	core->ApplyEffect(std::move(fx), target, this);
+	target->dccSubdualHit = false;
 }
 
 // what a burn would do for a swing: why, by how much it falls short, whether it would crit
@@ -620,6 +856,12 @@ struct RowContext {
 	Duration lastDuration; // the duration a term rolled last, for a later term's SAME
 	std::vector<String> notes;
 	std::vector<std::pair<std::string, std::vector<std::string>>> extraAttacks; // EXTRA terms, run after the row
+	// M2.3b
+	int normalDamage = 0; // this hit's own damage (HALFDMG, DOUBLEDMG)
+	int rowDice = 0; // what the row's DICE rolled (DRAIN)
+	bool cleave = false; // CLEAVE: a free attack on another foe if this hit kills
+	std::vector<int> rampage; // RAMPAGE: feet, most attacks, from the target (1) or the attacker (0)
+	int again = 0; // AGAIN: more rolls on the same table
 };
 
 }
@@ -714,7 +956,7 @@ static String ApplyFor(EffectRef& ref, ieDword p1, ieDword p2, const Duration& d
 	return what;
 }
 
-static String ApplyCombat(CombatEffect kind, int value, const Duration& duration, Actor* who, Actor* caster, Duration* rolled = nullptr)
+static String ApplyCombat(CombatEffect kind, int value, const Duration& duration, Actor* who, Actor* caster, Duration* rolled)
 {
 	return ApplyFor(fx_dcc_combat_ref, static_cast<ieDword>(value), static_cast<ieDword>(kind), duration, who, caster, 0, rolled);
 }
@@ -776,11 +1018,94 @@ static int WeaponDamageRoll(Actor* attacker, const WeaponInfo& wi)
 	return AttackDamage(RollDice(dice, [attacker](int sides) { return attacker->DCCDie(sides); }), str);
 }
 
+// d20 + the ability modifier (monsters: none) against a DC, with the subject's dice
+static RollResult AbilityCheck(Actor* who, Ability ability, int dc)
+{
+	int mod = who->IsDCCCharacter() ? who->GetDCCAbilityMod(ability) : 0;
+	return who->DCCRoll(RollKind::Check, mod, dc, who->DCCDie(20));
+}
+
+// feet from a table: dice, optionally times a number ("3d10x10")
+static int RollFeet(const std::string& text, const Roller& roller)
+{
+	std::string dice = text;
+	int times = 1;
+	auto x = text.find('x');
+	if (x != std::string::npos) {
+		dice = text.substr(0, x);
+		valid_signednumber(text.substr(x + 1).c_str(), times);
+	}
+	DiceExpr expr;
+	if (!ParseDice(dice, expr)) return 0;
+	return std::max(0, RollDice(expr, roller)) * std::max(1, times);
+}
+
+// a passable point up to feet from the origin along the angle (shorter if something is in the way);
+// blocked tells whether it had to stop short
+static Point PointAway(const Map* map, const Point& origin, float_t angle, int feet, bool* blocked = nullptr)
+{
+	if (blocked) *blocked = false;
+	Point best = origin;
+	int pixels = static_cast<int>(Feet2Pixels(feet, angle));
+	for (int step = 8; step <= pixels; step += 8) {
+		Point p(origin.x + static_cast<int>(std::cos(angle) * step), origin.y - static_cast<int>(std::sin(angle) * step));
+		if (!map || !bool(map->GetBlocked(p) & PathMapFlags::PASSABLE)) {
+			if (blocked) *blocked = true;
+			break;
+		}
+		best = p;
+	}
+	return best;
+}
+
+// the direction from a to b (b - a), in the angle convention of Feet2Pixels and PointAway
+static float_t AngleAway(const Point& a, const Point& b)
+{
+	if (a == b) return 0;
+	return std::atan2(static_cast<float_t>(a.y - b.y), static_cast<float_t>(b.x - a.x));
+}
+
+// the weapon in a creature's hand drops feet away from it (away from the attacker), or at its feet
+static void DropAway(Actor* holder, const Actor* attacker, int feet)
+{
+	int slot = holder->inventory.GetEquippedSlot();
+	Map* map = holder->GetCurrentArea();
+	Point where = holder->Pos;
+	if (feet > 0 && map) where = PointAway(map, holder->Pos, AngleAway(attacker->Pos, holder->Pos), feet);
+	if (holder->inventory.DropItemAtLocation(slot, 0, map, where)) holder->ReinitQuickSlots();
+}
+
+// the living foes of a creature (another side) near a point, nearest first
+static std::vector<Actor*> FoesNear(const Actor* of, const Point& where, int feet, const Actor* except)
+{
+	std::vector<Actor*> foes;
+	const Map* map = of->GetCurrentArea();
+	if (!map) return foes;
+	for (Actor* other : map->GetAllActorsInRadius(where, GA_NO_DEAD | GA_NO_UNSCHEDULED | GA_NO_LOS, feet + 5)) {
+		if (other == of || other == except || Side(other) == Side(of) || OutOfFight(other)) continue;
+		if (!WithinPersonalRange(other, where, feet)) continue;
+		foes.push_back(other);
+	}
+	std::sort(foes.begin(), foes.end(), [&where](const Actor* a, const Actor* b) {
+		return SquaredDistance(a->Pos, where) < SquaredDistance(b->Pos, where);
+	});
+	return foes;
+}
+
 static bool FailedSave(RowContext& ctx)
 {
 	if (!ctx.save || ctx.save->IsNone()) return true;
 	if (ctx.saved < 0) {
 		int dc = ctx.save->vsAttack ? ctx.attackTotal : ctx.save->dc + (ctx.save->plusLevel ? ctx.level : 0);
+		if (ctx.save->ability >= 0) {
+			// an ability check (Crit Table DR): d20 + the ability modifier
+			RollResult roll = AbilityCheck(ctx.subject, static_cast<Ability>(ctx.save->ability), dc);
+			ctx.saved = roll.success ? 1 : 0;
+			static const char16_t* abilities[] = { u"Str", u"Agi", u"Sta", u"Per", u"Int", u"Luck" };
+			ctx.notes.push_back(fmt::format(u"{} {} check {}{} = {} vs DC {}: {}", Name(ctx.subject), abilities[ctx.save->ability],
+							roll.natural, Plus(roll.total - roll.natural), roll.total, dc, roll.success ? u"passed" : u"failed"));
+			return ctx.saved == 0;
+		}
 		RollResult roll = ctx.subject->DCCRollSave(ctx.save->save, 0, dc, ctx.subject->DCCDie(20));
 		ctx.saved = roll.success ? 1 : 0;
 		static const char16_t* names[] = { u"Fort", u"Ref", u"Will" };
@@ -901,16 +1226,23 @@ static void ApplyTerm(const TableTerm& term, RowContext& ctx, const WeaponInfo& 
 	} else if (key == "DIEIN") {
 		note = u"dies unless healed, " + ApplyCombat(CombatEffect::Doomed, 1, TermDuration(term, 0), who, attacker);
 	} else if (key == "DIE") {
-		auto fx = EffectQueue::CreateEffect(fx_dcc_death_ref, 0, 4, FX_DURATION_INSTANT_PERMANENT);
+		// GONE: banished, no body left to roll over (the stock disintegration; Ethren decision)
+		bool gone = arg(0) == "GONE";
+		auto fx = EffectQueue::CreateEffect(fx_dcc_death_ref, 0, gone ? 512 : 4, FX_DURATION_INSTANT_PERMANENT);
 		fx->Target = FX_TARGET_PRESET;
 		core->ApplyEffect(std::move(fx), who, attacker);
-		note = u"dies";
+		note = gone ? u"is gone" : u"dies";
 	} else if (key == "HALFHP") {
 		int lost = Signed(who->GetBase(IE_HITPOINTS)) / 2;
 		ctx.extraDamage += lost;
 		note = fmt::format(u"loses half its hp ({})", lost);
 	} else if (key == "ABIL") {
 		int ability = AbilityIndex(arg(0));
+		// RND5: a random one of Str, Agi, Sta, Int, Per (Crit Table DN)
+		if (arg(0) == "RND5") {
+			static const Ability random5[] = { Ability::Str, Ability::Agi, Ability::Sta, Ability::Int, Ability::Per };
+			ability = static_cast<int>(random5[attacker->DCCDie(5) - 1]);
+		}
 		if (ability < 0) return;
 		int points = std::max(1, rollDice(arg(1)));
 		static const char16_t* names[] = { u"Str", u"Agi", u"Sta", u"Per", u"Int", u"Luck" };
@@ -918,6 +1250,10 @@ static void ApplyTerm(const TableTerm& term, RowContext& ctx, const WeaponInfo& 
 			unsigned int stat = AbilityStat(static_cast<Ability>(ability));
 			who->SetBase(stat, std::max(0, Signed(who->GetBase(stat)) - points));
 			note = fmt::format(u"-{} {} for good", points, names[ability]);
+		} else if (!arg(2).empty()) {
+			// for a while (a week): the loss lasts as long as the effect
+			Duration duration = TermDuration(term, 2);
+			note = fmt::format(u"-{} {} ", points, names[ability]) + ApplyFor(fx_dcc_loss_ref, points, ability, duration, who, attacker);
 		} else {
 			auto fx = EffectQueue::CreateEffect(fx_dcc_loss_ref, points, ability, FX_DURATION_INSTANT_PERMANENT);
 			fx->Target = FX_TARGET_PRESET;
@@ -927,8 +1263,10 @@ static void ApplyTerm(const TableTerm& term, RowContext& ctx, const WeaponInfo& 
 	} else if (key == "DISARM" || key == "DISARMSELF") {
 		Actor* holder = key == "DISARM" ? ctx.target : attacker;
 		if (!HasWeapon(holder, true)) return;
-		holder->DropItem(holder->inventory.GetEquippedSlot(), 0);
-		note = fmt::format(u"{} drops its weapon", Name(holder));
+		// "lands N' away": dropped that far from the holder, away from the attacker
+		int feet = key == "DISARM" && !arg(0).empty() ? RollFeet(arg(0), roller) : 0;
+		DropAway(holder, attacker, feet);
+		note = feet ? fmt::format(u"{}'s weapon lands {}' away", Name(holder), feet) : fmt::format(u"{} drops its weapon", Name(holder));
 	} else if (key == "SUNDER" || key == "SUNDERSELF") {
 		Actor* holder = key == "SUNDER" ? ctx.target : attacker;
 		if (!HasWeapon(holder, true)) return;
@@ -940,8 +1278,9 @@ static void ApplyTerm(const TableTerm& term, RowContext& ctx, const WeaponInfo& 
 		if (magic) {
 			// magic weapons never break (footnote *): knocked away instead, or untouched by a fumble
 			if (key == "SUNDER") {
-				holder->DropItem(slot, 0);
-				note = fmt::format(u"{}'s magic weapon is knocked away", Name(holder));
+				int feet = RollFeet("1d10+5", roller);
+				DropAway(holder, attacker, feet);
+				note = fmt::format(u"{}'s magic weapon is knocked {}' away", Name(holder), feet);
 			}
 		} else {
 			DestroySlotItem(holder, slot);
@@ -1002,6 +1341,257 @@ static void ApplyTerm(const TableTerm& term, RowContext& ctx, const WeaponInfo& 
 	} else if (key == "EXTRA") {
 		ctx.extraAttacks.emplace_back(key, term.args);
 		return;
+	} else if (key == "INJURY") {
+		Injury injury = ParseInjury(arg(0));
+		if (injury == INJ_NONE) {
+			Log(WARNING, "DCC", "Unknown injury '{}'", arg(0));
+			return;
+		}
+		Duration duration = TermDuration(term, 1, &ctx.lastDuration);
+		note = Widen(InjuryName(injury)) + u" " + ApplyCombat(CombatEffect::Injury, static_cast<int>(injury), duration, who, attacker, &ctx.lastDuration);
+		if (injury == INJ_AMNESIA) {
+			// it forgets its spells: arcane and divine casting fail while it lasts
+			ApplyFor(fx_dcc_miscast_ref, 100, 0, duration, who, attacker);
+			ApplyFor(fx_dcc_miscast_ref, 100, 1, duration, who, attacker);
+		}
+	} else if (key == "RAGE") {
+		// battle rage (footnote **): the attacker spends Per or Int, +1d12 a point (its setting)
+		int wanted = attacker->IsDCCCharacter() ? Signed(attacker->GetBase(IE_DCC_RAGE)) : 0;
+		RageSpend spend = BattleRage(wanted, Signed(attacker->GetStat(IE_CHR)), Signed(attacker->GetStat(IE_INT)));
+		if (!spend.Total()) {
+			note = u"battle rage (nothing spent)";
+		} else {
+			for (const auto& part : { std::make_pair(Ability::Per, spend.personality), std::make_pair(Ability::Int, spend.intelligence) }) {
+				if (!part.second) continue;
+				auto fx = EffectQueue::CreateEffect(fx_dcc_loss_ref, part.second, static_cast<ieDword>(part.first), FX_DURATION_INSTANT_PERMANENT);
+				fx->Target = FX_TARGET_PRESET;
+				core->ApplyEffect(std::move(fx), attacker, attacker);
+			}
+			DiceExpr dice;
+			dice.count = spend.Total();
+			dice.sides = RAGE_DIE;
+			int extra = RollDice(dice, roller);
+			ctx.extraDamage += extra;
+			note = fmt::format(u"battle rage: {} spends {} Per and {} Int, +{}d{} = {} damage", Name(attacker), spend.personality, spend.intelligence, dice.count,
+					   RAGE_DIE, extra);
+		}
+	} else if (key == "HALFACT" || key == "ONEACTION") {
+		bool half = key == "HALFACT";
+		Duration duration = TermDuration(term, 0, &ctx.lastDuration);
+		note = (half ? u"half its actions " : u"one action ") + ApplyCombat(CombatEffect::ActionLimit, half ? ACTIONS_HALVED : ACTIONS_ONE, duration, who, attacker);
+	} else if (key == "FOUL") {
+		if (!HasWeapon(who, false)) return;
+		int slot = who->weaponInfo[0].slot;
+		note = u"its weapon is fouled " + ApplyCombat(CombatEffect::Fouled, slot + 1, TermDuration(term, 0), who, attacker);
+	} else if (key == "DOWNED" || key == "STUCK") {
+		// down (prone) or stuck (no actions) until an ability check: DOWNED:16, STUCK:AGI:16, STUCK:STR:10:L
+		bool prone = key == "DOWNED";
+		int ability = prone ? static_cast<int>(Ability::Agi) : AbilityIndex(arg(0));
+		int dc = argInt(prone ? 0 : 1, FUMBLE_STAND_DC);
+		if (!prone && arg(2) == "L") dc += ctx.level;
+		if (ability < 0) return;
+		Duration turn;
+		turn.kind = Duration::Kind::Turns;
+		turn.dice.add = 1;
+		static const char16_t* names[] = { u"Str", u"Agi", u"Sta", u"Per", u"Int", u"Luck" };
+		ApplyCombat(CombatEffect::StandCheck, dc | (ability << 8) | (prone ? STAND_PRONE : 0), turn, who, attacker);
+		note = fmt::format(u"{} until a DC {} {} check", prone ? u"down" : u"stuck", dc, names[ability]);
+	} else if (key == "WOUND") {
+		DiceExpr dice;
+		if (!ParseDice(arg(0), dice)) return;
+		int ability = arg(1).empty() ? -1 : AbilityIndex(arg(1));
+		Duration healed;
+		healed.kind = Duration::Kind::UntilHealed;
+		ApplyCombat(CombatEffect::Wound, dice.count | (dice.sides << 8) | ((ability + 1) << 16), healed, who, attacker);
+		note = fmt::format(u"{} a round until healed", Widen(arg(0))) + (ability >= 0 ? u" (and a point of the ability)" : u"");
+	} else if (key == "CHOKE") {
+		// a Fort save now and every round after a failure: -1d4 Sta each time, lethal at 0
+		int dc = argInt(0, 20);
+		RollResult roll = who->DCCRollSave(Save::Fort, 0, dc, who->DCCDie(20));
+		if (roll.success) {
+			note = fmt::format(u"Fort save {} vs DC {}: shrugs it off", roll.total, dc);
+		} else {
+			int points = who->DCCDie(4);
+			auto fx = EffectQueue::CreateEffect(fx_dcc_loss_ref, points, static_cast<ieDword>(Ability::Sta) | 0x100, FX_DURATION_INSTANT_PERMANENT);
+			fx->Target = FX_TARGET_PRESET;
+			core->ApplyEffect(std::move(fx), who, attacker);
+			Duration turn;
+			turn.kind = Duration::Kind::Turns;
+			turn.dice.add = 1;
+			ApplyCombat(CombatEffect::Choke, dc, turn, who, attacker);
+			note = fmt::format(u"Fort save {} vs DC {}: -{} Sta, choking", roll.total, dc, points);
+		}
+	} else if (key == "NUMB") {
+		Duration turn;
+		turn.kind = Duration::Kind::Turns;
+		turn.dice.add = 1;
+		ApplyCombat(CombatEffect::Numb, 2, turn, who, attacker);
+		note = u"numbness spreads (Fort saves from DC 2 up)";
+	} else if (key == "HALFDMG") {
+		int half = ctx.normalDamage - std::max(1, ctx.normalDamage / 2);
+		ctx.extraDamage -= half;
+		note = fmt::format(u"half damage (-{})", half);
+	} else if (key == "DOUBLEDMG") {
+		ctx.extraDamage += ctx.normalDamage;
+		note = fmt::format(u"double damage (+{})", ctx.normalDamage);
+	} else if (key == "SLEEP") {
+		note = u"asleep " + ApplyFor(fx_dcc_slowsleep_ref, 0, 0, TermDuration(term, 0), who, attacker);
+	} else if (key == "ROLLMOD") {
+		int value = argInt(0, 0);
+		note = fmt::format(u"{:+} to all rolls ", value) + ApplyCombat(CombatEffect::RollMod, value, TermDuration(term, 1), who, attacker);
+	} else if (key == "MAXHP") {
+		int points = argInt(0, 1);
+		int maxHP = std::max(1, Signed(who->GetBase(IE_MAXHITPOINTS)) - points);
+		who->SetBase(IE_MAXHITPOINTS, maxHP);
+		if (Signed(who->GetBase(IE_HITPOINTS)) > maxHP) who->SetBase(IE_HITPOINTS, maxHP);
+		note = fmt::format(u"-{} max hp for good", points);
+	} else if (key == "XP") {
+		int points = argInt(0, 1);
+		who->SetBase(IE_XP, std::max(0, Signed(who->GetBase(IE_XP)) - points));
+		note = fmt::format(u"-{} XP", points);
+	} else if (key == "REROLL") {
+		int ability = AbilityIndex(arg(0));
+		if (ability < 0) return;
+		DiceExpr dice;
+		dice.count = 3;
+		dice.sides = 6;
+		int score = RollDice(dice, roller);
+		who->SetBase(AbilityStat(static_cast<Ability>(ability)), score);
+		static const char16_t* names[] = { u"Str", u"Agi", u"Sta", u"Per", u"Int", u"Luck" };
+		note = fmt::format(u"{} is now {}", names[ability], score);
+	} else if (key == "ABILTO") {
+		// down to a score (temporary loss)
+		int ability = AbilityIndex(arg(0));
+		if (ability < 0) return;
+		int now = Signed(who->GetStat(AbilityStat(static_cast<Ability>(ability))));
+		int points = now - argInt(1, 1);
+		if (points <= 0) return;
+		auto fx = EffectQueue::CreateEffect(fx_dcc_loss_ref, points, ability, FX_DURATION_INSTANT_PERMANENT);
+		fx->Target = FX_TARGET_PRESET;
+		core->ApplyEffect(std::move(fx), who, attacker);
+		static const char16_t* names[] = { u"Str", u"Agi", u"Sta", u"Per", u"Int", u"Luck" };
+		note = fmt::format(u"{} drops to {}", names[ability], argInt(1, 1));
+	} else if (key == "LIMBS") {
+		// limbs torn off: +1d14 each; the weapon arm, the other arm, then the legs
+		int limbs = std::max(1, rollDice(arg(0)));
+		int extra = 0;
+		for (int i = 0; i < limbs; ++i) {
+			extra += attacker->DCCDie(14);
+		}
+		ctx.extraDamage += extra;
+		Duration forGood;
+		forGood.kind = Duration::Kind::Permanent;
+		if (HasWeapon(who, true)) DropAway(who, attacker, 0);
+		ApplyCombat(CombatEffect::Injury, INJ_WEAPON_ARM, forGood, who, attacker);
+		if (limbs >= 2) ApplyCombat(CombatEffect::Injury, INJ_BOTH_ARMS, forGood, who, attacker);
+		if (limbs >= 3) {
+			ApplyCombat(CombatEffect::Injury, INJ_LEG, forGood, who, attacker);
+			ApplyFor(fx_dcc_movement_ref, 0, 2, forGood, who, attacker);
+		}
+		note = fmt::format(u"{} limbs lost: +{}d14 = {} damage", limbs, limbs, extra);
+	} else if (key == "SMASHGEAR") {
+		// each piece of gear: 50% destroyed (magic 10%)
+		String broken;
+		for (int slot : { who->inventory.GetEquippedSlot(), who->inventory.GetShieldSlot(), Inventory::GetArmorSlot(), Inventory::GetHeadSlot() }) {
+			if (slot < 0 || (slot == who->inventory.GetEquippedSlot() && who->inventory.FistsEquipped())) continue;
+			const CREItem* item = who->inventory.GetSlotItem(slot);
+			if (!item || (item->Flags & IE_INV_ITEM_UNDROPPABLE)) continue;
+			const Item* itm = gamedata->GetItem(item->ItemResRef, true);
+			bool magic = itm && ((itm->Flags & IE_ITEM_MAGICAL) || (item->Flags & IE_INV_ITEM_MAGICAL));
+			if (itm) gamedata->FreeItem(itm, item->ItemResRef);
+			int roll = attacker->DCCDie(100);
+			if (roll > (magic ? 10 : 50)) continue;
+			broken += (broken.empty() ? u"" : u", ") + Widen(std::string(item->ItemResRef.c_str()));
+			DestroySlotItem(who, slot);
+		}
+		note = broken.empty() ? String(u"its gear holds") : u"smashed: " + broken;
+	} else if (key == "FLING") {
+		// flung feet away (from the attacker, or RANDOM); FALL: +1d4 per 30' and +1d6 against an
+		// obstacle; STRIKE: the creatures next to where it lands strike it (Crit Table V, 2);
+		// RICOCHET: into a random other creature, both take 1d10 (Crit Table G, 6)
+		int feet = RollFeet(arg(0), roller);
+		auto has = [&term](const char* option) { return std::find(term.args.begin() + 1, term.args.end(), option) != term.args.end(); };
+		Map* map = who->GetCurrentArea();
+		if (!map || feet <= 0) return;
+		float_t angle = AngleAway(attacker->Pos, who->Pos);
+		if (has("RANDOM")) angle = static_cast<float_t>(attacker->DCCDie(360)) * static_cast<float_t>(M_PI) / 180;
+		Actor* victim = nullptr;
+		if (has("RICOCHET")) {
+			std::vector<Actor*> others;
+			for (Actor* other : map->GetAllActorsInRadius(who->Pos, GA_NO_DEAD | GA_NO_UNSCHEDULED | GA_NO_LOS, feet)) {
+				if (other != who && other != attacker && !OutOfFight(other)) others.push_back(other);
+			}
+			if (!others.empty()) {
+				victim = others[attacker->DCCDie(int(others.size())) - 1];
+				angle = AngleAway(who->Pos, victim->Pos);
+				feet = std::max(1, static_cast<int>(Distance(who, victim) / std::max<float_t>(1, Feet2Pixels(1, angle))) - MELEE_REACH);
+			}
+		}
+		bool blocked = false;
+		Point landing = PointAway(map, who->Pos, angle, feet, &blocked);
+		who->SetPosition(landing, true);
+		note = fmt::format(u"flung {}'", feet);
+		if (has("FALL")) {
+			DiceExpr fall;
+			fall.count = (feet + 29) / 30;
+			fall.sides = 4;
+			int extra = RollDice(fall, roller);
+			if (blocked) extra += attacker->DCCDie(6);
+			ctx.extraDamage += extra;
+			note += fmt::format(u"{}, +{} damage", blocked ? u" into an obstacle" : u"", extra);
+		}
+		if (victim) {
+			int hurt = attacker->DCCDie(10);
+			int hurtVictim = attacker->DCCDie(10);
+			ctx.extraDamage += hurt;
+			DirectDamage(victim, hurtVictim, attacker);
+			note += fmt::format(u" into {}: {} and {} damage", Name(victim), hurt, hurtVictim);
+		}
+		if (has("STRIKE")) {
+			// those next to it where it lands strike it, by accident
+			for (Actor* other : map->GetAllActorsInRadius(who->Pos, GA_NO_DEAD | GA_NO_UNSCHEDULED | GA_NO_LOS, MELEE_REACH + 10)) {
+				if (other == who || other == attacker || OutOfFight(other) || !WithinPersonalRange(other, who, MELEE_REACH)) continue;
+				if (other->IsDCCHeld() || other->Immobile()) continue;
+				ctx.notes.push_back(std::move(note));
+				note.clear();
+				other->DCCFreeAttack(who, fmt::format(u"{} is hurled into it", Name(who)));
+			}
+		}
+	} else if (key == "CLEAVE") {
+		ctx.cleave = true;
+		return;
+	} else if (key == "RAMPAGE") {
+		ctx.rampage = { argInt(0, 10), argInt(1, 10), arg(2) == "TARGET" ? 1 : 0 };
+		return;
+	} else if (key == "AGAIN") {
+		ctx.again = std::max(ctx.again, argInt(0, 1));
+		return;
+	} else if (key == "MORALECHECK") {
+		// the subject's side near it checks morale against the DC (PCS: the party too, stunned on a failure)
+		int dc = argInt(0, MORALE_DC);
+		bool pcs = arg(1) == "PCS";
+		const Map* map = who->GetCurrentArea();
+		int checked = 0;
+		if (map) {
+			for (Actor* other : map->GetAllActorsInRadius(who->Pos, GA_NO_DEAD | GA_NO_UNSCHEDULED, 60)) {
+				if (other == who || Side(other) != Side(who) || OutOfFight(other)) continue;
+				if (other->InParty && !pcs) continue;
+				other->DCCCheckMorale(attacker, dc, fmt::format(u"{}'s fate", Name(who)), pcs);
+				++checked;
+			}
+		}
+		note = checked ? fmt::format(u"{} near it check morale vs {}", checked, dc) : String(u"nobody near to lose heart");
+	} else if (key == "DRAIN") {
+		// the attacker heals what the row's dice rolled
+		int max = Signed(attacker->GetStat(IE_MAXHITPOINTS));
+		int hp = Signed(attacker->GetBase(IE_HITPOINTS));
+		int healed = std::max(0, std::min(ctx.rowDice, max - hp));
+		if (healed) attacker->SetBase(IE_HITPOINTS, hp + healed);
+		note = fmt::format(u"{} heals {}", Name(attacker), healed);
+	} else if (key == "ATTACKER") {
+		int damage = std::max(1, rollDice(arg(0)));
+		DirectDamage(attacker, damage, attacker);
+		note = fmt::format(u"{} loses {} hp", Name(attacker), damage);
 	} else if (key == "TODO") {
 		std::string what = arg(0);
 		std::replace(what.begin(), what.end(), '_', ' ');
@@ -1020,6 +1610,7 @@ static void ApplyRow(const ResultRow& row, RowContext& ctx, const WeaponInfo& wi
 	if (!row.dice.IsNone()) {
 		int extra = RollDice(row.dice, [&ctx](int sides) { return ctx.attacker->DCCDie(sides); });
 		ctx.extraDamage += extra;
+		ctx.rowDice = extra;
 		ctx.notes.push_back(fmt::format(u"+{} = {} damage", Widen(DiceString(row.dice)), extra));
 	}
 	for (const auto& alternatives : row.effects) {
@@ -1073,6 +1664,11 @@ void Actor::DCCResolveSwing(DCCSwing& swing, Actor* target, int depth, DCCAttack
 	record.fumble = roll.fumble;
 	record.cursed = roll.cursed;
 	if (state && depth == 0) record.deedKind = static_cast<int>(state->deed);
+	record.target = target->GetGlobalID();
+	record.backstab = swing.backstab;
+	record.subdual = swing.subdual;
+	record.bash = swing.bash;
+	record.free = depth > 0;
 
 	// "Ilsa burns 3 Luck: 9 -> 12, hit" (before the attack line, which shows the burned total)
 	if (swing.burnPoints) {
@@ -1099,10 +1695,11 @@ void Actor::DCCResolveSwing(DCCSwing& swing, Actor* target, int depth, DCCAttack
 		flat -= record.deed;
 	}
 	String luckText = swing.burnBonus ? fmt::format(u" +{} Luck", swing.burnBonus) : String();
-	String line = fmt::format(u"{} {}{} {}: {}{}{} = {} vs AC {}, ", Name(this), depth ? u"free attack on" : u"attacks", swing.hand ? u" (off hand)" : u"",
+	const char16_t* handText = swing.bash ? u" (shield bash)" : (swing.hand ? u" (off hand)" : u"");
+	String line = fmt::format(u"{} {}{} {}: {}{}{} = {} vs AC {}, ", Name(this), depth ? u"free attack on" : u"attacks", handText,
 				  Name(target), dieText, Plus(flat), luckText, record.total, record.ac);
 	if (record.hit) {
-		line += record.crit ? u"critical hit" : u"hit";
+		line += record.crit ? (swing.backstab ? u"backstab, critical hit" : u"critical hit") : u"hit";
 	} else if (record.cursed) {
 		line += u"miss (cursed by fortune)";
 	} else {
@@ -1114,6 +1711,8 @@ void Actor::DCCResolveSwing(DCCSwing& swing, Actor* target, int depth, DCCAttack
 		const ITMExtHeader* header = wi.extHeader;
 		DiceExpr dice = WeaponDice(header);
 		dice.add = 0; // the header's bonus is in damageBonus
+		// a shield bash, a subdual blow (a die lower) or a backstab's own damage
+		if (!swing.damageDice.IsNone()) dice = swing.damageDice;
 		int rolled = RollDice(dice, [this](int sides) { return DCCDie(sides); });
 		swing.damage = AttackDamage(rolled, swing.damageBonus);
 		line += fmt::format(u": {}{} = {} damage", Widen(DiceString(dice)), Plus(swing.damageBonus), swing.damage);
@@ -1126,6 +1725,7 @@ void Actor::DCCResolveSwing(DCCSwing& swing, Actor* target, int depth, DCCAttack
 		if (state && depth == 0 && swing.deed && state->deed != Deed::None && !state->deedTried && !DeedSucceeds(dccDeedRoll, true)) {
 			line += fmt::format(u" (deed {}: no {})", dccDeedRoll, DeedName(state->deed));
 		}
+		if (swing.subdual) line += u" (subdual)";
 	}
 	Feedback(std::move(line), FT_TOHIT);
 
@@ -1133,6 +1733,7 @@ void Actor::DCCResolveSwing(DCCSwing& swing, Actor* target, int depth, DCCAttack
 	ctx.attacker = this;
 	ctx.target = target;
 	ctx.level = GetDCCHitDice();
+	ctx.normalDamage = record.hit ? swing.damage : 0;
 
 	if (record.crit) {
 		CritTableID tableID = static_cast<CritTableID>(GetStat(IE_DCC_CRITTABLE));
@@ -1161,6 +1762,17 @@ void Actor::DCCResolveSwing(DCCSwing& swing, Actor* target, int depth, DCCAttack
 			if (row) {
 				record.result = row->text;
 				ApplyRow(*row, ctx, wi);
+			}
+			// "roll again" (Crit Table G): more rolls on the same table; another "again" there is nothing
+			int again = ctx.again;
+			ctx.again = 0;
+			for (int i = 0; i < again; ++i) {
+				int more = CritRoll(RollDice(critDice, [this](int sides) { return DCCDie(sides); }), add, luck, defender);
+				const ResultRow* extra = table->Lookup(more);
+				if (!extra) continue;
+				ctx.notes.push_back(fmt::format(u"again {}: {}", more, Widen(extra->text)));
+				ApplyRow(*extra, ctx, wi);
+				ctx.again = 0;
 			}
 			Feedback(fmt::format(u"CRITICAL ({}: {}d{}{} = {}): {}{}{}", Widen(CritTableName(tableID)), dice, die, mods, record.critRoll, Widen(record.result),
 					     ctx.notes.empty() ? u"" : u"; ", Joined(ctx.notes)),
@@ -1209,6 +1821,44 @@ void Actor::DCCResolveSwing(DCCSwing& swing, Actor* target, int depth, DCCAttack
 	record.damage = record.hit ? swing.damage : 0;
 	dccLastAttack.push_back(record);
 
+	// a miss into a melee (or at a pinned foe) may hit an ally instead: 1 on a d2, rolled again
+	// against that ally (combat.md "Firing into melee", "Grappling")
+	Actor* holder = nullptr;
+	if (!swing.missile && target->GetStat(IE_DCC_PINNED)) {
+		const Game* game = core->GetGame();
+		holder = game ? game->GetActorByGlobalID(target->GetStat(IE_DCC_PINNED)) : nullptr;
+		if (holder == this) holder = nullptr;
+	}
+	if (depth == 0 && !record.hit && !record.fumble && ((swing.missile && swing.intoMelee) || holder)) {
+		Actor* ally = holder;
+		if (!ally) {
+			std::vector<Actor*> allies;
+			const Map* map = target->GetCurrentArea();
+			if (map) {
+				for (Actor* other : map->GetAllActorsInRadius(target->Pos, GA_NO_DEAD | GA_NO_UNSCHEDULED | GA_NO_LOS, MELEE_REACH + 10)) {
+					if (other == this || other == target || Side(other) != Side(this) || OutOfFight(other)) continue;
+					if (WithinPersonalRange(other, target, MELEE_REACH)) allies.push_back(other);
+				}
+			}
+			if (!allies.empty() && DCCDie(STRAY_DIE) == 1) ally = allies[allies.size() > 1 ? DCCDie(int(allies.size())) - 1 : 0];
+		} else if (DCCDie(STRAY_DIE) != 1) {
+			ally = nullptr;
+		}
+		if (ally) {
+			DCCSwing stray = swing;
+			stray.record = AttackRecord();
+			stray.damage = stray.extraDamage = 0;
+			stray.in.targetAC = Signed(ally->GetStat(IE_DCC_AC));
+			stray.decided = true; // no Luck for a stray shot
+			stray.in.autoCrit = false;
+			stray.backstab = false;
+			stray.burnPoints = stray.burnBonus = 0;
+			Feedback(fmt::format(u"{}'s miss goes astray towards {}", Name(this), Name(ally)), FT_COMBAT);
+			DCCResolveSwing(stray, ally, depth + 1, state);
+			if (stray.record.hit) DCCApplySwingDamage(ally, stray, stray.damage);
+		}
+	}
+
 	// free attacks a crit grants: same die and hand, at once, never more than one deep
 	for (const auto& extra : ctx.extraAttacks) {
 		if (depth > 0) break;
@@ -1223,15 +1873,45 @@ void Actor::DCCResolveSwing(DCCSwing& swing, Actor* target, int depth, DCCAttack
 		free.extraOnHit = DiceExpr();
 		if (extra.second.size() > 1) ParseDice(extra.second[1], free.extraOnHit);
 		free.decided = false;
+		free.in.autoCrit = false;
+		free.backstab = false;
 		free.burnPoints = free.burnBonus = 0;
 		free.burnBy = 0;
 		free.fumbleCancelled = false;
 		DCCResolveSwing(free, target, depth + 1, state);
-		if (free.record.hit) {
-			const ITMExtHeader* header = wi.extHeader;
-			auto fx = EffectQueue::CreateEffect(fx_dcc_damage_ref, free.damage, ConvertDamageType(header ? header->DamageType : 0) << 16, FX_DURATION_INSTANT_LIMITED);
-			fx->Target = FX_TARGET_PRESET;
-			core->ApplyEffect(std::move(fx), target, this);
+		if (free.record.hit) DCCApplySwingDamage(target, free, free.damage);
+	}
+	if (depth > 0) return;
+
+	// cleave (Crit Table V, 21): if this blow kills, a free attack on another foe within 10'
+	int hp = Signed(target->GetStat(IE_HITPOINTS));
+	bool kills = OutOfFight(target) || (record.hit && swing.damage >= hp);
+	if (ctx.cleave && kills) {
+		std::vector<Actor*> foes = FoesNear(this, Pos, 10, target);
+		if (foes.empty()) {
+			Feedback(fmt::format(u"{} cleaves through, but no other foe is near", Name(this)), FT_COMBAT);
+		} else {
+			DCCFreeAttack(foes[0], fmt::format(u"{} cleaves on into {}", Name(this), Name(foes[0])));
+		}
+	}
+	// keep attacking until a miss (V-28, M-30, DR-29/30, G-9): foes near the attacker (or the target)
+	if (ctx.rampage.size() == 3) {
+		int feet = ctx.rampage[0];
+		int most = ctx.rampage[1];
+		Point from = ctx.rampage[2] ? target->Pos : Pos;
+		std::set<ieDword> struck { target->GetGlobalID() };
+		for (int i = 0; i < most; ++i) {
+			Actor* next = nullptr;
+			for (Actor* foe : FoesNear(this, from, feet, target)) {
+				if (!struck.count(foe->GetGlobalID())) {
+					next = foe;
+					break;
+				}
+			}
+			if (!next) break;
+			struck.insert(next->GetGlobalID());
+			AttackRecord free = DCCFreeAttack(next, fmt::format(u"{} keeps attacking", Name(this)));
+			if (!free.hit) break;
 		}
 	}
 }
@@ -1269,6 +1949,19 @@ bool Actor::DCCStartBleeding()
 {
 	if (!Rules()) return false;
 	if ((InternalFlags & IF_REALLYDIED) || (Modified[IE_STATE_ID] & STATE_DEAD)) return false;
+	// a subdual blow knocks out instead of killing (one hp pool: the blow that drops it decides)
+	if (dccSubdualHit) {
+		if (!fxqueue.HasEffectWithParam(fx_dcc_combat_ref, static_cast<ieDword>(CombatEffect::Subdued))) {
+			Duration turn;
+			turn.kind = Duration::Kind::Turns;
+			turn.dice.add = 1;
+			ApplyCombat(CombatEffect::Subdued, 1, turn, this, this);
+			Feedback(fmt::format(u"{} is knocked out", Name(this)), FT_COMBAT);
+		}
+		return true;
+	}
+	// a lethal blow on one knocked out: no more mercy
+	fxqueue.RemoveAllEffectsWithParam(fx_dcc_combat_ref, static_cast<ieDword>(CombatEffect::Subdued));
 	// already bleeding: further damage doesn't hurry it (Ethren decision)
 	if (fxqueue.HasEffectWithParam(fx_dcc_combat_ref, static_cast<ieDword>(CombatEffect::Bleed))) return true;
 	if (!IsDCCCharacter()) return false;
@@ -1301,6 +1994,17 @@ void Actor::DCCHealed(int oldHP, int newHP)
 		Modified[IE_DCC_DOOMED] = 0;
 		Feedback(fmt::format(u"{} is healed in time", Name(this)), FT_COMBAT);
 	}
+	// a heal closes a wound that bleeds every round, and wakes the knocked out
+	if (fxqueue.HasEffectWithParam(fx_dcc_combat_ref, static_cast<ieDword>(CombatEffect::Wound))) {
+		fxqueue.RemoveAllEffectsWithParam(fx_dcc_combat_ref, static_cast<ieDword>(CombatEffect::Wound));
+		Feedback(fmt::format(u"{}'s wound is closed", Name(this)), FT_COMBAT);
+	}
+	if (fxqueue.HasEffectWithParam(fx_dcc_combat_ref, static_cast<ieDword>(CombatEffect::Subdued))) {
+		fxqueue.RemoveAllEffectsWithParam(fx_dcc_combat_ref, static_cast<ieDword>(CombatEffect::Subdued));
+		Modified[IE_DCC_SUBDUED] = 0;
+		SetStance(IE_ANI_GET_UP);
+		Feedback(fmt::format(u"{} comes to", Name(this)), FT_COMBAT);
+	}
 }
 
 void Actor::DCCCountdownOver(CombatEffect kind)
@@ -1312,20 +2016,29 @@ void Actor::DCCCountdownOver(CombatEffect kind)
 
 void Actor::DCCOnDeath()
 {
-	if (!IsDCCCharacter()) return;
 	const Game* game = core->GetGame();
+	dccDiedTime = game ? std::max<ieDword>(game->GameTime, 1) : 1;
+	// its group may lose heart (combat.md "Morale")
+	DCCGroupMorale();
+	if (!IsDCCCharacter()) return;
 	BaseStats[IE_DCC_DIEDAT] = game ? std::max<ieDword>(game->GameTime, 1) : 1;
 	BaseStats[IE_DCC_BODY] = 0;
 }
 
-int Actor::DCCRecoverBody(const Actor* ally, int natural)
+bool Actor::DCCBodyRecoverable() const
 {
 	const Game* game = core->GetGame();
-	if (!Rules() || !game || !(Modified[IE_STATE_ID] & STATE_DEAD) || !IsDCCCharacter()) return -1;
-	if (ally && (ally->GetStat(IE_STATE_ID) & STATE_DEAD)) return -1;
-	if ((LastDamageType & DAMAGE_CHUNKING) || !BaseStats[IE_DCC_DIEDAT]) return -1;
+	if (!Rules() || !game || !(Modified[IE_STATE_ID] & STATE_DEAD) || !IsDCCCharacter()) return false;
+	if ((LastDamageType & (DAMAGE_CHUNKING | DAMAGE_DISINTEGRATE)) || !BaseStats[IE_DCC_DIEDAT]) return false;
 	int seconds = static_cast<int>((game->GameTime - BaseStats[IE_DCC_DIEDAT]) / core->Time.defaultTicksPerSec);
-	if (!CanRecoverBody(Signed(BaseStats[IE_LEVEL]), seconds, BaseStats[IE_DCC_BODY])) return -1;
+	return CanRecoverBody(Signed(BaseStats[IE_LEVEL]), seconds, BaseStats[IE_DCC_BODY]);
+}
+
+int Actor::DCCRecoverBody(const Actor* ally, int natural)
+{
+	// a living ally in the same area, able to act
+	if (ally && ((ally->GetStat(IE_STATE_ID) & STATE_DEAD) || ally->IsDCCHeld() || ally->GetCurrentArea() != GetCurrentArea())) return -1;
+	if (!DCCBodyRecoverable()) return -1;
 
 	BaseStats[IE_DCC_BODY] = 1;
 	// the dead character's own Luck (combat.md)
@@ -1350,6 +2063,390 @@ int Actor::DCCRecoverBody(const Actor* ally, int natural)
 	BaseStats[IE_DCC_DIEDAT] = 0;
 	Feedback(line + fmt::format(u"alive at 1 hp, -1 {} for good, {} to all rolls for an hour", names[which], BODY_RECOVERY_PENALTY), FT_COMBAT);
 	return 1;
+}
+
+// ---------------------------------------------------------------------------
+// combat completion (M2.3b): free attacks, grappling, withdrawal, morale, the per-round
+// effects, injuries and the combat options
+
+AttackRecord Actor::DCCFreeAttack(Actor* target, const String& why)
+{
+	AttackRecord none;
+	if (!Rules() || !target || OutOfFight(target) || target == this) return none;
+	if (IsDCCHeld() || Immobile() || GetStat(IE_DCC_NOATTACK) || GetStat(IE_DCC_PRONE) || (GetDCCInjuries() & INJ_BOTH_ARMS)) return none;
+	DCCSwing swing;
+	if (!DCCBuildSwing(swing, 0, target, 0, false)) return none;
+	Feedback(fmt::format(u"{} gets a free attack: {}", Name(this), why), FT_COMBAT);
+	size_t before = dccLastAttack.size();
+	DCCResolveSwing(swing, target, 1, nullptr);
+	if (swing.record.hit) DCCApplySwingDamage(target, swing, swing.damage);
+	return dccLastAttack.size() > before ? dccLastAttack[before] : swing.record;
+}
+
+// grappling: the action die + attack bonus + the better of Str and Agi (monsters: HD), the larger
+// side + its size bonus
+static int GrappleRoll(Actor* who, int sizeBonus, int& natural)
+{
+	bool character = who->IsDCCCharacter();
+	int str = character ? who->GetDCCAbilityMod(Ability::Str) : 0;
+	int agi = character ? who->GetDCCAbilityMod(Ability::Agi) : 0;
+	int die = who->GetStat(IE_DCC_ACTDIE1) ? who->GetStat(IE_DCC_ACTDIE1) : 20;
+	natural = who->DCCDie(die);
+	return natural + Signed(who->GetStat(IE_DCC_ATTACK)) + GrappleModifier(character, str, agi, who->GetDCCHitDice()) + sizeBonus + Signed(who->GetStat(IE_DCC_ROLLMOD));
+}
+
+static int CreatureSize(const Actor* actor)
+{
+	return std::max(1, actor->CircleSize2Radius());
+}
+
+int Actor::DCCGrapple(Actor* target)
+{
+	if (!Rules() || !target || target == this || OutOfFight(target)) return -1;
+	if (IsDCCHeld() || Immobile() || GetStat(IE_DCC_NOATTACK) || (GetDCCInjuries() & INJ_BOTH_ARMS)) return -1;
+	int mine = CreatureSize(this);
+	int theirs = CreatureSize(target);
+	int natural = 0;
+	int otherNatural = 0;
+	int total = GrappleRoll(this, mine > theirs ? GrappleSizeBonus(mine, theirs) : 0, natural);
+	int defence = GrappleRoll(target, theirs > mine ? GrappleSizeBonus(theirs, mine) : 0, otherNatural);
+	const Game* game = core->GetGame();
+	dccCombatTime = target->dccCombatTime = game ? ieDword(game->GameTime) : 0;
+	bool wins = GrappleWins(total, defence);
+	String line = fmt::format(u"{} grapples {}: {} vs {}, ", Name(this), Name(target), total, defence);
+	if (!wins) {
+		Feedback(line + u"fails", FT_COMBAT);
+		return 0;
+	}
+	// pinned until it wins a grapple of its own (or the holder lets go)
+	Duration turn;
+	turn.kind = Duration::Kind::Turns;
+	turn.dice.add = 1;
+	target->fxqueue.RemoveAllEffectsWithParam(fx_dcc_combat_ref, static_cast<ieDword>(CombatEffect::Pinned));
+	ApplyCombat(CombatEffect::Pinned, static_cast<int>(GetGlobalID()), turn, target, this);
+	Feedback(line + u"pinned", FT_COMBAT);
+	return 1;
+}
+
+void Actor::DCCCheckWithdrawal()
+{
+	if (dccEngaged.empty() || !Rules()) return;
+	const Game* game = core->GetGame();
+	const Map* map = GetCurrentArea();
+	if (!game || !map) return;
+	ieDword now = game->GameTime;
+	ieDword window = 2 * core->Time.attack_round_size;
+	for (auto it = dccEngaged.begin(); it != dccEngaged.end();) {
+		Actor* foe = map->GetActorByGlobalID(it->first);
+		bool recent = now <= it->second + window;
+		if (!foe || !recent || OutOfFight(foe)) {
+			it = dccEngaged.erase(it);
+			continue;
+		}
+		int reach = std::max<int>(foe->GetWeaponRange(false), MELEE_REACH);
+		bool inReach = WithinPersonalRange(foe, this, reach);
+		bool canAttack = !(foe->weaponInfo[0].wflags & WEAPON_RANGED) && !foe->IsDCCHeld() && !foe->Immobile() && !foe->GetStat(IE_DCC_NOATTACK) &&
+				 !foe->GetStat(IE_DCC_PRONE);
+		if (inReach) {
+			++it;
+			continue;
+		}
+		// it left the foe's reach on its own feet: one free attack (combat.md "Withdrawal")
+		it = dccEngaged.erase(it);
+		foe->dccEngaged.erase(GetGlobalID());
+		if (WithdrawalProvokes(true, true, false, canAttack)) {
+			foe->DCCFreeAttack(this, fmt::format(u"{} withdraws", Name(this)));
+		}
+	}
+}
+
+bool Actor::DCCCheckMorale(const Scriptable* from, int dc, const String& why, bool pcs)
+{
+	if (!Rules() || OutOfFight(this) || IsDCCHeld()) return true;
+	if (InParty && !pcs) return true; // the party never checks (combat.md)
+	// mindless creatures: the stock "never panics" (morale break 0)
+	if (!InParty && !GetStat(IE_MORALEBREAK)) return true;
+	int will = Signed(GetStat(IE_DCC_WILL));
+	// the CRE's morale as the situational modifier, plus morale effects (a rallying deed)
+	int mod = InParty ? 0 : MoraleModifier(Signed(BaseStats[IE_MORALE])) + Signed(Modified[IE_MORALE]) - Signed(BaseStats[IE_MORALE]);
+	int natural = DCCDie(20);
+	bool holds = MoraleHolds(natural, will, mod, dc);
+	int total = natural + will + mod;
+	String outcome = holds ? String(u"stands") : (InParty ? String(u"stunned for a round") : String(u"flees"));
+	Feedback(fmt::format(u"{} checks morale ({}): d20 {}{} = {} vs {}: {}", Name(this), why, natural, Plus(will + mod), total, dc, outcome), FT_COMBAT);
+	if (holds) return true;
+	if (InParty) {
+		Duration round;
+		round.dice.add = 1;
+		ApplyFor(fx_dcc_stun_ref, 0, 0, round, this, this);
+		return false;
+	}
+	// flees: the stock panic, running from the one it fears, for a turn
+	Duration turn;
+	turn.kind = Duration::Kind::Turns;
+	turn.dice.add = 1;
+	ApplyCombat(CombatEffect::Fleeing, 1, turn, this, this);
+	Panic(from, PanicMode::RunAway);
+	return false;
+}
+
+// whether a creature counts as down for its group's morale
+static bool Down(const Actor* actor)
+{
+	return OutOfFight(actor) || actor->IsDCCHeld() || (actor->GetStat(IE_STATE_ID) & (STATE_HELPLESS | STATE_SLEEP));
+}
+
+void Actor::DCCGroupMorale()
+{
+	const Map* map = GetCurrentArea();
+	const Game* game = core->GetGame();
+	if (!map || !game || !Rules()) return;
+	ieDword now = game->GameTime;
+	ieDword fight = 10 * core->Time.round_size; // deaths within the last turn count for this fight
+	std::vector<Actor*> group;
+	MoraleGroup state;
+	int highest = GetDCCHitDice();
+	bool leader = true;
+	for (Actor* other : map->GetAllActorsInRadius(Pos, GA_NO_LOS | GA_NO_UNSCHEDULED, 40)) {
+		if (other == this || Side(other) != Side(this)) continue;
+		bool dead = (other->GetStat(IE_STATE_ID) & STATE_DEAD) || (other->GetInternalFlag() & IF_REALLYDIED);
+		if (dead) {
+			if (other->dccDiedTime && now <= other->dccDiedTime + fight) {
+				++state.down;
+				++state.deadRecently;
+			}
+			continue;
+		}
+		if (Down(other)) {
+			++state.down;
+		} else {
+			++state.standing;
+			group.push_back(other);
+		}
+		if (other->GetDCCHitDice() >= highest) leader = false;
+	}
+	// this one is dying now
+	++state.down;
+	++state.deadRecently;
+	state.leaderDied = leader && !group.empty();
+	const Actor* killer = game->GetActorByGlobalID(objects.LastHitter);
+	for (Actor* member : group) {
+		if (member->InParty) continue;
+		uint32_t triggers = MoraleTriggers(state, member->dccMoraleDone);
+		if (!triggers) continue;
+		member->dccMoraleDone |= triggers;
+		const char16_t* why = (triggers & MORALE_LEADER) ? u"its leader fell" : ((triggers & MORALE_HALF_DOWN) ? u"half its side is down" : u"the first of its side fell");
+		member->DCCCheckMorale(killer, MORALE_DC, why);
+	}
+}
+
+void Actor::DCCHurt(int oldHP, int newHP)
+{
+	if (InParty || newHP >= oldHP || !Rules() || (dccMoraleDone & MORALE_ALONE_HURT)) return;
+	int maxHP = Signed(GetStat(IE_MAXHITPOINTS));
+	if (maxHP <= 0 || newHP * 2 > maxHP || newHP <= 0) return;
+	// alone: nobody of its side standing near it
+	const Map* map = GetCurrentArea();
+	if (!map) return;
+	for (const Actor* other : map->GetAllActorsInRadius(Pos, GA_NO_LOS | GA_NO_DEAD | GA_NO_UNSCHEDULED, 40)) {
+		if (other != this && Side(other) == Side(this) && !Down(other)) return;
+	}
+	MoraleGroup state;
+	state.standing = 1;
+	state.alone = true;
+	state.halfHurt = true;
+	if (!MoraleTriggers(state, dccMoraleDone)) return;
+	dccMoraleDone |= MORALE_ALONE_HURT;
+	const Game* game = core->GetGame();
+	DCCCheckMorale(game ? game->GetActorByGlobalID(objects.LastHitter) : nullptr, MORALE_DC, u"alone and hurt");
+}
+
+bool Actor::DCCRoundEffect(Effect& fx)
+{
+	static const char16_t* abilities[] = { u"Str", u"Agi", u"Sta", u"Per", u"Int", u"Luck" };
+	int value = Signed(fx.Parameter1);
+	switch (static_cast<CombatEffect>(fx.Parameter2)) {
+		case CombatEffect::StandCheck: {
+			// once a round: an ability check to get up or free
+			int dc = value & 0xff;
+			int ability = std::min((value >> 8) & 0xff, ABILITY_COUNT - 1);
+			RollResult roll = AbilityCheck(this, static_cast<Ability>(ability), dc);
+			bool prone = value & STAND_PRONE;
+			Feedback(fmt::format(u"{} tries to {}: {} check {}{} = {} vs DC {}: {}", Name(this), prone ? u"get up" : u"get free", abilities[ability], roll.natural,
+					     Plus(roll.total - roll.natural), roll.total, dc, roll.success ? (prone ? u"up" : u"free") : u"not yet"),
+				 FT_COMBAT);
+			if (roll.success && prone) SetStance(IE_ANI_GET_UP);
+			return !roll.success;
+		}
+		case CombatEffect::Wound: {
+			DiceExpr dice;
+			dice.count = value & 0xff;
+			dice.sides = (value >> 8) & 0xff;
+			int ability = ((value >> 16) & 0xff) - 1;
+			int damage = std::max(1, RollDice(dice, [this](int sides) { return DCCDie(sides); }));
+			Feedback(fmt::format(u"{}'s wound: {} damage{}", Name(this), damage, ability >= 0 ? fmt::format(u", -1 {}", abilities[ability]) : String()), FT_COMBAT);
+			if (ability >= 0) {
+				auto loss = EffectQueue::CreateEffect(fx_dcc_loss_ref, 1, ability | 0x100, FX_DURATION_INSTANT_PERMANENT);
+				loss->Target = FX_TARGET_PRESET;
+				core->ApplyEffect(std::move(loss), this, this);
+			}
+			DirectDamage(this, damage, this);
+			return true;
+		}
+		case CombatEffect::Choke: {
+			RollResult roll = DCCRollSave(Save::Fort, 0, value, DCCDie(20));
+			if (roll.success) {
+				Feedback(fmt::format(u"{} catches its breath: Fort save {} vs DC {}", Name(this), roll.total, value), FT_COMBAT);
+				return false;
+			}
+			int points = DCCDie(4);
+			Feedback(fmt::format(u"{} chokes: Fort save {} vs DC {}, -{} Sta", Name(this), roll.total, value, points), FT_COMBAT);
+			auto loss = EffectQueue::CreateEffect(fx_dcc_loss_ref, points, static_cast<ieDword>(Ability::Sta) | 0x100, FX_DURATION_INSTANT_PERMANENT);
+			loss->Target = FX_TARGET_PRESET;
+			core->ApplyEffect(std::move(loss), this, this);
+			return true;
+		}
+		case CombatEffect::Numb: {
+			// DC 2, 3, 4, ...: one failure paralyzes until healed; DC 20 passed shakes it off
+			RollResult roll = DCCRollSave(Save::Fort, 0, value, DCCDie(20));
+			Feedback(fmt::format(u"{} fights the numbness: Fort save {} vs DC {}: {}", Name(this), roll.total, value,
+					     roll.success ? (value >= 20 ? u"shaken off" : u"holds") : u"paralyzed"),
+				 FT_COMBAT);
+			if (!roll.success) {
+				Duration healed;
+				healed.kind = Duration::Kind::UntilHealed;
+				ApplyFor(fx_dcc_hold_ref, 0, 0, healed, this, this);
+				return false;
+			}
+			if (value >= 20) return false;
+			++fx.Parameter1;
+			return true;
+		}
+		case CombatEffect::Pinned: {
+			// the holder must stay on it; each round the pinned one tries a grapple of its own
+			const Game* game = core->GetGame();
+			Actor* holder = game ? game->GetActorByGlobalID(fx.Parameter1) : nullptr;
+			if (!holder || holder->GetCurrentArea() != GetCurrentArea() || OutOfFight(holder) || holder->IsDCCHeld() ||
+			    !WithinPersonalRange(holder, this, MELEE_REACH + 5)) {
+				Feedback(fmt::format(u"{} is no longer pinned", Name(this)), FT_COMBAT);
+				return false;
+			}
+			int mine = CreatureSize(this);
+			int theirs = CreatureSize(holder);
+			int natural = 0;
+			int holderNatural = 0;
+			int total = GrappleRoll(this, mine > theirs ? GrappleSizeBonus(mine, theirs) : 0, natural);
+			int defence = GrappleRoll(holder, theirs > mine ? GrappleSizeBonus(theirs, mine) : 0, holderNatural);
+			bool free = GrappleWins(total, defence);
+			Feedback(fmt::format(u"{} struggles against {}'s hold: {} vs {}: {}", Name(this), Name(holder), total, defence, free ? u"free" : u"still pinned"), FT_COMBAT);
+			return !free;
+		}
+		default:
+			return true;
+	}
+}
+
+std::vector<String> Actor::DCCInjuryList() const
+{
+	std::vector<String> lines;
+	const Game* game = core->GetGame();
+	ieDword now = game ? ieDword(game->GameTime) : 0;
+	auto how = [now](const Effect& fx) {
+		if (fx.SourceRef == PermanentSource) return String(u" (for good)");
+		if (fx.SourceRef == UntilHealedSource) return String(u" (until healed)");
+		if (fx.Duration > now) {
+			ieDword rounds = (fx.Duration - now + core->Time.round_size - 1) / core->Time.round_size;
+			return fmt::format(u" ({} round{})", rounds, rounds == 1 ? u"" : u"s");
+		}
+		return String();
+	};
+	static EffectRef refs[] = { fx_dcc_blind_ref, fx_dcc_deaf_ref, fx_dcc_silence_ref, fx_dcc_hold_ref, fx_dcc_movement_ref, fx_dcc_sleep_ref };
+	static const char16_t* names[] = { u"blind", u"deaf", u"can't speak", u"paralyzed", u"slowed", u"unconscious" };
+	int combatOpcode = EffectQueue::ResolveEffect(fx_dcc_combat_ref);
+	auto it = fxqueue.GetFirstEffect();
+	while (const Effect* next = fxqueue.GetNextEffect(it)) {
+		const Effect& fx = *next;
+		bool lasting = fx.SourceRef == PermanentSource || fx.SourceRef == UntilHealedSource;
+		if (static_cast<int>(fx.Opcode) == combatOpcode) {
+			switch (static_cast<CombatEffect>(fx.Parameter2)) {
+				case CombatEffect::Injury:
+					lines.push_back(Widen(InjuryName(static_cast<Injury>(fx.Parameter1))) + how(fx));
+					break;
+				case CombatEffect::AttackMod:
+					if (lasting) lines.push_back(fmt::format(u"{:+} to attack", Signed(fx.Parameter1)) + how(fx));
+					break;
+				case CombatEffect::ACMod:
+					if (lasting) lines.push_back(fmt::format(u"{:+} AC", Signed(fx.Parameter1)) + how(fx));
+					break;
+				case CombatEffect::NoAttack:
+					if (lasting) lines.push_back(u"can't attack" + how(fx));
+					break;
+				case CombatEffect::RollMod:
+					if (lasting) lines.push_back(fmt::format(u"{:+} to all rolls", Signed(fx.Parameter1)) + how(fx));
+					break;
+				case CombatEffect::Wound:
+					lines.push_back(u"bleeding wound" + how(fx));
+					break;
+				case CombatEffect::Doomed:
+					lines.push_back(u"mortally wounded" + how(fx));
+					break;
+				default:
+					break;
+			}
+			continue;
+		}
+		if (!lasting) continue;
+		for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+			if (static_cast<int>(fx.Opcode) != EffectQueue::ResolveEffect(refs[i])) continue;
+			String what = names[i];
+			if (i == 4) what = fx.Parameter1 ? fmt::format(u"speed {}%", fx.Parameter1) : String(u"can't walk");
+			lines.push_back(what + how(fx));
+		}
+	}
+	return lines;
+}
+
+uint32_t Actor::GetDCCInjuries() const
+{
+	return GetStat(IE_DCC_INJURY);
+}
+
+uint32_t Actor::GetDCCCombatOptions() const
+{
+	return BaseStats[IE_DCC_COMBATOPT];
+}
+
+void Actor::SetDCCCombatOptions(uint32_t options, int rage)
+{
+	uint32_t old = BaseStats[IE_DCC_COMBATOPT];
+	SetBase(IE_DCC_COMBATOPT, options & (OPT_CHARGE | OPT_GRAPPLE | OPT_SUBDUAL));
+	// the run-up of a charge starts where it's declared
+	if ((options & OPT_CHARGE) && !(old & OPT_CHARGE)) dccChargeFrom = Pos;
+	if (rage >= 0) SetBase(IE_DCC_RAGE, std::min(rage, RAGE_MAX_SETTING));
+}
+
+void Actor::DCCNightlyInjuries()
+{
+	uint32_t injuries = GetDCCInjuries();
+	// an infection and grave rot: a Fort save each night or -1d4 Sta; rot: -1 Per (lethal at 0)
+	for (const auto& rot : { std::make_pair(INJ_INFECTED, 10), std::make_pair(INJ_GRAVE_ROT, 16) }) {
+		if (!(injuries & rot.first)) continue;
+		RollResult roll = DCCRollSave(Save::Fort, 0, rot.second, DCCDie(20));
+		int points = roll.success ? 0 : DCCDie(4);
+		Feedback(fmt::format(u"{}'s {} overnight: Fort save {} vs DC {}: {}", Name(this), Widen(InjuryName(rot.first)), roll.total, rot.second,
+				     roll.success ? String(u"holds") : fmt::format(u"-{} Sta", points)),
+			 FT_MISC);
+		if (!points) continue;
+		auto loss = EffectQueue::CreateEffect(fx_dcc_loss_ref, points, static_cast<ieDword>(Ability::Sta) | 0x100, FX_DURATION_INSTANT_PERMANENT);
+		loss->Target = FX_TARGET_PRESET;
+		core->ApplyEffect(std::move(loss), this, this);
+	}
+	if (injuries & INJ_ROT) {
+		Feedback(fmt::format(u"{}'s flesh rots overnight: -1 Per", Name(this)), FT_MISC);
+		auto loss = EffectQueue::CreateEffect(fx_dcc_loss_ref, 1, static_cast<ieDword>(Ability::Per) | 0x100, FX_DURATION_INSTANT_PERMANENT);
+		loss->Target = FX_TARGET_PRESET;
+		core->ApplyEffect(std::move(loss), this, this);
+	}
 }
 
 }

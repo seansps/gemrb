@@ -43,12 +43,13 @@ constexpr ieDword FAKE_VARIABLE_OPCODE = 187;
 //   17 threat (0: 20), 18 action die (0: d20), 19 initiative modifier (signed),
 //   dying: 20-23 game time of death (ticks, 0: none), 24 body flags (1: rolled over),
 //   version 2 (M2.4): 25 Luck burn policy (DCC::BurnPolicy), 26 its Luck threshold, 27 Luck flags
-//   (DCC::LuckFlags), 28 signature deed, 29 queued one-off deed (DCC::Deed), 30-31 reserved
+//   (DCC::LuckFlags), 28 signature deed, 29 queued one-off deed (DCC::Deed),
+//   version 3 (M2.3b): 30 battle rage points, 31 combat options (DCC::CombatOption)
 // Creatures without the block get Luck 10 (modifier 0), no augur and no loss; as monsters, their
 // IE level stands in for HD and attack bonus (HD 255 marks that). Version 1 blocks and creatures
 // without one get the default Luck and deed settings.
 constexpr size_t DCC_BLOCK_SIZE = 32;
-constexpr ieByte DCC_BLOCK_VERSION = 2;
+constexpr ieByte DCC_BLOCK_VERSION = 3;
 constexpr ieDword DCC_DEFAULT_LUCK = 10;
 constexpr ieDword DCC_HD_FROM_LEVEL = 255; // no block: the IE level is the HD and the attack bonus
 
@@ -59,6 +60,8 @@ static void DefaultDCCSettings(Actor* act)
 	act->BaseStats[IE_DCC_LUCKFLAGS] = DCC::DEFAULT_LUCK_FLAGS;
 	act->BaseStats[IE_DCC_DEED] = static_cast<ieDword>(DCC::DEFAULT_SIGNATURE_DEED);
 	act->BaseStats[IE_DCC_NEXTDEED] = 0;
+	act->BaseStats[IE_DCC_RAGE] = 0;
+	act->BaseStats[IE_DCC_COMBATOPT] = 0;
 }
 
 static void ReadDCCBlock(DataStream* str, Actor* act)
@@ -97,6 +100,9 @@ static void ReadDCCBlock(DataStream* str, Actor* act)
 	act->BaseStats[IE_DCC_LUCKFLAGS] = block[27];
 	act->BaseStats[IE_DCC_DEED] = std::min<ieDword>(block[28], DCC::DEED_COUNT - 1);
 	act->BaseStats[IE_DCC_NEXTDEED] = std::min<ieDword>(block[29], DCC::DEED_COUNT - 1);
+	if (block[3] < 3) return;
+	act->BaseStats[IE_DCC_RAGE] = std::min<ieDword>(block[30], DCC::RAGE_MAX_SETTING);
+	act->BaseStats[IE_DCC_COMBATOPT] = block[31] & (DCC::OPT_CHARGE | DCC::OPT_GRAPPLE | DCC::OPT_SUBDUAL);
 }
 
 static void WriteDCCBlock(DataStream* stream, const Actor* act)
@@ -134,6 +140,8 @@ static void WriteDCCBlock(DataStream* stream, const Actor* act)
 	block[27] = byte(IE_DCC_LUCKFLAGS);
 	block[28] = byte(IE_DCC_DEED);
 	block[29] = byte(IE_DCC_NEXTDEED);
+	block[30] = byte(IE_DCC_RAGE);
+	block[31] = byte(IE_DCC_COMBATOPT);
 	stream->Write(block.data(), block.size());
 }
 

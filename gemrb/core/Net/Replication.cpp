@@ -428,6 +428,11 @@ NetGuiOpInfo NetGuiInfo(NetGuiOp op)
 			return { 0, 4, NetPermission::Control, "DCCSetLuckPolicy" };
 		case NetGuiOp::DCCSetDeeds:
 			return { 0, 3, NetPermission::Control, "DCCSetDeeds" };
+		// M2.3b: the combat options; rolling a body over is the host's roll, for the ally's owner
+		case NetGuiOp::DCCSetCombat:
+			return { 0, 3, NetPermission::Control, "DCCSetCombat" };
+		case NetGuiOp::DCCRecoverBody:
+			return { 1, 2, NetPermission::Control, "DCCRecoverBody", true };
 		default:
 			return {};
 	}

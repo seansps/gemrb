@@ -238,6 +238,7 @@ IF (BUILD_TESTING)
     tests/core/DCC/Test_Character.cpp
     tests/core/DCC/Test_Classes.cpp
     tests/core/DCC/Test_Combat.cpp
+    tests/core/DCC/Test_CombatRules.cpp
     tests/core/DCC/Test_CombatTables.cpp
     tests/core/DCC/Test_Deeds.cpp
     tests/core/DCC/Test_DiceChain.cpp

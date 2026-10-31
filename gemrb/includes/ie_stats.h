@@ -618,7 +618,17 @@ namespace GemRB {
 #define IE_DCC_LUCKFLAGS  302 // DCC::LuckFlags: 1 pause and ask on key rolls, 2 halflings burn for allies
 #define IE_DCC_DEED       303 // the signature deed (DCC::Deed), warriors and dwarves
 #define IE_DCC_NEXTDEED   304 // a one-off deed for the next attack (DCC::Deed), cleared when declared
-#define IE_DCC_LAST       304
+// combat completion (M2.3b): set by DCC:Combat effects while they last (modified only)
+#define IE_DCC_INJURY     305 // lasting injuries (DCC::Injury bits)
+#define IE_DCC_ACTLIMIT   306 // fewer actions (DCC::ACTIONS_HALVED, ACTIONS_ONE)
+#define IE_DCC_FOULED     307 // inventory slot + 1 of a fouled weapon (fumble 4)
+#define IE_DCC_STAND      308 // down or stuck until a check against this DC
+#define IE_DCC_PINNED     309 // held in a grapple by the creature with this global ID
+#define IE_DCC_SUBDUED    310 // knocked out by subdual damage
+// the CRE's DCC block, version 3 (base, saved): battle rage and the combat options
+#define IE_DCC_RAGE       311 // Personality/Intelligence points spent on a battle rage crit
+#define IE_DCC_COMBATOPT  312 // DCC::CombatOption bits: next attack a charge or a grapple, subdual blows
+#define IE_DCC_LAST       312
 
 }
 

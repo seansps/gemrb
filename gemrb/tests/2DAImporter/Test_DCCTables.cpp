@@ -460,9 +460,13 @@ TEST(DCC_Tables, CritAndFumbleKeysKnown)
 	static const std::set<std::string> known { "NONE", "DMG", "PRONE", "NOATTACK", "INITBOTTOM", "STUN", "BLIND", "DEAF", "MUTE", "UNCON",
 						   "PARALYZE", "HELD", "SPEED", "ATK", "AC", "NEXTATK", "ENEMYBONUS", "DIEIN", "DIE", "HALFHP",
 						   "ABIL", "DISARM", "DISARMSELF", "SUNDER", "SUNDERSELF", "SHIELD", "WEAPONDMG", "ALLY", "SELF",
-						   "SELFHIT", "HITALLY", "DELAYDMG", "EXTRA", "TODO" };
+						   "SELFHIT", "HITALLY", "DELAYDMG", "EXTRA", "TODO",
+						   // M2.3b
+						   "INJURY", "RAGE", "HALFACT", "ONEACTION", "FOUL", "DOWNED", "STUCK", "WOUND", "CHOKE", "NUMB",
+						   "HALFDMG", "DOUBLEDMG", "SLEEP", "ROLLMOD", "MAXHP", "XP", "REROLL", "ABILTO", "LIMBS", "SMASHGEAR",
+						   "FLING", "CLEAVE", "RAMPAGE", "AGAIN", "MORALECHECK", "DRAIN", "ATTACKER" };
 	static const std::set<std::string> conditions { "", "NOHELM", "NOSHIELD", "ARMORED", "HASWEAPON" };
-	for (const char* name : { "dcccrit1", "dcccrit2", "dcccrit3", "dcccrit4", "dcccrit5", "dcccritm", "dccfumbl" }) {
+	for (const char* name : { "dcccrit1", "dcccrit2", "dcccrit3", "dcccrit4", "dcccrit5", "dcccritm", "dccfumbl", "dcccritd", "dcccritn", "dcccritg", "dcccritu" }) {
 		auto table = Open2DA(name);
 		ASSERT_TRUE(table);
 		ResultTable results;
@@ -475,6 +479,10 @@ TEST(DCC_Tables, CritAndFumbleKeysKnown)
 					if (term.key == "STUN" || term.key == "PRONE" || term.key == "BLIND" || term.key == "UNCON" || term.key == "DIEIN") {
 						Duration duration;
 						EXPECT_TRUE(ParseDuration(term.args.empty() ? "" : term.args[0], duration)) << name << " " << roll;
+					}
+					if (term.key == "INJURY") {
+						ASSERT_FALSE(term.args.empty());
+						EXPECT_NE(ParseInjury(term.args[0]), INJ_NONE) << name << " " << roll << ": " << term.args[0];
 					}
 				}
 			}
@@ -509,6 +517,204 @@ TEST(DCC_Tables, CritSpotChecks)
 	EXPECT_EQ(fumbles.Lookup(12)->effects[0][0].key, "HITALLY");
 	EXPECT_EQ(fumbles.Lookup(-2)->roll, 0);
 	EXPECT_EQ(fumbles.Lookup(20)->roll, 16); // 16+
+}
+
+// --- combat completion (M2.3b): the monster tables DR, DN, G and U (crits-fumbles.md), and what
+// the crit and fumble tables now express instead of their old TODO notes
+
+TEST(DCC_Tables, CritTableDR)
+{
+	ExpectDice("dcccritd", 1, { "1d6", "", "", "", "", "2d6", "1d8", "1d12", "", "", "", "1d10", "1d12", "", "2d12", "3d6", "2d6", "1d6", "1d16", "",
+				    "2d8", "1d8", "", "1d16", "", "", "", "", "", "" });
+}
+
+TEST(DCC_Tables, CritTableDN)
+{
+	ExpectDice("dcccritn", 1, { "1d8", "", "1d10", "", "", "", "", "", "", "", "", "", "", "", "", "" });
+}
+
+TEST(DCC_Tables, CritTableG)
+{
+	ExpectDice("dcccritg", 1, { "1d8", "1d10", "1d10", "1d12", "1d12", "", "2d6", "1d8", "1d8", "2d8", "", "" });
+}
+
+TEST(DCC_Tables, CritTableU)
+{
+	ExpectDice("dcccritu", 1, { "", "1d4", "1d4", "", "", "", "1d8", "", "", "", "1d10", "", "1d8", "", "", "2d6", "", "", "", "1d6", "", "2d6", "", "1d12", "1d6",
+				    "", "1d20", "", "2d12", "" });
+}
+
+TEST(DCC_Tables, MonsterCritSaves)
+{
+	struct Expected {
+		const char* table;
+		int roll;
+		int ability; // -1: a save
+		Save save;
+		int dc;
+		bool plusLevel;
+	};
+	const Expected saves[] = {
+		{ "dcccritd", 4, static_cast<int>(Ability::Str), Save::Fort, 10, true }, // opposed Str vs the dragon's 10 + HD
+		{ "dcccritd", 13, -1, Save::Will, 10, true }, { "dcccritd", 19, -1, Save::Fort, 15, true },
+		{ "dcccritu", 4, -1, Save::Fort, 15, false }, { "dcccritu", 6, -1, Save::Fort, 10, false }, { "dcccritu", 10, -1, Save::Fort, 16, false },
+		{ "dcccritu", 12, -1, Save::Fort, 16, false }, { "dcccritu", 14, -1, Save::Fort, 12, false }, { "dcccritu", 16, -1, Save::Fort, 16, false },
+	};
+	for (const auto& expected : saves) {
+		auto table = Open2DA(expected.table);
+		ASSERT_TRUE(table);
+		ResultTable results;
+		ASSERT_TRUE(results.Load(*table));
+		const ResultRow* row = results.Lookup(expected.roll);
+		ASSERT_TRUE(row);
+		EXPECT_EQ(row->save.ability, expected.ability) << expected.table << " " << expected.roll;
+		if (expected.ability < 0) EXPECT_EQ(row->save.save, expected.save) << expected.table << " " << expected.roll;
+		EXPECT_EQ(row->save.dc, expected.dc) << expected.table << " " << expected.roll;
+		EXPECT_EQ(row->save.plusLevel, expected.plusLevel) << expected.table << " " << expected.roll;
+	}
+}
+
+static ResultTable LoadResults(const char* name)
+{
+	ResultTable results;
+	auto table = Open2DA(name);
+	if (table) results.Load(*table);
+	return results;
+}
+
+static bool HasKey(const ResultRow* row, const std::string& key, const std::string& arg0 = std::string())
+{
+	if (!row) return false;
+	for (const auto& alternatives : row->effects) {
+		for (const auto& term : alternatives) {
+			if (term.key == key && (arg0.empty() || (!term.args.empty() && term.args[0] == arg0))) return true;
+		}
+	}
+	return false;
+}
+
+TEST(DCC_Tables, CompletedCritsAndFumbles)
+{
+	ResultTable one = LoadResults("dcccrit1");
+	EXPECT_TRUE(HasKey(one.Lookup(6), "EXTRA")); // free attack while it stoops for its weapon
+	EXPECT_TRUE(HasKey(one.Lookup(15), "DISARM", "1d10+5")); // knocked 1d10+5' away
+	ResultTable two = LoadResults("dcccrit2");
+	EXPECT_TRUE(HasKey(two.Lookup(6), "HALFACT"));
+	EXPECT_TRUE(HasKey(two.Lookup(16), "INJURY", "EYE"));
+	EXPECT_TRUE(HasKey(two.Lookup(17), "ONEACTION"));
+	ResultTable three = LoadResults("dcccrit3");
+	EXPECT_TRUE(HasKey(three.Lookup(0), "RAGE"));
+	EXPECT_TRUE(HasKey(three.Lookup(5), "INJURY", "SMELL"));
+	EXPECT_TRUE(HasKey(three.Lookup(7), "DISARM", "1d20+5"));
+	EXPECT_TRUE(HasKey(three.Lookup(22), "INJURY", "ARMUSELESS"));
+	ResultTable four = LoadResults("dcccrit4");
+	EXPECT_TRUE(HasKey(four.Lookup(2), "INJURY", "HAND"));
+	EXPECT_TRUE(HasKey(four.Lookup(12), "RAGE"));
+	EXPECT_TRUE(HasKey(four.Lookup(18), "INJURY", "AMNESIA"));
+	ResultTable five = LoadResults("dcccrit5");
+	EXPECT_TRUE(HasKey(five.Lookup(2), "FLING"));
+	for (int roll = 8; roll <= 12; ++roll) {
+		EXPECT_TRUE(HasKey(five.Lookup(roll), "RAGE")) << roll;
+	}
+	EXPECT_TRUE(HasKey(five.Lookup(20), "INJURY", "SHIELDARM"));
+	EXPECT_TRUE(HasKey(five.Lookup(21), "CLEAVE"));
+	EXPECT_TRUE(HasKey(five.Lookup(24), "INJURY", "ARM"));
+	EXPECT_TRUE(HasKey(five.Lookup(28), "RAMPAGE"));
+	ResultTable monsters = LoadResults("dcccritm");
+	EXPECT_TRUE(HasKey(monsters.Lookup(4), "DISARM", "1d12+5"));
+	EXPECT_TRUE(HasKey(monsters.Lookup(8), "INJURY", "ARMUSELESS"));
+	EXPECT_TRUE(HasKey(monsters.Lookup(30), "RAMPAGE"));
+	ResultTable fumbles = LoadResults("dccfumbl");
+	EXPECT_TRUE(HasKey(fumbles.Lookup(4), "FOUL", "1T")); // useless for 10 minutes
+	EXPECT_TRUE(HasKey(fumbles.Lookup(16), "DOWNED", "16")); // DC 16 Agility check to stand
+	// nothing on I-V, M or the fumble table is only a note any more
+	for (const char* name : { "dcccrit1", "dcccrit2", "dcccrit3", "dcccrit4", "dcccrit5", "dcccritm", "dccfumbl" }) {
+		ResultTable results = LoadResults(name);
+		for (int roll = results.MinRoll(); roll <= results.MaxRoll(); ++roll) {
+			EXPECT_FALSE(HasKey(results.Lookup(roll), "TODO")) << name << " " << roll;
+		}
+	}
+	// spot checks on the monster tables
+	ResultTable dragons = LoadResults("dcccritd");
+	EXPECT_TRUE(HasKey(dragons.Lookup(15), "STUCK", "AGI"));
+	EXPECT_TRUE(HasKey(dragons.Lookup(27), "DIE"));
+	EXPECT_EQ(dragons.Lookup(40)->roll, 30); // 30+
+	ResultTable demons = LoadResults("dcccritn");
+	EXPECT_TRUE(HasKey(demons.Lookup(2), "MAXHP", "2"));
+	EXPECT_TRUE(HasKey(demons.Lookup(16), "DIE", "GONE"));
+	ResultTable giants = LoadResults("dcccritg");
+	EXPECT_TRUE(HasKey(giants.Lookup(11), "AGAIN", "2"));
+	EXPECT_TRUE(HasKey(giants.Lookup(12), "AGAIN", "3"));
+	EXPECT_EQ(giants.Lookup(-3)->roll, 1); // 1 or less
+	ResultTable undead = LoadResults("dcccritu");
+	EXPECT_TRUE(HasKey(undead.Lookup(22), "WOUND", "1d6"));
+	EXPECT_TRUE(HasKey(undead.Lookup(27), "DRAIN"));
+}
+
+// weapon training by class (classes.md), subdual weapons and backstab damage (equipment.md)
+TEST(DCC_Tables, Weapons)
+{
+	auto table = Open2DA("dccweap");
+	ASSERT_TRUE(table);
+	WeaponTable weapons;
+	ASSERT_TRUE(weapons.Load(*table));
+	auto trained = [&weapons](const char* key, WeaponClass which) {
+		const WeaponRow* row = weapons.Find(key);
+		return row && row->Trained(which);
+	};
+	struct ClassWeapons {
+		WeaponClass which;
+		std::vector<const char*> weapons;
+	};
+	const ClassWeapons lists[] = {
+		{ WeaponClass::Wizard, { "DAGGER", "LONGBOW", "LONGSWORD", "SHORTBOW", "SHORT_SWORD", "STAFF" } },
+		{ WeaponClass::Thief, { "BLACKJACK", "BLOWGUN", "CROSSBOW", "DAGGER", "DART", "GARROTE", "LONGSWORD", "SHORT_SWORD", "SLING", "STAFF" } },
+		{ WeaponClass::Warrior, { "BATTLEAXE", "CLUB", "CROSSBOW", "DAGGER", "DART", "FLAIL", "HANDAXE", "JAVELIN", "LANCE", "LONGBOW", "LONGSWORD", "MACE", "POLEARM",
+					  "SHORTBOW", "SHORT_SWORD", "SLING", "SPEAR", "STAFF", "TWO_HANDED_SWORD", "WARHAMMER" } },
+		{ WeaponClass::Dwarf, { "BATTLEAXE", "CLUB", "DAGGER", "HANDAXE", "LONGSWORD", "MACE", "SHORT_SWORD", "SPEAR", "TWO_HANDED_SWORD", "WARHAMMER", "CROSSBOW",
+					"JAVELIN", "SHORTBOW", "SLING" } },
+		{ WeaponClass::Elf, { "DAGGER", "JAVELIN", "LANCE", "LONGBOW", "LONGSWORD", "SHORTBOW", "SHORT_SWORD", "STAFF", "SPEAR", "TWO_HANDED_SWORD" } },
+		{ WeaponClass::Halfling, { "CLUB", "CROSSBOW", "DAGGER", "HANDAXE", "JAVELIN", "SHORTBOW", "SHORT_SWORD", "SLING", "STAFF" } },
+		{ WeaponClass::ClericLaw, { "CLUB", "MACE", "SLING", "STAFF", "WARHAMMER" } },
+		{ WeaponClass::ClericNeutral, { "DAGGER", "MACE", "SLING", "STAFF", "LONGSWORD", "SHORT_SWORD", "TWO_HANDED_SWORD" } },
+		{ WeaponClass::ClericChaos, { "BATTLEAXE", "HANDAXE", "LONGBOW", "SHORTBOW", "DAGGER", "DART", "FLAIL" } },
+	};
+	// the 23 weapons of Table 3-1: trained exactly in the listed ones
+	const char* const table31[] = { "BATTLEAXE", "BLACKJACK", "BLOWGUN", "CLUB", "CROSSBOW", "DAGGER", "DART", "FLAIL", "GARROTE", "HANDAXE", "JAVELIN", "LANCE",
+					"LONGBOW", "LONGSWORD", "MACE", "POLEARM", "SHORTBOW", "SHORT_SWORD", "SLING", "SPEAR", "STAFF", "TWO_HANDED_SWORD", "WARHAMMER" };
+	for (const auto& list : lists) {
+		for (const char* weapon : table31) {
+			bool listed = std::find_if(list.weapons.begin(), list.weapons.end(), [weapon](const char* w) { return std::string(w) == weapon; }) != list.weapons.end();
+			EXPECT_EQ(trained(weapon, list.which), listed) << WeaponClassKey(list.which) << " " << weapon;
+		}
+		EXPECT_TRUE(trained("UNARMED", list.which));
+	}
+	// subdual: swords, axes, clubs, spears and staves; the blackjack and fists always
+	for (const char* weapon : { "BATTLEAXE", "HANDAXE", "CLUB", "LONGSWORD", "SHORT_SWORD", "TWO_HANDED_SWORD", "SPEAR", "STAFF" }) {
+		EXPECT_EQ(weapons.Find(weapon)->subdual, Subdual::Possible) << weapon;
+	}
+	for (const char* weapon : { "DAGGER", "MACE", "WARHAMMER", "FLAIL", "POLEARM", "LANCE", "JAVELIN", "CROSSBOW", "SHORTBOW", "LONGBOW", "SLING", "DART" }) {
+		EXPECT_EQ(weapons.Find(weapon)->subdual, Subdual::Never) << weapon;
+	}
+	EXPECT_EQ(weapons.Find("BLACKJACK")->subdual, Subdual::Always);
+	EXPECT_EQ(weapons.Find("UNARMED")->subdual, Subdual::Always);
+	// backstab damage (the second value of Table 3-1)
+	auto backstab = [&weapons](const char* key) { return DiceString(weapons.Find(key)->backstab); };
+	EXPECT_EQ(backstab("DAGGER"), "1d10");
+	EXPECT_EQ(backstab("BLACKJACK"), "2d6");
+	EXPECT_EQ(backstab("BLOWGUN"), "1d5");
+	EXPECT_EQ(backstab("GARROTE"), "3d4");
+	EXPECT_TRUE(weapons.Find("LONGSWORD")->backstab.IsNone());
+	// IE items: by item type and hands, resref rows first
+	EXPECT_EQ(weapons.Lookup("SW1H01", 20, false)->key, "LONGSWORD");
+	EXPECT_EQ(weapons.Lookup("SW2H01", 20, true)->key, "TWO_HANDED_SWORD");
+	EXPECT_EQ(weapons.Lookup("AX1H01", 25, false)->key, "HANDAXE");
+	EXPECT_EQ(weapons.Lookup("AX1H02", 25, true)->key, "BATTLEAXE");
+	EXPECT_EQ(weapons.Lookup("BOW01", 15, true)->key, "SHORTBOW"); // a bow is a shortbow unless named
+	EXPECT_EQ(weapons.Lookup("DCCLBOW", 15, true)->key, "LONGBOW");
+	EXPECT_EQ(weapons.Lookup("DCCBJACK", 44, false)->key, "BLACKJACK");
+	EXPECT_EQ(weapons.Lookup("FIST", 28, false)->key, "UNARMED");
+	EXPECT_EQ(weapons.Lookup("WHATEVER", 99, false), nullptr);
 }
 
 TEST(DCC_Tables, MonsterCritMatrix)

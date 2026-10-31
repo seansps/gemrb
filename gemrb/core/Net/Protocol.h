@@ -31,7 +31,7 @@
 namespace GemRB {
 
 constexpr uint8_t NET_MAGIC = 0xE7;
-constexpr uint8_t NET_PROTOCOL_VERSION = 9;
+constexpr uint8_t NET_PROTOCOL_VERSION = 10;
 constexpr uint16_t NET_DEFAULT_PORT = 27015;
 constexpr size_t NET_HEADER_SIZE = 3;
 constexpr size_t NET_MAX_STRING = 1024;
@@ -672,6 +672,8 @@ enum class NetGuiOp : uint8_t {
 	SetMapnote, // x, y, color (text: the note, empty removes it)
 	DCCSetLuckPolicy, // actor, policy, threshold, flags (v9)
 	DCCSetDeeds, // actor, signature deed, one-off deed (v9)
+	DCCSetCombat, // actor, combat options, battle rage points (v10)
+	DCCRecoverBody, // dead party slot, ally party slot (v10; host only)
 	count
 };
 

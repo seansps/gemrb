@@ -180,6 +180,11 @@ void Actor::RefreshDCCStats(const stats_t& previous)
 
 	// ascending AC from the stock AC (natural, armor, shield and magic; no dex or wisdom here)
 	int armor = IsReverseToHit() ? BonusFromIEAC(AC.GetTotal()) : AC.GetTotal() - 10;
+	// a severed shield arm: a shield in hand gives nothing (its +1, Table 3-3)
+	if (InjuryBlocksShield(Modified[IE_DCC_INJURY]) && !IsDualWielding()) {
+		int shieldSlot = inventory.GetShieldSlot();
+		if (shieldSlot >= 0 && inventory.GetSlotItem(shieldSlot)) armor -= 1;
+	}
 	Modified[IE_DCC_AC] = Signed(Modified[IE_DCC_AC]) + DCC::ArmorClass(armor, mod(Ability::Agi), GetDCCAugurBonus(AugurRoll::ArmorClass));
 
 	int warriorLevel = BaseStats[IE_CLASS] == static_cast<ieDword>(ClassID::Warrior) ? Signed(BaseStats[IE_LEVEL]) : 0;
@@ -451,7 +456,9 @@ int Actor::DCCLevelUp(int classID, const Roller* roller)
 
 void Actor::DCCRestHeal(bool bedRest)
 {
-	// crit injuries that last "until healed" heal with a night's rest (Ethren decision)
+	// injuries that get worse overnight (infection, rot), then the ones that last "until healed"
+	// heal with a night's rest (Ethren decision)
+	DCCNightlyInjuries();
 	fxqueue.RemoveAllEffects(ResRef("DCCHEAL"));
 	for (int i = 0; i < ABILITY_COUNT; ++i) {
 		Ability ability = static_cast<Ability>(i);

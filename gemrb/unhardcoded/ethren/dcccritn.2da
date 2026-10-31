@@ -1,0 +1,19 @@
+2DA V1.0
+*
+     DICE   EFFECTS                               SAVE   TEXT
+1    1d8    *                                     *      piercing_blow
+2    *      MAXHP:2                               *      life_burn
+3    1d10   *                                     *      head_strike
+4    *      MAXHP:4                               *      major_life_burn
+5    *      TODO:CORRUPTION                       *      corruption
+6    *      TODO:AGING                            *      aged
+7    *      ABIL:RND5:1d4:1W                      *      infernal_weakening
+8    *      XP:1                                  *      soul_wound
+9    *      REROLL:INT,REROLL:PER,REROLL:LCK      *      soul_traded
+10   *      TODO:DOUBLE_CORRUPTION                *      double_corruption
+11   *      ABIL:RND5:1:PERM                      *      lasting_infernal_weakening
+12   *      ABIL:LCK:1                            *      bad_luck
+13   *      XP:3                                  *      severe_soul_wound
+14   *      UNCON:PERM                            *      soul_adrift_on_the_astral_plane
+15   *      SPEED:ZERO:PERM                       *      confined_in_a_circle_of_flame
+16   *      DIE:GONE                              *      banished_to_its_plane

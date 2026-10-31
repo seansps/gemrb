@@ -1,0 +1,15 @@
+2DA V1.0
+*
+     DICE   EFFECTS                                           SAVE   TEXT
+1    1d8    *                                                 *      spine_compressed
+2    1d10   ABIL:STR:1:PERM,INJURY:ARMUSELESS:HEAL            *      arm_broken
+3    1d10   SPEED:-5:PERM,SPEED:HALF:HEAL                     *      leg_broken
+4    1d12   INJURY:CHEST:HEAL                                 *      chest_caved_in
+5    1d12   ABIL:STA:1:PERM                                   *      flattened
+6    *      FLING:3d30:RICOCHET                               *      ricochet
+7    2d6    ABIL:INT:1:PERM                                   *      colossal_head_strike
+8    1d8    SMASHGEAR                                         *      weapons_and_gear_smashed
+9    1d8    PRONE:1,RAMPAGE:5:4:TARGET                        *      sweeping_blow
+10   2d8    SPEED:-10:PERM,ABIL:AGI:1:PERM,SPEED:-29:HEAL     *      driven_into_the_ground
+11   *      AGAIN:2                                           *      two_more_blows
+12   *      AGAIN:3                                           *      three_more_blows
