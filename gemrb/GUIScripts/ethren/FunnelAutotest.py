@@ -58,6 +58,9 @@
 #      the spear from the five drawn facings; every hair style and beard on its rig; each helmet over long and short
 #      hair; the ten hair colours; the items' own colours on their overlays; the stance files and colour bytes
 #      checked, screenshots looks2_*.bmp
+# Phase 4 (areas), only when asked (--scenario area):
+#   j. area: Delmord's western edge (DL0100, tools/area_builder): the party moves there; peasants behind and in
+#      front of the hall and two oaks; the hall door opened; night (the night tiles); screenshots area_*.bmp
 # Every check logs "[FNT] ok ..." or "[FNT] FAIL ...", the end "[FNT] autotest done: N checks,
 # F failed"; FNT_AT_DONE becomes 1 if all passed, 2 if not.
 
@@ -1036,6 +1039,58 @@ def _Travel ():
 	_Check ("travel: Player16 there (the area script saw it)", GemRB.GetGameVar ("FNT_CAVE"), 1)
 	_Log ("arrival: " + " ".join ("%d,%d" % (p["X"], p["Y"]) for p in where))
 
+# --- Phase 4: an area from tools/area_builder (area) -----------------------------------------------
+
+# DL0100's walkable spots just behind (above the behind-line) and just in front of a walk-behind unit,
+# picked from the built search map and polygons: the hall, the oak left of the road, the oak below it
+AREA_SPOTS = (("hall_behind", 1448, 80), ("hall_front", 1064, 728), ("oak_behind", 104, 416),
+	("oak_front", 200, 668), ("oak2_behind", 440, 980), ("oak2_front", 280, 1256))
+AREA_DOOR = (870, 656) # outside the hall door (its ARE approach point)
+
+def _AreaShot (name, center):
+	path = GemRB.GetSystemVariable (SV_SAVEPATH) + "/area_%s.bmp" % name
+	_Check ("screenshot area %s" % name, GemRB.SaveScreenshot (path, center), True)
+
+def _Area ():
+	"""j: the party on Delmord's western edge (DL0100): walk-behind, the hall door and night, as GemRB
+	draws the area tools/area_builder made"""
+	living = [pc for pc in range (1, 17) if not _Dead (pc)]
+	for i, pc in enumerate (living):
+		row, column = divmod (i, 4)
+		GemRB.ClearActions (pc)
+		GemRB.ExecuteString ("MoveBetweenAreas(\"DL0100\",[%d.%d],0)" % (1300 + column * 40, 860 + row * 30), pc)
+	yield from _Wait (lambda: all (p["Area"].lower () == "dl0100" for p in _Positions (living)), 40)
+	_Check ("area: the party on Delmord's western edge", sorted (set (p["Area"].lower () for p in _Positions (living))), ["dl0100"])
+	GemRB.ExploreArea () # no fog of war in the screenshots
+	for pc, (name, x, y) in zip (living, AREA_SPOTS):
+		_Put (pc, x, y)
+	for i in range (4):
+		yield
+	where = _Positions (living[:len (AREA_SPOTS)])
+	_Check ("area: everyone stands where put (walkable spots)", [(p["X"], p["Y"]) for p in where], [(x, y) for name, x, y in AREA_SPOTS])
+	for pc, (name, x, y) in zip (living, AREA_SPOTS):
+		if name.endswith ("behind"):
+			_AreaShot (name[:-7], pc)
+	door = living[len (AREA_SPOTS)]
+	_Put (door, *AREA_DOOR)
+	for i in range (2):
+		yield
+	_AreaShot ("door_closed", door)
+	_Check ("area: the hall door starts closed", GemRB.EvaluateString ("OpenState(\"HallDoor\",0)", True), True)
+	GemRB.ExecuteString ("OpenDoor(\"HallDoor\")", door)
+	yield from _Wait (lambda: GemRB.EvaluateString ("OpenState(\"HallDoor\",1)", True), 40)
+	_Check ("area: a peasant opens it", GemRB.EvaluateString ("OpenState(\"HallDoor\",1)", True), True)
+	yield
+	_AreaShot ("door_open", door)
+	GemRB.ExecuteString ("DayNight(23)")
+	for i in range (4):
+		yield
+	_Check ("area: night (hour 23)", (GemRB.GetGameTime () // 300) % 24, 23)
+	_AreaShot ("night_hall", living[1])
+	_AreaShot ("night_door", door)
+	GemRB.ExecuteString ("DayNight(12)")
+	yield
+
 # --- M3.2: the roster ----------------------------------------------------------------------------
 
 def _ShotScreen (name, center = 0):
@@ -1436,6 +1491,7 @@ SCENARIOS = (
 	("linetravel", _LineTravel), # c
 	("sprites", _Sprites), # M2.11: the peasant sprites, with screenshots
 	("looks2", _Looks2), # S3/S4: weapon, shield, helmet, hair and beard overlays on both rigs, with screenshots
+	("area", _Area), # j (Phase 4): Delmord's western edge from tools/area_builder; only when asked (OPT_IN)
 	("classpicks", _ClassPicks), # 5
 	("skills", _Skills), # M3.4: occupation skills: checks from Python, the world, a dialog; Luck; the sheet
 	("prompts", _Prompts), # 6
@@ -1456,13 +1512,15 @@ NEEDS = {
 	"choose": ["rolling"],
 	"reserves": ["rolling", "choose"],
 }
+# not part of a full run: they leave the party in another area, at night
+OPT_IN = {"area"}
 Picked = None
 
 def _PickScenarios ():
 	global Picked, Failures
 	names = [name for name, run in SCENARIOS]
 	if not GemRB.GetGameVar ("AT_ONLY"):
-		Picked = set (names)
+		Picked = set (names) - OPT_IN
 		return
 	asked = [name for name in names if GemRB.GetGameVar ("AT_" + name.upper ())]
 	if not asked:
