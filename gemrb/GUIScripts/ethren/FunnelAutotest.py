@@ -165,6 +165,7 @@ def _Party ():
 	# weapon slot was the fists until the engine lined it up with the equipped weapon)
 	unarmed = [(pc, _SwungItem (pc)) for pc in range (1, size + 1) if GemRB.GetDCCFunnel (pc)["Occupation"]["Weapon"] and _SwungItem (pc) != GemRB.GetDCCFunnel (pc)["Occupation"]["Weapon"]]
 	_Check ("everyone swings its occupation's weapon", unarmed, [])
+	_HeldStances ()
 	yield
 
 	# 2: the roster: sixteen slots; one, a toggle, everyone
@@ -796,6 +797,25 @@ def _ExpectedSummary ():
 	dying = sum (1 for pc in range (1, 17) if not _Dead (pc) and GemRB.GetPlayerStat (pc, IE_DCC_BLEED) > 0)
 	text = "Alive %d of 16" % (16 - dead - dying)
 	return text + (", %d dying" % dying if dying else "") + (", %d dead" % dead if dead else "")
+
+def _HeldStances ():
+	"""a weapon held in both hands though one-handed in DCC (dcchold.2da; the autotest's copy lists
+	FNTSPEAR): Wyn's spear takes the two-handed stances with her off hand free, its ITM's 100% thrust
+	picking the two-handed jab (A6); the rules still see a one-handed weapon (d20 initiative). A club
+	keeps the one-handed files"""
+	wyn = _Slot ("fntwyn")
+	stats = GemRB.GetDCCStats (wyn)
+	files = stats["StanceFiles"]
+	_Log ("held stances: Wyn %s %s %s" % (stats["WeaponAnim"], stats["AttackWeights"], files))
+	_Check ("held: the spear in both hands (two-handed animation, ITM weights all thrust)", [stats["WeaponAnim"], stats["AttackWeights"]], [1, [0, 0, 100]])
+	_Check ("held: ready is G13, the thrust A6 (body and overlay)", [files["Ready"][0][-3:].upper (), files["Ready"][1].upper (), files["Thrust"][0][-2:].upper (), files["Thrust"][1].upper ()], ["G13", "G1", "A6", "A6"])
+	spear = GemRB.GetSlotItem (wyn, GemRB.GetCombatDetails (wyn, 0)["Slot"], 1)
+	_Check ("held: the rules see a one-handed spear (no two-handed flag: d20 initiative, a shield allowed)", [spear["ItemResRef"].lower (), bool (spear["Flags"] & 0x200)], ["fntspear", False])
+	# a one-handed weapon not in the table: the one-handed files
+	club = [pc for pc in range (1, GemRB.GetPartySize () + 1) if _SwungItem (pc) == "fntclub"]
+	if club:
+		other = GemRB.GetDCCStats (club[0])
+		_Check ("held: a club stays one-handed (G1, A1 A3 A5)", [other["WeaponAnim"], other["StanceFiles"]["Ready"][0][-2:].upper (), [other["StanceFiles"][s][0][-2:].upper () for s in ("Backhand", "Overhand", "Thrust")]], [0, "G1", ["A1", "A3", "A5"]])
 
 def _RosterIsParty (what):
 	"""the roster's tiles are the party as it is: one tile per member (no stale ones from a bigger

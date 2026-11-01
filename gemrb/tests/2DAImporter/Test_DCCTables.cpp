@@ -1087,6 +1087,29 @@ TEST(DCC_Tables, GodsAndEquipment)
 	EXPECT_EQ(equip->QueryField(equip->GetRowIndex("14"), equip->GetColumnIndex("NAME")), "Lantern");
 }
 
+// weapons held in both hands though one-handed in DCC (dcchold.2da): the staff and pole, the spear, the
+// pitchfork and the shovel by their animation codes (art/sprites/engine_rows.md); none of the true
+// two-handed weapons, which go by the ITM's flag, and none that dccweap.2da makes two-handed
+TEST(DCC_Tables, HeldInBothHands)
+{
+	auto table = Open2DA("dcchold");
+	ASSERT_TRUE(table);
+	HeldTable held;
+	ASSERT_TRUE(held.Load(*table));
+	for (const char* code : { "QS", "SP", "PF", "SV" }) {
+		EXPECT_TRUE(held.BothHands("", code)) << code;
+	}
+	for (const char* code : { "CL", "DD", "KN", "SS", "S1", "AX", "MC", "BA", "S2", "PL", "BW", "LB", "CB" }) {
+		EXPECT_FALSE(held.BothHands("", code)) << code;
+	}
+	auto weapons = Open2DA("dccweap");
+	ASSERT_TRUE(weapons);
+	auto hands = weapons->GetColumnIndex("HANDS");
+	for (const char* weapon : { "STAFF", "SPEAR" }) {
+		EXPECT_NE(weapons->QueryField(weapons->GetRowIndex(std::string(weapon)), hands), "2") << weapon; // one-handed for the rules
+	}
+}
+
 // M2.11: the hair and beard overlays (dcchair.2da), the walk speeds (moverate.2da) and the avatars
 TEST(DCC_Tables, Looks)
 {

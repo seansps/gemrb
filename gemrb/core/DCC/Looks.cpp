@@ -4,6 +4,7 @@
 
 #include "DCC/Looks.h"
 
+#include "CharAnimations.h"
 #include "TableMgr.h"
 
 #include <algorithm>
@@ -87,6 +88,52 @@ unsigned int OverlayColourByte(unsigned int paletteType)
 bool CombatStance(bool engaged, bool partyFight)
 {
 	return engaged || partyFight;
+}
+
+static std::string Upper(std::string text)
+{
+	std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return std::toupper(c); });
+	return text;
+}
+
+bool HeldTable::Load(const TableMgr& table)
+{
+	rows.clear();
+	TableMgr::index_t hands = table.GetColumnIndex("HANDS");
+	if (hands == TableMgr::npos) return false;
+	for (TableMgr::index_t r = 0; r < table.GetRowCount(); ++r) {
+		const std::string& value = table.QueryField(r, hands);
+		if (value != "1" && value != "2") return false;
+		const std::string& key = table.GetRowName(r);
+		if (key.empty() || key.size() > 8) return false;
+		Set(key, value == "2");
+	}
+	return true;
+}
+
+void HeldTable::Set(const std::string& key, bool bothHands)
+{
+	rows[Upper(key)] = bothHands;
+}
+
+bool HeldTable::BothHands(const std::string& resref, const std::string& animCode) const
+{
+	if (!resref.empty()) {
+		auto row = rows.find(Upper(resref));
+		if (row != rows.end()) return row->second;
+	}
+	std::string code = Code(animCode);
+	if (code.size() != 2) return false;
+	auto row = rows.find(code);
+	return row != rows.end() && row->second;
+}
+
+unsigned char WeaponAnimType(bool twoHandedFlag, bool heldInBothHands, OffHand offHand)
+{
+	if (twoHandedFlag) return IE_ANI_WEAPON_2H;
+	if (offHand == OffHand::Weapon) return IE_ANI_WEAPON_2W;
+	if (offHand == OffHand::Empty && heldInBothHands) return IE_ANI_WEAPON_2H;
+	return IE_ANI_WEAPON_1H;
 }
 
 }

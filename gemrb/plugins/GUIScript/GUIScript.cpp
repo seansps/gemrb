@@ -7054,6 +7054,30 @@ static PyObject* GemRB_GetDCCStats(PyObject* /*self*/, PyObject* args)
 	PyDict_SetItemString(dict, "HairOverlay", DecRef(PyString_FromString, looks ? looks->GetHairRef().c_str() : ""));
 	PyDict_SetItemString(dict, "BeardOverlay", DecRef(PyString_FromString, looks ? looks->GetBeardRef().c_str() : ""));
 	DictInt(dict, "Stance", actor->GetStance());
+	// the weapon's animation: its type (0 one-handed, 1 two-handed, 2 two weapons; a weapon held in
+	// both hands, dcchold.2da, is 1 with the off hand free), the ITM's overhand/backhand/thrust
+	// weights, and the files the ready stance and the three attacks draw: [body file, overlay suffix]
+	DictInt(dict, "WeaponAnim", looks ? looks->WeaponType : -1);
+	const ITMExtHeader* wielded = actor->GetWeapon(false);
+	PyObject* weights = PyList_New(0);
+	for (ieWord weight : wielded ? wielded->MeleeAnimation : std::array<ieWord, 3> { 100, 0, 0 }) {
+		PyList_Append(weights, DecRef(PyLong_FromLong, weight));
+	}
+	PyDict_SetItemString(dict, "AttackWeights", weights);
+	Py_DecRef(weights);
+	PyObject* files = PyDict_New();
+	if (looks && looks->GetAnimType() == IE_ANI_CODE_MIRROR) {
+		static const std::array<std::pair<const char*, unsigned char>, 4> stances { { { "Ready", IE_ANI_READY }, { "Overhand", IE_ANI_ATTACK_BACKSLASH }, { "Backhand", IE_ANI_ATTACK_SLASH }, { "Thrust", IE_ANI_ATTACK_JAB } } };
+		for (const auto& stance : stances) {
+			std::string suffix;
+			ResRef file = looks->DCCStanceFile(stance.second, actor->GetOrientation(), &suffix);
+			PyObject* pair = Py_BuildValue("[ss]", file.c_str(), suffix.c_str());
+			PyDict_SetItemString(files, stance.first, pair);
+			Py_DecRef(pair);
+		}
+	}
+	PyDict_SetItemString(dict, "StanceFiles", files);
+	Py_DecRef(files);
 	DictInt(dict, "Engaged", actor->DCCEngaged());
 	DictInt(dict, "GameTicks", core->GetGame()->GameTime); // for tests that time things in ticks
 

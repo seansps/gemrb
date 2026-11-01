@@ -1,0 +1,16 @@
+2DA V1.0
+*
+# ethren: weapons held in both hands although DCC counts them one-handed (docs/rules/equipment.md: d20
+# initiative, a shield allowed). Only the animation changes: wielded with nothing in the off hand they
+# take the two-handed stances and attack files (G13's ready cycles, A2 A4 A6; the ITM's overhand,
+# backhand and thrust weights still pick among them, so a thrust is A6); with a shield or an off-hand
+# weapon the one-handed ones (G1, A1 A3 A5). The true two-handed weapons (the ITM's two-handed flag:
+# d16 initiative, no shield) take the two-handed files anyway and are not listed.
+# Rows: an item's 2-letter animation code (ITM 0x22, art/sprites/engine_rows.md), or an item resref,
+# which wins over its code's row. HANDS 2: held in both hands; 1: one-handed (an item taken out of its
+# code's row).
+      HANDS
+QS    2
+SP    2
+PF    2
+SV    2

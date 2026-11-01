@@ -18,6 +18,8 @@
 #include "Item.h"
 #include "Map.h"
 
+#include "DCC/Looks.h"
+#include "DCC/Rules.h"
 #include "GameScript/GSUtils.h"
 #include "Logging/Logging.h"
 #include "Scriptable/Actor.h"
@@ -365,6 +367,8 @@ void Inventory::KillSlot(size_t index)
 	switch (effect) {
 		case SLOT_EFFECT_LEFT:
 			UpdateShieldAnimation(nullptr);
+			// DCC: with the off hand free, a weapon held in both hands takes the two-handed stances
+			if (core->HasFeature(GFFlags::RULES_DCC)) UpdateWeaponAnimation();
 			break;
 		case SLOT_EFFECT_MISSILE:
 			//getting a new projectile of the same type
@@ -1977,6 +1981,21 @@ void Inventory::UpdateWeaponAnimation()
 		if (WeaponType == IE_ANI_WEAPON_INVALID) {
 			WeaponType = IE_ANI_WEAPON_1H;
 		}
+	}
+
+	if (core->HasFeature(GFFlags::RULES_DCC)) {
+		// DCC: the staff, spear and the like are one-handed for the rules, but held in both hands while
+		// the off hand is free (dcchold.2da): the two-handed stances and attack files, the ITM's own
+		// overhand/backhand/thrust weights still choosing among them
+		const DCC::RulesData* rules = core->GetDCCRules();
+		bool held = rules && rules->held.BothHands(Slot->ItemResRef.c_str(), AnimationType.c_str());
+		DCC::OffHand offHand = DCC::OffHand::Empty;
+		if (WeaponType == IE_ANI_WEAPON_2W) {
+			offHand = DCC::OffHand::Weapon;
+		} else if (GetShieldSlot() > 0 && !IsSlotEmpty(GetShieldSlot())) {
+			offHand = DCC::OffHand::Shield;
+		}
+		WeaponType = DCC::WeaponAnimType(Slot->Flags & IE_INV_ITEM_TWOHANDED, held, offHand);
 	}
 
 	if (header) meleeAnimation = header->MeleeAnimation;
