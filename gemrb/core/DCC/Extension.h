@@ -215,7 +215,10 @@ struct Funnel {
 	std::string killer; // who or what killed it ("Marauder"; "" unknown, eg. bleeding out)
 	std::string cause; // the weapon or the effect ("crossbow bolt", "Slay"; "" unknown)
 	std::string place; // the area's name ("the wooded trail"; dccarea.2da, else the area's resref)
-	bool Empty() const { return status == FunnelStatus::None && !order && player == FUNNEL_NO_PLAYER && !flags && !diedAt && diedIn.empty() && killer.empty() && cause.empty() && place.empty(); }
+	// M3.3, the choose-your-four cards (record version 3): what it did in the funnel
+	uint16_t kills = 0; // creatures it killed while in the funnel
+	uint8_t nearDeaths = 0; // times it fell below 2 hp and lived, started bleeding out, or was rolled over and lived
+	bool Empty() const { return status == FunnelStatus::None && !order && player == FUNNEL_NO_PLAYER && !flags && !diedAt && diedIn.empty() && killer.empty() && cause.empty() && place.empty() && !kills && !nearDeaths; }
 };
 constexpr size_t FUNNEL_TEXT_MAX = 255;
 
@@ -235,7 +238,8 @@ constexpr const char* PARTY_AI_SCRIPT = "DCCPARTY";
 GEM_EXPORT const char* PartyAIName(PartyAI mode);
 
 // "CHAR" (M2.10): what didn't fit the CRE's DCC block. At run time these are the stats
-// IE_DCC_WEIGHT and IE_DCC_PARTYAI (and since version 2, M2.11, IE_DCC_HAIR and IE_DCC_BEARD);
+// IE_DCC_WEIGHT and IE_DCC_PARTYAI (and since version 2, M2.11, IE_DCC_HAIR and IE_DCC_BEARD;
+// since version 3, M3.3, IE_DCC_GOD);
 // the record only carries them through CREs and saves (CREImporter moves them into the stats
 // on load and back on save).
 struct Body {
@@ -243,7 +247,8 @@ struct Body {
 	PartyAI partyAI = DEFAULT_PARTY_AI;
 	uint8_t hair = 0; // the hair overlay's style id (dcchair.2da), 0 none
 	uint8_t beard = 0; // the beard overlay's style id, 0 none
-	bool Empty() const { return !weight && partyAI == DEFAULT_PARTY_AI && !hair && !beard; }
+	uint8_t god = 0; // M3.3 (version 3): a cleric's god (dccgods.2da's ID), 0 none; IE_DCC_GOD
+	bool Empty() const { return !weight && partyAI == DEFAULT_PARTY_AI && !hair && !beard && !god; }
 };
 
 struct RawRecord {
@@ -276,6 +281,45 @@ GEM_EXPORT std::vector<uint8_t> WriteExtension(const CharacterExt& ext);
 GEM_EXPORT bool ReadExtension(const uint8_t* data, size_t size, CharacterExt& out);
 /** the total size an extension's header claims, 0 if data doesn't start with one */
 GEM_EXPORT size_t ExtensionSize(const uint8_t* data, size_t size);
+
+/**
+ * M3.3: the game's own DCC record, saved with the GAM ("DCCG": the same header and records as
+ * the CRE extension, after the GAM's last section; the GAM header's unused bytes at 0x80 hold its
+ * offset and size) and replicated to co-op clients (NetGraveyard). Records: "GRAV", the
+ * graveyard: every funnel character who died, written at the death, so the dead are remembered
+ * after they leave the party (the end of the funnel, a swap at camp).
+ */
+struct Grave {
+	std::string name; // UTF-8, at most FUNNEL_TEXT_MAX bytes
+	uint8_t occupation = 0; // OCCU id and sub-roll, for the occupation's name
+	uint8_t sub = 0;
+	uint8_t order = 0; // its roster order in the funnel
+	uint8_t player = FUNNEL_NO_PLAYER; // the co-op player it belonged to
+	uint8_t level = 0; // its level and class when it died (0 and 8: a peasant)
+	uint8_t classID = 0;
+	uint16_t kills = 0;
+	uint32_t diedAt = 0; // game time
+	std::string diedIn; // the area's resref, lower case
+	std::string killer; // as the funnel record (Funnel::killer, cause, place)
+	std::string cause;
+	std::string place;
+	bool operator==(const Grave& other) const;
+};
+
+struct GEM_EXPORT GameRecord {
+	std::vector<Grave> graves; // in the order they died
+	std::vector<RawRecord> other; // records this version doesn't know, kept as they are
+
+	bool Empty() const { return graves.empty() && other.empty(); }
+	/** a grave for this order and time of death, nullptr if there is none */
+	const Grave* FindGrave(uint8_t order, uint32_t diedAt) const;
+	/** takes a grave back (a body rolled over and alive); false if there was none */
+	bool RemoveGrave(uint8_t order, uint32_t diedAt);
+};
+
+GEM_EXPORT std::vector<uint8_t> WriteGameRecord(const GameRecord& record);
+/** false (and out untouched) for anything that isn't a well formed game record */
+GEM_EXPORT bool ReadGameRecord(const uint8_t* data, size_t size, GameRecord& out);
 
 }
 }

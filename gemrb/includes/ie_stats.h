@@ -642,7 +642,9 @@ namespace GemRB {
 // looks (M2.11), kept in the CHAR record too: the hair and beard overlays (DCC/Looks.h, dcchair.2da), 0 none
 #define IE_DCC_HAIR       322
 #define IE_DCC_BEARD      323
-#define IE_DCC_LAST       323
+// M3.3: a cleric's god (dccgods.2da's ID, 0 none), kept in the CRE extension's CHAR record
+#define IE_DCC_GOD        324
+#define IE_DCC_LAST       324
 
 }
 

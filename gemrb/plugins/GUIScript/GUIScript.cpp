@@ -43,6 +43,7 @@
 #include "GUI/TextEdit.h"
 #include "GUI/WindowManager.h"
 #include "GUI/WorldMapControl.h"
+#include "DCC/Funnel.h"
 #include "DCC/Luck.h"
 #include "DCC/Rules.h"
 #include "DCC/Stats.h"
@@ -4404,6 +4405,60 @@ static PyObject* GemRB_NetSetLobbyCards(PyObject* /*self*/, PyObject* args)
 	RETURN_BOOL(net && net->SetLobbyCards(cards));
 }
 
+PyDoc_STRVAR(GemRB_NetEditCard__doc,
+	     "===== NetEditCard =====\n\
+\n\
+**Prototype:** GemRB.NetEditCard (partySlot, field, text)\n\
+\n\
+**Description:** A co-op client in the lobby while the host rolls (M3.3): changes one of the \n\
+cards dealt to it. field 0 is the name (at most 32 bytes), 1 the alignment ('1' lawful, '2' \n\
+neutral, '3' chaotic). The host's rolling screen applies it (NetTakeCardEdits) and the cards come \n\
+back with the lobby.\n\
+\n\
+**Return value:** bool (sent)\n\
+");
+
+static PyObject* GemRB_NetEditCard(PyObject* /*self*/, PyObject* args)
+{
+	int partySlot;
+	int field;
+	PyObject* text = nullptr;
+	PARSE_ARGS(args, "iiO", &partySlot, &field, &text);
+	NetSession* net = core->GetNetSession();
+	if (partySlot < 1 || partySlot > NET_PARTY_SLOTS || field < 0 || field >= NetCardEdit::count) Py_RETURN_FALSE;
+	RETURN_BOOL(net && net->EditCard(uint8_t(partySlot), uint8_t(field), NetUtf8(text)));
+}
+
+PyDoc_STRVAR(GemRB_NetTakeCardEdits__doc,
+	     "===== NetTakeCardEdits =====\n\
+\n\
+**Prototype:** GemRB.NetTakeCardEdits ()\n\
+\n\
+**Description:** The co-op host's rolling screen (M3.3): the changes players made to their own cards \n\
+since the last call (checked: the card was dealt to them), in order.\n\
+\n\
+**Return value:** list of dicts: Slot, Field (0 name, 1 alignment), Text, Player\n\
+");
+
+static void DictInt(PyObject* dict, const char* key, long value);
+
+static PyObject* GemRB_NetTakeCardEdits(PyObject* /*self*/, PyObject* /*args*/)
+{
+	NetSession* net = core->GetNetSession();
+	PyObject* list = PyList_New(0);
+	if (!net) return list;
+	for (const auto& edit : net->TakeCardEdits()) {
+		PyObject* dict = PyDict_New();
+		DictInt(dict, "Slot", edit.partySlot);
+		DictInt(dict, "Field", edit.field);
+		PyDict_SetItemString(dict, "Text", DecRef(NetPyString, edit.text));
+		DictInt(dict, "Player", edit.player);
+		PyList_Append(list, dict);
+		Py_DecRef(dict);
+	}
+	return list;
+}
+
 PyDoc_STRVAR(GemRB_NetSetPermission__doc,
 	     "===== NetSetPermission =====\n\
 \n\
@@ -6990,6 +7045,11 @@ static PyObject* GemRB_GetDCCStats(PyObject* /*self*/, PyObject* args)
 	// M2.11: looks, the overlays drawn now (the style's, or the one under a helmet), the stance
 	DictInt(dict, "Hair", actor->GetBase(IE_DCC_HAIR));
 	DictInt(dict, "Beard", actor->GetBase(IE_DCC_BEARD));
+	// M3.3: a cleric's god
+	DictInt(dict, "God", actor->GetBase(IE_DCC_GOD));
+	const DCC::God* god = rules ? rules->gods.Find(int(actor->GetBase(IE_DCC_GOD))) : nullptr;
+	PyDict_SetItemString(dict, "GodName", DecRef(PyString_FromString, god ? god->name.c_str() : ""));
+	DictInt(dict, "AlignmentCode", DCC::AlignmentCode(actor->GetStat(IE_ALIGNMENT)));
 	const CharAnimations* looks = actor->GetAnims();
 	PyDict_SetItemString(dict, "HairOverlay", DecRef(PyString_FromString, looks ? looks->GetHairRef().c_str() : ""));
 	PyDict_SetItemString(dict, "BeardOverlay", DecRef(PyString_FromString, looks ? looks->GetBeardRef().c_str() : ""));
@@ -8058,7 +8118,8 @@ extension's OCCU and FUNL records, Phase 3).\n\
 \n\
 **Return value:** dict: Occupation (Id, Sub, TradeGood, Weapon, LastWeapon, Skills: list of \n\
 tag names, SkillBits), Funnel (Status: 0 none, 1 alive, 2 dead, 3 chosen, 4 reserve; StatusName, \n\
-Order, Player (-1 none), ClassPending, Recovered, DiedAt, DiedIn)");
+Order, Player (-1 none), ClassPending, Recovered, DiedAt, DiedIn, Killer, Cause, Place; M3.3: \n\
+Kills, NearDeaths), GlobalID, Slot (its party slot, 0 outside the party)");
 
 static PyObject* GemRB_GetDCCFunnel(PyObject* /*self*/, PyObject* args)
 {
@@ -8094,9 +8155,14 @@ static PyObject* GemRB_GetDCCFunnel(PyObject* /*self*/, PyObject* args)
 	PyDict_SetItemString(place, "Killer", DecRef(PyUnicode_FromString, funnel.killer.c_str()));
 	PyDict_SetItemString(place, "Cause", DecRef(PyUnicode_FromString, funnel.cause.c_str()));
 	PyDict_SetItemString(place, "Place", DecRef(PyUnicode_FromString, funnel.place.c_str()));
+	DictInt(place, "Kills", funnel.kills);
+	DictInt(place, "NearDeaths", funnel.nearDeaths);
 	PyObject* dict = PyDict_New();
 	PyDict_SetItemString(dict, "Occupation", occupation);
 	PyDict_SetItemString(dict, "Funnel", place);
+	// M3.3: who it is, for the screens that keep it across party changes
+	DictInt(dict, "GlobalID", long(actor->GetGlobalID()));
+	DictInt(dict, "Slot", actor->InParty);
 	Py_DecRef(occupation);
 	Py_DecRef(place);
 	return dict;
@@ -8135,6 +8201,255 @@ static PyObject* GemRB_DCCSetFunnel(PyObject* /*self*/, PyObject* args)
 	if (flags >= 0) funnel.flags = static_cast<uint8_t>(flags);
 	actor->DCCExtChanged();
 	Py_RETURN_TRUE;
+}
+
+PyDoc_STRVAR(GemRB_DCCSetAlignment__doc,
+	     "===== DCCSetAlignment =====\n\
+\n\
+**Prototype:** GemRB.DCCSetAlignment (globalID, alignment[, god])\n\
+\n\
+**Description:** The player's choice of a level-0 character's alignment (M3.3): 1 lawful, \n\
+2 neutral, 3 chaotic. god is a cleric's god (dccgods.2da's ID), 0 none; without it the god \n\
+follows the alignment (kept if it is of that alignment, else none). Refused past level 0 and \n\
+for a god of another alignment. Routed to the host in co-op (its owner only).\n\
+\n\
+**Return value:** bool\n\
+\n\
+**See also:** [GetDCCStats](GetDCCStats.md), [DCCLevelUp](DCCLevelUp.md)");
+
+static PyObject* GemRB_DCCSetAlignment(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int code;
+	int god = -1;
+	PARSE_ARGS(args, "ii|i", &globalID, &code, &god);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	if (!NetForward(NetGuiOp::DCCSetAlignment, { globalID, code, god })) Py_RETURN_FALSE;
+	RETURN_BOOL(actor->DCCSetAlignment(code, god));
+}
+
+PyDoc_STRVAR(GemRB_DCCKillFor__doc,
+	     "===== DCCKillFor =====\n\
+\n\
+**Prototype:** GemRB.DCCKillFor (targetID, killerID)\n\
+\n\
+**Description:** Kills a creature as if killerID had struck the blow (M3.3: the kill on a funnel \n\
+peasant's record, the killer on a grave). For tests and scripted deaths. Host or single player only.\n\
+\n\
+**Return value:** bool");
+
+static PyObject* GemRB_DCCKillFor(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int killerID;
+	PARSE_ARGS(args, "ii", &globalID, &killerID);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	Actor* killer = killerID > 1000 ? game->GetActorByGlobalID(killerID) : game->FindPC(killerID);
+	const NetSession* net = core->GetNetSession();
+	if ((net && !net->IsHost()) || !killer || (actor->GetStat(IE_STATE_ID) & STATE_DEAD)) Py_RETURN_FALSE;
+	actor->Die(killer);
+	actor->SetBase(IE_HITPOINTS, 0);
+	Py_RETURN_TRUE;
+}
+
+PyDoc_STRVAR(GemRB_DCCSetScriptName__doc,
+	     "===== DCCSetScriptName =====\n\
+\n\
+**Prototype:** GemRB.DCCSetScriptName (globalID, name)\n\
+\n\
+**Description:** Gives a character a script name of its own (M3.3): the funnel's peasants are \n\
+made from one template and would all share its name, which the reserves (and scripts) can't \n\
+tell apart. Host or single player only.\n\
+\n\
+**Return value:** bool");
+
+static PyObject* GemRB_DCCSetScriptName(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	PyObject* pyName = nullptr;
+	PARSE_ARGS(args, "iO", &globalID, &pyName);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	const NetSession* net = core->GetNetSession();
+	if (net && !net->IsHost()) Py_RETURN_FALSE;
+	std::string name = NetUtf8(pyName);
+	if (name.empty() || name.size() >= sizeof(ieVariable)) Py_RETURN_FALSE;
+	actor->SetScriptName(ieVariable(name.c_str()));
+	Py_RETURN_TRUE;
+}
+
+PyDoc_STRVAR(GemRB_DCCSetPlayer__doc,
+	     "===== DCCSetPlayer =====\n\
+\n\
+**Prototype:** GemRB.DCCSetPlayer (globalID, player)\n\
+\n\
+**Description:** The co-op player a funnel character belongs to (M3.3; the FUNL record's player, \n\
+-1 none). In co-op the host's party slots follow it, so the character keeps its player when the \n\
+party changes (the four, a reserve swapped in). Host or single player only.\n\
+\n\
+**Return value:** bool");
+
+static PyObject* GemRB_DCCSetPlayer(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int player;
+	PARSE_ARGS(args, "ii", &globalID, &player);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	const NetSession* net = core->GetNetSession();
+	if (net && !net->IsHost()) Py_RETURN_FALSE;
+	if (player < -1 || player >= DCC::FUNNEL_NO_PLAYER) Py_RETURN_FALSE;
+	actor->dccExt.funnel.player = player < 0 ? DCC::FUNNEL_NO_PLAYER : uint8_t(player);
+	actor->DCCExtChanged();
+	Py_RETURN_TRUE;
+}
+
+// a list of global IDs or party slots as actors
+static bool DCCActorList(PyObject* list, const Game* game, std::vector<Actor*>& actors)
+{
+	if (!PyList_Check(list)) return false;
+	for (Py_ssize_t i = 0; i < PyList_Size(list); ++i) {
+		long id = PyLong_AsLong(PyList_GetItem(list, i));
+		Actor* actor = id > 1000 ? game->GetActorByGlobalID(ieDword(id)) : game->FindPC(unsigned(id));
+		if (!actor) return false;
+		actors.push_back(actor);
+	}
+	return true;
+}
+
+PyDoc_STRVAR(GemRB_DCCEndFunnel__doc,
+	     "===== DCCEndFunnel =====\n\
+\n\
+**Prototype:** GemRB.DCCEndFunnel (chosen)\n\
+\n\
+**Description:** The end of the level-0 funnel (M3.3, choose your four): every survivor gets the XP \n\
+for level 1 (logged) and its class pick pending. chosen is a list of 1-4 living party members \n\
+(global IDs or party slots), who become the party in that order and pick their classes now; the \n\
+other survivors go to the reserves (off the map, kept in the save, level-1 XP and the class pick \n\
+pending until they join) and the dead leave the party (their things on the ground, their graves in the game's \n\
+record). The party size becomes 4 (and the global DCC_PARTY_SIZE). Host or single player only.\n\
+\n\
+**Return value:** 0, -1 if refused\n\
+\n\
+**See also:** [DCCDismiss](DCCDismiss.md), [DCCRecruit](DCCRecruit.md)");
+
+static PyObject* GemRB_DCCEndFunnel(PyObject* /*self*/, PyObject* args)
+{
+	PyObject* list = nullptr;
+	PARSE_ARGS(args, "O", &list);
+	GET_GAME();
+	const NetSession* net = core->GetNetSession();
+	if (net && !net->IsHost()) return PyLong_FromLong(-1);
+	std::vector<Actor*> chosen;
+	if (!DCCActorList(list, game, chosen)) return PyLong_FromLong(-1);
+	return PyLong_FromLong(game->DCCEndFunnel(chosen));
+}
+
+PyDoc_STRVAR(GemRB_DCCDismiss__doc,
+	     "===== DCCDismiss =====\n\
+\n\
+**Prototype:** GemRB.DCCDismiss (globalID)\n\
+\n\
+**Description:** A party member leaves (M3.3, the reserves): a living one goes to the reserves, a \n\
+dead one is buried where it fell (its things on the ground; its grave stays in the game's record). \n\
+Host or single player only.\n\
+\n\
+**Return value:** 0, -1 if refused");
+
+static PyObject* GemRB_DCCDismiss(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	PARSE_ARGS(args, "i", &globalID);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	const NetSession* net = core->GetNetSession();
+	if (net && !net->IsHost()) return PyLong_FromLong(-1);
+	return PyLong_FromLong(game->DCCDismiss(actor));
+}
+
+PyDoc_STRVAR(GemRB_DCCRecruit__doc,
+	     "===== DCCRecruit =====\n\
+\n\
+**Prototype:** GemRB.DCCRecruit (globalID)\n\
+\n\
+**Description:** A reserve (GetDCCReserves) joins the party next to its first member, as the last \n\
+one, rested; its class pick (pending since the funnel's end) is made now. Refused while the party is full. Host or \n\
+single player only.\n\
+\n\
+**Return value:** the party slot (0-based), -1 if refused");
+
+static PyObject* GemRB_DCCRecruit(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	PARSE_ARGS(args, "i", &globalID);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	const NetSession* net = core->GetNetSession();
+	if (net && !net->IsHost()) return PyLong_FromLong(-1);
+	return PyLong_FromLong(game->DCCRecruit(actor));
+}
+
+PyDoc_STRVAR(GemRB_GetDCCReserves__doc,
+	     "===== GetDCCReserves =====\n\
+\n\
+**Prototype:** GemRB.GetDCCReserves ()\n\
+\n\
+**Description:** The funnel's reserves (M3.3): the survivors who weren't chosen, waiting off the map, \n\
+in roster order. Their global IDs work with GetPlayerName, GetPlayerStat, GetDCCStats and \n\
+GetDCCFunnel.\n\
+\n\
+**Return value:** list of global IDs");
+
+static PyObject* GemRB_GetDCCReserves(PyObject* /*self*/, PyObject* /*args*/)
+{
+	GET_GAME();
+	std::vector<Actor*> reserves = game->DCCReserves();
+	PyObject* list = PyList_New(0);
+	for (const Actor* reserve : reserves) {
+		PyObject* id = PyLong_FromLong(long(reserve->GetGlobalID()));
+		PyList_Append(list, id);
+		Py_DecRef(id);
+	}
+	return list;
+}
+
+PyDoc_STRVAR(GemRB_GetDCCGraveyard__doc,
+	     "===== GetDCCGraveyard =====\n\
+\n\
+**Prototype:** GemRB.GetDCCGraveyard ()\n\
+\n\
+**Description:** The funnel's graveyard (M3.3), the game's own record: every funnel character who \n\
+died, in the party or not any more, in the order they died. Saved with the game and the same for \n\
+every co-op player.\n\
+\n\
+**Return value:** list of dicts: Name, Occupation, Sub, Order, Player (-1 none), Level, Class, Kills, \n\
+DiedAt, DiedIn, Killer, Cause, Place");
+
+static PyObject* GemRB_GetDCCGraveyard(PyObject* /*self*/, PyObject* /*args*/)
+{
+	GET_GAME();
+	PyObject* list = PyList_New(0);
+	for (const DCC::Grave& grave : game->dccRecord.graves) {
+		PyObject* dict = PyDict_New();
+		PyDict_SetItemString(dict, "Name", DecRef(PyUnicode_FromString, grave.name.c_str()));
+		DictInt(dict, "Occupation", grave.occupation);
+		DictInt(dict, "Sub", grave.sub);
+		DictInt(dict, "Order", grave.order);
+		DictInt(dict, "Player", grave.player == DCC::FUNNEL_NO_PLAYER ? -1 : grave.player);
+		DictInt(dict, "Level", grave.level);
+		DictInt(dict, "Class", grave.classID);
+		DictInt(dict, "Kills", grave.kills);
+		DictInt(dict, "DiedAt", long(grave.diedAt));
+		PyDict_SetItemString(dict, "DiedIn", DecRef(PyUnicode_FromString, grave.diedIn.c_str()));
+		PyDict_SetItemString(dict, "Killer", DecRef(PyUnicode_FromString, grave.killer.c_str()));
+		PyDict_SetItemString(dict, "Cause", DecRef(PyUnicode_FromString, grave.cause.c_str()));
+		PyDict_SetItemString(dict, "Place", DecRef(PyUnicode_FromString, grave.place.c_str()));
+		PyList_Append(list, dict);
+		Py_DecRef(dict);
+	}
+	return list;
 }
 
 PyDoc_STRVAR(GemRB_DCCSetOccupation__doc,
@@ -15246,6 +15561,15 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(DCCReplaceSpell, METH_VARARGS),
 	METHOD(DCCConfirmSpells, METH_VARARGS),
 	METHOD(GetDCCFunnel, METH_VARARGS),
+	METHOD(DCCSetAlignment, METH_VARARGS),
+	METHOD(DCCKillFor, METH_VARARGS),
+	METHOD(DCCSetScriptName, METH_VARARGS),
+	METHOD(DCCSetPlayer, METH_VARARGS),
+	METHOD(DCCEndFunnel, METH_VARARGS),
+	METHOD(DCCDismiss, METH_VARARGS),
+	METHOD(DCCRecruit, METH_VARARGS),
+	METHOD(GetDCCReserves, METH_NOARGS),
+	METHOD(GetDCCGraveyard, METH_NOARGS),
 	METHOD(DCCWalk, METH_VARARGS),
 	METHOD(GameControlMoveSelected, METH_VARARGS),
 	METHOD(GameControlTravel, METH_VARARGS),
@@ -15313,6 +15637,8 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(NetAllowed, METH_VARARGS),
 	METHOD(NetAssign, METH_VARARGS),
 	METHOD(NetSetLobbyCards, METH_VARARGS),
+	METHOD(NetEditCard, METH_VARARGS),
+	METHOD(NetTakeCardEdits, METH_NOARGS),
 	METHOD(NetChat, METH_VARARGS),
 	METHOD(NetChatReplay, METH_NOARGS),
 	METHOD(NetGetConfig, METH_NOARGS),

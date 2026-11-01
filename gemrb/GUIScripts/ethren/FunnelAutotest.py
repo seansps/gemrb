@@ -38,10 +38,19 @@
 #   e. rolling the sixteen (rolling, after everything else): a new game through the rolling screen (the
 #      cards, renaming, reroll all, the house rules, accept) and the sixteen it makes: abilities, Luck and
 #      augur, HP, species, OCCU/FUNL, items, body weight, looks, the purse; screenshots
+# M3.3:
+#   f. the funnel's end (choose, in the rolled game): a little history (two killed, a kill, a near death),
+#      the funnel ended by a script action, the selection screen (cards, the record, sorting, alignment,
+#      four picks), the engine's end (the party of four, ten reserves off the map, level-1 XP for every
+#      survivor, class picks pending, the dead out of the party and in the graveyard), the class picks
+#      (a cleric with its god, a wizard's learn window), the end screen; screenshots
+#   g. the reserves (reserves): a death among the four, the camp's roster, a swap and the newcomer's
+#      class pick, a dismissal; save and load (the reserves, the graveyard, the party size)
 # Every check logs "[FNT] ok ..." or "[FNT] FAIL ...", the end "[FNT] autotest done: N checks,
 # F failed"; FNT_AT_DONE becomes 1 if all passed, 2 if not.
 
 import GemRB
+import DCCSheet
 from GUIDefines import *
 from ie_stats import *
 
@@ -951,13 +960,18 @@ SCENARIOS = (
 	("travel", _Travel), # 7
 	("roster", _Roster), # d (M3.2): the roster, a fight with deaths, the graveyard
 	("save", None), # 8
-	("rolling", None), # e (M3.1): a new game through the rolling screen, last
+	("rolling", None), # e (M3.1): a new game through the rolling screen
+	("choose", None), # f (M3.3): the funnel's end in the rolled game: choose your four, the class picks, the end screen
+	("reserves", None), # g (M3.3): the reserves at camp: a death, a swap, a dismissal, save and load
 )
 NEEDS = {
 	"roster": ["classpicks"], # a level-1 character to bleed out
 	"prompts": ["classpicks"], # the party settings panel's spellburn lines need the wizards
 	# the load checks what these left: the spells, Rolf's death, the party in the cave
 	"save": ["classpicks", "prompts", "travel"],
+	# M3.3: the funnel's end happens in the game the rolling screen makes
+	"choose": ["rolling"],
+	"reserves": ["rolling", "choose"],
 }
 Picked = None
 
@@ -1073,6 +1087,11 @@ def _Rolling ():
 	RollScreen.RerollAll ()
 	RollScreen.Rename (0, "Gristlewick")
 	yield
+	# M3.3: the alignment is the player's choice; card 3's button cycles it, here to lawful
+	while RollScreen.Cards[2]["Alignment"] != 1:
+		RollScreen.NextAlignment (2)
+	_Check ("rolling: card 3 lawful by its button", [RollScreen.Cards[2]["Alignment"], "Lawful" in RollScreen.Shown[3][5]], [1, True])
+	_Check ("rolling: Table 3-4's item on the gear line", all ("; " in RollScreen.Shown[c["Order"]][4] and c["EquipmentName"] for c in RollScreen.Cards), True)
 	Saved["rolled"] = [dict (card) for card in RollScreen.Cards]
 	_Check ("rolling: accept", RollScreen.Accept (), True)
 	_Check ("rolling: the screen closes", RollScreen.Window, None)
@@ -1131,6 +1150,17 @@ def _Rolled ():
 		_Log ("rolled: differs: %s" % (entry,))
 	_Check ("rolled: every peasant as its card (abilities, Luck, augur, HP, species, sex, alignment, level 0, OCCU, FUNL, items, weight, looks)", len (bad), 0)
 	_Check ("rolled: the first card's new name", GemRB.GetPlayerName (1, 0), "Gristlewick")
+	# M3.3: a script name each, the player's alignment from the card, Table 3-4's item where the game has it
+	names = [GemRB.GetPlayerName (pc, 2).lower () for pc in range (1, 17)]
+	_Check ("rolled: a script name of its own each", names, ["dccpeas%02d" % pc for pc in range (1, 17)])
+	_Check ("rolled: card 3's alignment as the player set it (lawful)", GemRB.GetDCCStats (3)["AlignmentCode"], 1)
+	missing = []
+	for card in cards:
+		item = card.get ("EquipmentItem")
+		if item and not any (GemRB.GetSlotItem (card["Order"], slot) and GemRB.GetSlotItem (card["Order"], slot)["ItemResRef"].lower () == item for slot in range (0, 60)):
+			missing.append ((card["Order"], item))
+	_Check ("rolled: Table 3-4's items the game has are in the packs", missing, [])
+	_Log ("rolled: Table 3-4: %s" % ", ".join ("%d %s%s" % (c["Order"], c.get ("EquipmentName", "?"), " (%s)" % c["EquipmentItem"] if c.get ("EquipmentItem") else "") for c in cards))
 	import SetupGame
 	_Check ("rolled: the purse holds everyone's copper (in cp, on top of the game's own)", GemRB.GameGetPartyGold () - SetupGame.StartGold, purse)
 	_Check ("rolled: everyone has the party AI", sorted (set ((GemRB.GetPlayerScript (pc, 7) or "").lower () for pc in range (1, 17))), ["dccparty"])
@@ -1150,7 +1180,279 @@ def _StepRolled ():
 		next (RolledSteps)
 		return "rolled"
 	except StopIteration:
-		return "done"
+		return "choose" if _Wanted ("choose") else "done"
+
+# --- M3.3: the funnel's end and the reserves -----------------------------------------------------
+
+ChooseSteps = None
+ReserveSteps = None
+
+def _Funnel (pc):
+	return GemRB.GetDCCFunnel (pc)["Funnel"]
+
+def _Id (pc):
+	return GemRB.GetDCCFunnel (pc)["GlobalID"]
+
+def _FunnelHistory ():
+	"""f: a little history before the end: a marauder kills two, a peasant kills a rat, one nearly dies"""
+	pcs = list (range (1, 17))
+	GemRB.GameSetScreenFlags (GS_PARTYAI, OP_NAND) # nobody joins in on their own
+	spots = _Block (pcs)
+	yield
+	# the last two die to a marauder
+	for victim in (15, 16):
+		x, y = spots[victim]
+		gob = GemRB.CreateCreature (1, "FNTGOB", x + 40, y)
+		_Put (gob, x + 40, y)
+		yield
+		yield from _Kill (gob, victim)
+		GemRB.ExecuteString ("DestroySelf()", gob)
+		yield
+	_Check ("history: 15 and 16 dead", [_Dead (15), _Dead (16)], [True, True])
+	# a kill: the giant rat dies to peasant 3 (the kill is credited by DCCOnDeath; a rolled peasant's
+	# blows are its fists' for now, subdual ones, so the rat is knocked out first and then dies to a
+	# blow of the same peasant's once it is down: see the M3.3 notes in the README)
+	killer = 3
+	x, y = spots[killer]
+	rat = GemRB.CreateCreature (1, "FNTRAT", x + 40, y)
+	_Put (rat, x + 40, y)
+	yield
+	for i in range (10):
+		if GemRB.GetPlayerStat (rat, IE_STATE_ID) & STATE_DEAD:
+			break
+		GemRB.DCCForceDice (killer, [19, 6, 6, 6, 6])
+		GemRB.DCCAttack (killer, rat)
+		GemRB.DCCForceDice (killer, [])
+		yield
+	if not GemRB.GetPlayerStat (rat, IE_STATE_ID) & STATE_DEAD:
+		_Log ("history: the rat is only knocked out; the peasant finishes it with a script kill on its behalf")
+		GemRB.DCCKillFor (rat, killer)
+		yield
+	_Check ("history: the rat died", bool (GemRB.GetPlayerStat (rat, IE_STATE_ID) & STATE_DEAD), True)
+	_Check ("history: the killer's kill on its funnel record", _Funnel (killer)["Kills"], 1)
+	# one with 2 hp or more nearly dies: down to 1
+	near = [pc for pc in range (1, 15) if pc != killer and GemRB.GetPlayerStat (pc, IE_HITPOINTS) >= 2][0]
+	GemRB.ApplyEffect (near, "Damage", GemRB.GetPlayerStat (near, IE_HITPOINTS) - 1, 0)
+	yield
+	_Check ("history: a near death on the record (1 hp left)", [GemRB.GetPlayerStat (near, IE_HITPOINTS), _Funnel (near)["NearDeaths"]], [1, 1])
+	Saved["near"] = _Id (near)
+	Saved["killer"] = _Id (killer)
+	graves = GemRB.GetDCCGraveyard ()
+	_Check ("history: two graves in the game's record", [(g["Order"], g["Killer"], g["Cause"], g["Place"]) for g in graves], [(15, "Marauder", "cudgel", "the glade"), (16, "Marauder", "cudgel", "the glade")])
+	GemRB.GameSetScreenFlags (GS_PARTYAI, OP_OR)
+	for i in range (30): # the fight's counter runs out
+		yield
+
+def _Choose ():
+	"""f: choose your four, their class picks (a cleric with its god, a wizard and the learn window), the end screen"""
+	import ChooseFour, ClassPick, DCCLearn, FunnelEnd, FunnelChoose, Roster
+	yield from _FunnelHistory ()
+	# the funnel ends by a script action (the adventure's last scene will do the same)
+	GemRB.ExecuteString ('SetGlobal("DCC_FUNNEL","GLOBAL",1)')
+	yield from _Wait (lambda: ChooseFour.Window, 10)
+	_Check ("choose: the screen opens when the funnel ends", bool (ChooseFour.Window), True)
+	if not ChooseFour.Window:
+		return
+	survivors = ChooseFour.Survivors
+	_Check ("choose: 14 survivors as cards", [len (survivors), len (ChooseFour.Shown["Cards"])], [14, 14])
+	card = ChooseFour.Shown[Saved["killer"]]
+	_Log ("choose: a card: " + " | ".join (card))
+	_Check ("choose: a card's lines (name, abilities, occupation, HP and alignment, the record)", len (card), 6)
+	_Check ("choose: the kill on its card", card[5], "Kills 1   Near deaths 0")
+	_Check ("choose: the near death on its card", ChooseFour.Shown[Saved["near"]][5], "Kills 0   Near deaths 1")
+	ChooseFour.SortBy ("Str")
+	strengths = [ChooseFour.Shown[i][1].split ()[1] for i in ChooseFour.Shown["Cards"]]
+	_Check ("choose: sorted by Str", [int (v) for v in strengths], sorted ([int (v) for v in strengths], reverse = True))
+	ChooseFour.SortBy ("Kills")
+	_Check ("choose: sorted by kills: the killer first", ChooseFour.Shown["Cards"][0], Saved["killer"])
+	ChooseFour.SortBy ("Order")
+	_Check ("choose: Accept waits for a pick", GemRB.GetPlayerStat (1, IE_HITPOINTS) > 0 and not FunnelChoose.Ready (ChooseFour.Picks, survivors), True)
+	# the picks: three humans and a demihuman if there is one (its class is its race's)
+	humans = [s for s in survivors if s["Race"] == 1]
+	others = [s for s in survivors if s["Race"] != 1]
+	picks = humans[:3] + (others[:1] if others else humans[3:4])
+	# the cleric-to-be's alignment, the player's choice on the card: chaotic
+	ChooseFour.SetAlignment (picks[0]["Id"], 3)
+	_Check ("choose: the alignment changed on the card", GemRB.GetDCCStats (picks[0]["Id"])["AlignmentCode"], 3)
+	for pick in picks:
+		ChooseFour.Pick (pick["Id"])
+	fifth = [s for s in survivors if s not in picks][0]
+	_Check ("choose: a fifth pick doesn't fit", ChooseFour.Pick (fifth["Id"]), False)
+	_Check ("choose: four picked", ChooseFour.Shown["Picks"], [p["Id"] for p in picks])
+	_ShotScreen ("choose_screen")
+	Saved["picks"] = [p["Id"] for p in picks]
+	Saved["survivors"] = [s["Id"] for s in survivors]
+	_Check ("choose: accept", ChooseFour.Accept (), True)
+	yield
+	# the end of the funnel in the engine
+	_Check ("funnel's end: the party is the four, in the order picked", [_Id (pc) for pc in range (1, GemRB.GetPartySize () + 1)], Saved["picks"])
+	_Check ("funnel's end: a party of four from now on", [GemRB.GetGameVar ("DCC_PARTY_SIZE"), GemRB.GetVar ("MaxPartySize")], [4, 16])
+	reserves = GemRB.GetDCCReserves ()
+	_Check ("funnel's end: the other ten in the reserves", sorted (reserves), sorted (i for i in Saved["survivors"] if i not in Saved["picks"]))
+	Saved["reserves"] = reserves
+	xp = dict ((i, GemRB.GetDCCStats (i)["XP"]) for i in Saved["survivors"])
+	_Check ("funnel's end: every survivor has the XP for level 1", sorted (set (xp.values ())), [10])
+	_Check ("funnel's end: every survivor's class pick pending", [_Funnel (i)["ClassPending"] for i in Saved["survivors"]], [1] * 14)
+	_Check ("funnel's end: the reserves stay level 0 and wait off the map", [(GemRB.GetDCCStats (i)["Level"], _Funnel (i)["StatusName"], GemRB.DCCFindActor (GemRB.GetPlayerName (i, 2))) for i in reserves], [(0, "reserve", 0)] * 10)
+	_Check ("funnel's end: their script names stay their own", sorted (GemRB.GetPlayerName (i, 2).lower () for i in reserves), sorted ("dccpeas%02d" % _Funnel (i)["Order"] for i in reserves))
+	_Check ("funnel's end: the chosen", [_Funnel (i)["StatusName"] for i in Saved["picks"]], ["chosen"] * 4)
+	_Check ("funnel's end: the dead are out of the party, in the graveyard", [len (Roster.GraveLinesAll ()), any (_Funnel (pc)["StatusName"] == "dead" for pc in range (1, 5))], [2, False])
+	Roster.UpdateRoster ()
+	_Check ("funnel's end: the roster shows four", [len (Roster.Tiles), Roster.Header["Summary"]], [4, "Alive 4 of 4"])
+	# the class picks: one window at a time, for each of the four
+	classes = {}
+	for index, ident in enumerate (Saved["picks"]):
+		yield from _Wait (lambda: ClassPick.Window, 10)
+		_Check ("class pick %d: its window opens" % (index + 1), [bool (ClassPick.Window), ClassPick.Shown], [True, ident])
+		if not ClassPick.Window:
+			return
+		race = GemRB.GetPlayerStat (ident, IE_RACE)
+		if race != 1:
+			want, alignment, god = ClassPick.Last["Choice"]["Class"], None, None
+			_Check ("class pick: a demihuman takes its own class", len (ClassPick.Last["Classes"]), 1)
+		elif index == 0:
+			want, alignment, god = 3, 3, 13 # a chaotic cleric of Ahriman
+		elif index == 1:
+			want, alignment, god = 1, None, None # a wizard
+		else:
+			want, alignment, god = 2 if index == 2 else 4, None, None
+		valid = ClassPick.Choose (want, alignment, god)
+		if index == 0:
+			_Check ("class pick: the cleric's gods are its alignment's", ClassPick.Last["Gods"], [name for i, name in FunnelChoose.GodsFor (ChooseFour.Tables ()["dccgods"], 3)])
+			ClassPick.SetAlignment (1)
+			_Check ("class pick: a lawful cleric can't keep Ahriman (the god follows)", [ClassPick.Choice["God"], ClassPick.Last["Valid"]], [0, False])
+			ClassPick.SetAlignment (3)
+			ClassPick.SetGod (0)
+			valid = ClassPick.Last["Valid"]
+			_ShotScreen ("class_pick")
+		_Check ("class pick %d: valid" % (index + 1), valid, True)
+		hp = ClassPick.Confirm ()
+		_Check ("class pick %d: level 1" % (index + 1), [hp >= 1, GemRB.GetDCCStats (ident)["Level"], GemRB.GetDCCStats (ident)["Class"], _Funnel (ident)["ClassPending"]], [True, 1, want, 0])
+		classes[ident] = want
+		yield
+		if DCCLearn.Window:
+			_Check ("class pick %d: the learn window for a caster" % (index + 1), want in FunnelChoose.CASTERS, True)
+			DCCLearn.Confirm ()
+			yield
+	cleric = Saved["picks"][0]
+	stats = GemRB.GetDCCStats (cleric)
+	if GemRB.GetPlayerStat (cleric, IE_RACE) == 1:
+		_Check ("the cleric: chaotic, of Ahriman", [stats["AlignmentCode"], stats["God"], stats["GodName"]], [3, 13, "Ahriman"])
+		_Check ("the cleric's sheet names its god", "serves Ahriman" in DCCSheet.Lines (cleric)[0], True)
+		_Check ("alignment is fixed past level 0", GemRB.DCCSetAlignment (cleric, 1), False)
+	Saved["classes"] = classes
+	# the end screen, once every pick is made
+	yield from _Wait (lambda: FunnelEnd.Window, 10)
+	_Check ("end screen opens", [bool (FunnelEnd.Window), ChooseFour.State ()], [True, 3])
+	_Log ("end screen: party %s" % FunnelEnd.Shown.get ("Party"))
+	_Check ("end screen: the four, the ten, the two graves", [len (FunnelEnd.Shown.get ("Party", [])), len (FunnelEnd.Shown.get ("Reserves", [])), len (FunnelEnd.Shown.get ("Graves", []))], [4, 10, 2])
+	_Check ("end screen: a reserve's line (level-1 XP, class pending)", FunnelEnd.Shown["Reserves"][0].endswith ("10 XP, class pick pending"), True)
+	_ShotScreen ("funnel_end")
+	FunnelEnd.Leave ()
+	_Check ("end screen: closed, the funnel done", [FunnelEnd.Window, ChooseFour.State ()], [None, 4])
+
+def _StepChoose ():
+	global ChooseSteps
+	if ChooseSteps is None:
+		ChooseSteps = _Choose ()
+	try:
+		next (ChooseSteps)
+		return "choose"
+	except StopIteration:
+		return "reserves" if _Wanted ("reserves") else "done"
+
+ReserveSave = "funnelend"
+
+def _Reserves ():
+	"""g: a party member dies, the camp's roster: bury it, a reserve joins and picks its class; a dismissal"""
+	import ChooseFour, ClassPick, DCCLearn, Reserves, Roster
+	# the party's second dies (level 1: it bleeds out)
+	victim = 2
+	Saved["victim"] = GemRB.GetPlayerName (victim, 0)
+	GemRB.GameSetScreenFlags (GS_PARTYAI, OP_NAND)
+	GemRB.ApplyEffect (victim, "Damage", GemRB.GetPlayerStat (victim, IE_HITPOINTS) + 2, 0)
+	yield from _Wait (lambda: _Dead (victim), 60)
+	GemRB.GameSetScreenFlags (GS_PARTYAI, OP_OR)
+	_Check ("reserves: the second of the four died", _Dead (victim), True)
+	graves = GemRB.GetDCCGraveyard ()
+	_Check ("reserves: its grave, with its class", [(g["Name"], g["Level"], g["Class"], g["Cause"]) for g in graves][-1], (Saved["victim"], 1, Saved["classes"][Saved["picks"][1]], "bled out"))
+	# a camp script opens the roster
+	GemRB.ExecuteString ('SetGlobal("DCC_CAMP","GLOBAL",1)')
+	yield from _Wait (lambda: Reserves.Window, 10)
+	_Check ("reserves: the camp's roster opens", bool (Reserves.Window), True)
+	if not Reserves.Window:
+		return
+	_Check ("reserves: ten waiting, the party of four", [len (Reserves.Shown["Reserves"]), len (Reserves.Shown["Party"])], [10, 4])
+	_Check ("reserves: the dead one's row", Reserves.Shown["Party"][1].endswith ("(dead)"), True)
+	_ShotScreen ("reserves_roster")
+	newcomer = Reserves.Shown["Reserves"][0]
+	_Check ("reserves: none joins a full party", Reserves.Join (newcomer), -1)
+	# bury the dead, the first reserve joins
+	_Check ("reserves: swap the dead for a reserve", Reserves.Swap (victim, newcomer) >= 0, True)
+	yield
+	party = [_Id (pc) for pc in range (1, GemRB.GetPartySize () + 1)]
+	_Check ("reserves: the newcomer is the fourth", [len (party), party[-1]], [4, newcomer])
+	_Check ("reserves: it is chosen, level 0, 10 XP, its pick pending", [_Funnel (newcomer)["StatusName"], GemRB.GetDCCStats (newcomer)["Level"], GemRB.GetDCCStats (newcomer)["XP"], _Funnel (newcomer)["ClassPending"]], ["chosen", 0, 10, 1])
+	_Check ("reserves: nine wait now", len (GemRB.GetDCCReserves ()), 9)
+	_Check ("reserves: the dead one is buried, its grave kept", [Saved["victim"] in [GemRB.GetPlayerName (pc, 0) for pc in range (1, 5)], len (Roster.GraveLinesAll ())], [False, 3])
+	# its class pick comes up
+	yield from _Wait (lambda: ClassPick.Window, 10)
+	_Check ("reserves: the newcomer's class pick opens", [bool (ClassPick.Window), ClassPick.Shown], [True, newcomer])
+	if ClassPick.Window:
+		race = GemRB.GetPlayerStat (newcomer, IE_RACE)
+		want = ClassPick.Last["Choice"]["Class"] if race != 1 else 2
+		ClassPick.Choose (want)
+		ClassPick.Confirm ()
+		yield
+		if DCCLearn.Window:
+			DCCLearn.Confirm ()
+		_Check ("reserves: the newcomer is level 1", GemRB.GetDCCStats (newcomer)["Level"], 1)
+	# a living party member goes back to the reserves, level 1 and all
+	first = _Id (1)
+	Reserves.Open ()
+	_Check ("reserves: dismiss the first", Reserves.Dismiss (1), 0)
+	_Check ("reserves: dismissed, in the reserves, still level 1", [GemRB.GetPartySize (), first in GemRB.GetDCCReserves (), GemRB.GetDCCStats (first)["Level"], _Funnel (first)["StatusName"]], [3, True, 1, "reserve"])
+	_Check ("reserves: and back again (room for one)", Reserves.Join (first) >= 0, True)
+	Reserves.Leave ()
+	_Check ("reserves: closed, the camp's global cleared", [Reserves.Window, GemRB.GetGameVar ("DCC_CAMP")], [None, 0])
+	yield
+	Saved["reserves2"] = sorted (GemRB.GetDCCReserves ())
+	Saved["reserveNames"] = sorted (GemRB.GetPlayerName (i, 0) for i in GemRB.GetDCCReserves ())
+	Saved["graves"] = GemRB.GetDCCGraveyard ()
+	Saved["party"] = [GemRB.GetPlayerName (pc, 0) for pc in range (1, GemRB.GetPartySize () + 1)]
+	for game in [g for g in GemRB.GetSaveGames () if g.GetName () == ReserveSave]:
+		GemRB.DeleteSaveGame (game)
+	_Check ("reserves: game saved", GemRB.SaveGame (None, ReserveSave), 0)
+
+def _StepReserves ():
+	global ReserveSteps
+	if ReserveSteps is None:
+		ReserveSteps = _Reserves ()
+	try:
+		next (ReserveSteps)
+		return "reserves"
+	except StopIteration:
+		games = [g for g in GemRB.GetSaveGames () if g.GetName () == ReserveSave]
+		if not games:
+			return "done"
+		_Log ("loading the save '%s'" % ReserveSave)
+		def Load ():
+			GemRB.LoadGame (games[0])
+			GemRB.EnterGame ()
+		GemRB.QuitGame ()
+		GemRB.SetTimer (Load, 0, 0)
+		return "rsvloading"
+
+def _StepReservesLoaded ():
+	_Check ("loaded: the party of four", [GemRB.GetPlayerName (pc, 0) for pc in range (1, GemRB.GetPartySize () + 1)], Saved.get ("party"))
+	_Check ("loaded: the party size stays four", [GemRB.GetGameVar ("DCC_PARTY_SIZE"), GemRB.GetGameVar ("DCC_FUNNEL")], [4, 4])
+	_Check ("loaded: the reserves with their records", sorted (GemRB.GetPlayerName (i, 0) for i in GemRB.GetDCCReserves ()), Saved.get ("reserveNames"))
+	_Check ("loaded: the reserves' pick still pending, level 0", sorted (set ((GemRB.GetDCCStats (i)["Level"], GemRB.GetDCCStats (i)["XP"], _Funnel (i)["ClassPending"], _Funnel (i)["StatusName"]) for i in GemRB.GetDCCReserves ())), [(0, 10, 1, "reserve")])
+	_Check ("loaded: the graveyard (the game's record)", GemRB.GetDCCGraveyard (), Saved.get ("graves"))
+	import Roster
+	Roster.UpdateRoster ()
+	_Check ("loaded: the roster of four", len (Roster.Tiles), 4)
+	return "done"
 
 StepTable = {
 	"run": _StepRun,
@@ -1159,11 +1461,14 @@ StepTable = {
 	"rolling": _StepRolling,
 	"rollopen": _StepRollOpen,
 	"rolled": _StepRolled,
+	"choose": _StepChoose,
+	"reserves": _StepReserves,
+	"rsvloaded": _StepReservesLoaded,
 }
 
 def _Tick (token):
 	global Step, Failures
-	if token != Token or Step in ("loading", "finished", "rollwait"):
+	if token != Token or Step in ("loading", "finished", "rollwait", "rsvloading"):
 		return
 	try:
 		if Step == "wait":
@@ -1194,5 +1499,7 @@ def OnGameStart ():
 		Step = "loaded"
 	elif Step == "rollwait":
 		Step = "rolled"
+	elif Step == "rsvloading":
+		Step = "rsvloaded"
 	token = Token
 	GemRB.SetTimer (lambda: _Tick (token), 500, -1)

@@ -1105,4 +1105,48 @@ TEST(NetProtocolTest, VersionProofReject)
 	EXPECT_FALSE(NetDecodeAnyReject(nullptr, 0, out, version));
 }
 
+TEST(NetProtocolTest, FunnelRecordAndCardEdits)
+{
+	// v15 (M3.3): the game's DCC record (the graveyard) and a player's change to its own card
+	EXPECT_EQ(NET_PROTOCOL_VERSION, 15);
+	NetDCCRecord record;
+	record.data = { 'D', 'C', 'C', 'G', 1, 0, 0, 0, 12, 0, 0, 0 };
+	auto data = NetEncode(record);
+	EXPECT_EQ(data[2], uint8_t(NetMsgType::DCCRecord));
+	NetDCCRecord recordBack;
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), recordBack));
+	EXPECT_EQ(recordBack.data, record.data);
+
+	NetCardEdit edit;
+	edit.partySlot = 7;
+	edit.field = NetCardEdit::Name;
+	edit.text = "Gristlewick";
+	data = NetEncode(edit);
+	EXPECT_EQ(data.size(), NET_HEADER_SIZE + 2 + 2 + 11);
+	NetCardEdit back;
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), back));
+	EXPECT_EQ(back.partySlot, 7);
+	EXPECT_EQ(back.field, NetCardEdit::Name);
+	EXPECT_EQ(back.text, "Gristlewick");
+	edit.field = NetCardEdit::Alignment;
+	edit.text = "3";
+	data = NetEncode(edit);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), back));
+	EXPECT_EQ(back.field, NetCardEdit::Alignment);
+	// a name is cut at 32 bytes, on a character boundary
+	edit.field = NetCardEdit::Name;
+	edit.text = std::string(31, 'a') + "\xc3\xa6";
+	data = NetEncode(edit);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), back));
+	EXPECT_EQ(back.text, std::string(31, 'a'));
+	// no slot 0 or past 16, no unknown field
+	for (auto bad : { std::make_pair(0, 0), std::make_pair(17, 0), std::make_pair(3, 2) }) {
+		edit.partySlot = uint8_t(bad.first);
+		edit.field = uint8_t(bad.second);
+		edit.text = "x";
+		data = NetEncode(edit);
+		EXPECT_FALSE(NetDecode(data.data(), data.size(), back)) << bad.first << " " << bad.second;
+	}
+}
+
 }

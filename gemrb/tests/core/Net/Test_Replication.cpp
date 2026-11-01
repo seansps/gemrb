@@ -449,6 +449,12 @@ TEST(NetReplicationTest, GuiOps)
 	EXPECT_EQ(NetGuiInfo(NetGuiOp::SetupQuickSpell).permission, NetPermission::CharacterRecords);
 	EXPECT_TRUE(NetGuiInfo(NetGuiOp::SetMapnote).text);
 	EXPECT_FALSE(NetGuiInfo(NetGuiOp::SetMapnote).hostOnly);
+	// M3.3 (v15): a level-0 character's alignment and god, its owner's (predicted, not host only)
+	EXPECT_STREQ(NetGuiInfo(NetGuiOp::DCCSetAlignment).name, "DCCSetAlignment");
+	EXPECT_EQ(NetGuiInfo(NetGuiOp::DCCSetAlignment).actorArg, 0);
+	EXPECT_EQ(NetGuiInfo(NetGuiOp::DCCSetAlignment).minArgs, 3u);
+	EXPECT_EQ(NetGuiInfo(NetGuiOp::DCCSetAlignment).permission, NetPermission::Control);
+	EXPECT_FALSE(NetGuiInfo(NetGuiOp::DCCSetAlignment).hostOnly);
 	EXPECT_STREQ(NetGuiInfo(NetGuiOp::count).name, "?");
 }
 

@@ -764,6 +764,13 @@ public:
 	 * later it must be the current class. Rolls the hit die + Sta mod (+ augur), at least 1.
 	 * Returns the hp gained, -1 if refused. roller (1..sides) replaces the RNG, for tests */
 	int DCCLevelUp(int classID, const DCC::Roller* roller = nullptr);
+	/** M3.3: a near death on the funnel record of a peasant in the funnel (its hit points fell below
+	 * 2 and it lives, or always: it started bleeding out, it was rolled over and lived) */
+	void DCCFunnelNearDeath(int oldHP, int newHP, bool always = false);
+	/** M3.3: the player's choice of alignment (FunnelRoll's codes: 1 lawful, 2 neutral, 3 chaotic)
+	 * and a cleric's god (dccgods.2da's ID; 0 none, -1 the god follows: kept if it is of the
+	 * alignment, else none). Level 0 only; false for a god of another alignment */
+	bool DCCSetAlignment(int code, int god = -1);
 	/** a night's rest heals ability loss (Luck excepted): 1 point, 2 with bed rest */
 	void DCCRestHeal(bool bedRest);
 	// encumbrance by body weight (M2.10, equipment.md)

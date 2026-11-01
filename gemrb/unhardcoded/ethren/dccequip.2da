@@ -1,0 +1,32 @@
+2DA V1.0
+*
+# ethren (M3.3): Table 3-4, the random equipment item every 0-level character starts with (d24,
+# docs/rules/equipment.md), for the funnel's rolling screen. Rows by the d24 roll. ITEM is the item the
+# peasant gets (* none yet: the rolling screen logs it); a game or test game ships its own copy with its
+# items. NAME is what the card shows (_ for spaces); COUNT how many of it (iron spikes and torches come one
+# each, as the table prices them).
+     ITEM      NAME                   COUNT
+1    *         Backpack               1
+2    *         Candle                 1
+3    *         Chain,_10'             1
+4    *         Chalk                  1
+5    *         Chest,_empty           1
+6    *         Crowbar                1
+7    *         Flask,_empty           1
+8    *         Flint_&_steel          1
+9    *         Grappling_hook         1
+10   *         Small_hammer           1
+11   *         Holy_symbol            1
+12   *         Holy_water             1
+13   *         Iron_spike             1
+14   *         Lantern                1
+15   *         Hand_mirror            1
+16   *         Oil_flask              1
+17   *         10'_pole               1
+18   *         Rations,_a_day         1
+19   *         Rope,_50'              1
+20   *         Large_sack             1
+21   *         Small_sack             1
+22   *         Thieves'_tools         1
+23   *         Torch                  1
+24   *         Waterskin              1

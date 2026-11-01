@@ -47,6 +47,7 @@
 #include "DCC/Combat.h"
 #include "DCC/CombatTables.h"
 #include "DCC/Deeds.h"
+#include "DCC/Funnel.h"
 #include "DCC/Luck.h"
 #include "DCC/Rules.h"
 #include "DCC/Stats.h"
@@ -2057,6 +2058,7 @@ bool Actor::DCCStartBleeding()
 	fx->Target = FX_TARGET_PRESET;
 	core->ApplyEffect(std::move(fx), this, this);
 	Feedback(fmt::format(u"{} falls, bleeding out: {} round{} to heal", Name(this), rounds, rounds == 1 ? u"" : u"s"), FT_COMBAT);
+	DCCFunnelNearDeath(0, 0, true);
 	return true;
 }
 
@@ -2159,37 +2161,73 @@ static std::string FunnelPlace(const Map* map)
 
 void Actor::DCCOnDeath(const Scriptable* killer)
 {
-	const Game* game = core->GetGame();
+	Game* game = core->GetGame();
 	dccDiedTime = game ? std::max<ieDword>(game->GameTime, 1) : 1;
 	// its group may lose heart (combat.md "Morale")
 	DCCGroupMorale();
+	// who killed it: the killer, else who struck the blow (a death at 0 hp comes from the hit points
+	// changing, with no killer)
+	Actor* by = game && killer ? game->GetActorByGlobalID(killer->GetGlobalID()) : nullptr;
+	if (by && by->Type != ST_ACTOR) by = nullptr;
+	if (!by && dccHitBy && game) by = game->GetActorByGlobalID(dccHitBy);
+	if (by == this) by = nullptr;
+	// M3.3: a kill for the funnel record of a peasant still in the funnel (the choose-your-four cards)
+	if (by && by->dccExt.funnel.status == DCC::FunnelStatus::Alive && by->dccExt.funnel.kills < 0xffff) {
+		by->dccExt.funnel.kills++;
+		by->DCCExtChanged();
+	}
 	if (!IsDCCCharacter()) return;
 	BaseStats[IE_DCC_DIEDAT] = game ? std::max<ieDword>(game->GameTime, 1) : 1;
 	BaseStats[IE_DCC_BODY] = 0;
-	// the funnel (Phase 3): a peasant in it is now one of its dead, with the time and place
-	if (dccExt.funnel.status == DCC::FunnelStatus::Alive) {
-		dccExt.funnel.status = DCC::FunnelStatus::Dead;
-		dccExt.funnel.diedAt = BaseStats[IE_DCC_DIEDAT];
-		const Map* map = GetCurrentArea();
-		std::string area = map ? std::string(map->GetScriptRef().c_str()) : std::string();
-		std::transform(area.begin(), area.end(), area.begin(), [](unsigned char c) { return char(std::tolower(c)); });
-		dccExt.funnel.diedIn = area;
-		// M3.2: the cause, for the graveyard: who, with what, where
-		const Actor* by = Scriptable::As<Actor>(killer);
-		// a death at 0 hp comes from the hit points changing, with no killer: who struck the blow
-		if (!by && dccHitBy && game) by = game->GetActorByGlobalID(dccHitBy);
-		DCC::Funnel& funnel = dccExt.funnel;
-		funnel.killer = by && by != this ? MBStringFromString(by->GetName()) : std::string();
-		funnel.cause = HarmName(dccHitSource);
-		if (funnel.cause.empty() && by && by != this) {
-			// a weapon in its hand, else bare hands or claws
-			int slot = 0;
-			const CREItem* weapon = by->inventory.GetUsedWeapon(false, slot);
-			if (weapon && !by->inventory.FistsEquipped()) funnel.cause = HarmName(weapon->ItemResRef);
-		}
-		if (funnel.cause.empty()) funnel.cause = dccDeathNote;
-		funnel.place = FunnelPlace(map);
+	// the funnel (Phase 3): a peasant in it (or one of the four after it, M3.3) is now one of its
+	// dead, with the time and place
+	DCC::Funnel& funnel = dccExt.funnel;
+	if (funnel.status != DCC::FunnelStatus::Alive && funnel.status != DCC::FunnelStatus::Chosen && funnel.status != DCC::FunnelStatus::Reserve) return;
+	funnel.status = DCC::FunnelStatus::Dead;
+	funnel.diedAt = BaseStats[IE_DCC_DIEDAT];
+	const Map* map = GetCurrentArea();
+	std::string area = map ? std::string(map->GetScriptRef().c_str()) : std::string();
+	std::transform(area.begin(), area.end(), area.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+	funnel.diedIn = area;
+	// M3.2: the cause, for the graveyard: who, with what, where
+	funnel.killer = by ? MBStringFromString(by->GetName()) : std::string();
+	funnel.cause = HarmName(dccHitSource);
+	if (funnel.cause.empty() && by) {
+		// a weapon in its hand, else bare hands or claws
+		int slot = 0;
+		const CREItem* weapon = by->inventory.GetUsedWeapon(false, slot);
+		if (weapon && !by->inventory.FistsEquipped()) funnel.cause = HarmName(weapon->ItemResRef);
 	}
+	if (funnel.cause.empty()) funnel.cause = dccDeathNote;
+	funnel.place = FunnelPlace(map);
+	DCCExtChanged();
+	// M3.3: its grave in the game's own record, which outlasts its place in the party
+	if (game) {
+		DCC::Grave grave;
+		grave.name = MBStringFromString(GetName());
+		grave.occupation = dccExt.occupation.id;
+		grave.sub = dccExt.occupation.sub;
+		grave.order = funnel.order;
+		grave.player = funnel.player;
+		grave.level = uint8_t(std::min<ieDword>(BaseStats[IE_LEVEL], 255));
+		grave.classID = uint8_t(std::min<ieDword>(BaseStats[IE_CLASS], 255));
+		grave.kills = funnel.kills;
+		grave.diedAt = funnel.diedAt;
+		grave.diedIn = funnel.diedIn;
+		grave.killer = funnel.killer;
+		grave.cause = funnel.cause;
+		grave.place = funnel.place;
+		game->dccRecord.graves.push_back(std::move(grave));
+	}
+}
+
+void Actor::DCCFunnelNearDeath(int oldHP, int newHP, bool always)
+{
+	DCC::Funnel& funnel = dccExt.funnel;
+	if (funnel.status != DCC::FunnelStatus::Alive || funnel.nearDeaths == 0xff) return;
+	if (!always && !DCC::NearDeath(oldHP, newHP)) return;
+	funnel.nearDeaths++;
+	DCCExtChanged();
 }
 
 bool Actor::DCCBodyRecoverable() const
@@ -2229,10 +2267,15 @@ int Actor::DCCRecoverBody(const Actor* ally, int natural)
 	ApplyCombat(CombatEffect::RollMod, BODY_RECOVERY_PENALTY, hour, this, this);
 	BaseStats[IE_DCC_DIEDAT] = 0;
 	if (dccExt.funnel.status == DCC::FunnelStatus::Dead) {
-		dccExt.funnel.status = DCC::FunnelStatus::Alive;
+		// M3.3: out of the graveyard again (and a near death on its funnel record)
+		Game* game = core->GetGame();
+		if (game) game->dccRecord.RemoveGrave(dccExt.funnel.order, dccExt.funnel.diedAt);
+		dccExt.funnel.status = BaseStats[IE_LEVEL] ? DCC::FunnelStatus::Chosen : DCC::FunnelStatus::Alive;
 		dccExt.funnel.flags |= DCC::FUNNEL_RECOVERED;
 		dccExt.funnel.diedAt = 0;
 		dccExt.funnel.diedIn.clear();
+		DCCFunnelNearDeath(0, 1, true);
+		DCCExtChanged();
 	}
 	Feedback(line + fmt::format(u"alive at 1 hp, -1 {} for good, {} to all rolls for an hour", names[which], BODY_RECOVERY_PENALTY), FT_COMBAT);
 	return 1;

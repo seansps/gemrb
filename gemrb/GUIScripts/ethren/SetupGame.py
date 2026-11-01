@@ -63,14 +63,21 @@ def _GiveItem (pc, card, item, what, slots = None, count = 0):
 		GemRB.CreateItem (pc, item, slot)
 	return item
 
+def ScriptName (order):
+	"""a rolled peasant's script name: unique in the game, kept when it leaves the party (the reserves)"""
+	return "DCCPEAS%02d" % order
+
 def CreatePeasant (card, template, owner = -1):
-	"""one card as a party member in its roster slot: abilities, Luck and augur, HP, species, sex,
-	alignment, the OCCU and FUNL records, the occupation's weapon (equipped), ammunition and trade
-	good, the copper (into the purse), the body weight and the looks"""
+	"""one card as a party member in its roster slot: a script name of its own, abilities, Luck and
+	augur, HP, species, sex, alignment (the card's, the player's choice), the OCCU and FUNL records,
+	the occupation's weapon (equipped), ammunition and trade good, Table 3-4's item, the copper (into
+	the purse), the body weight and the looks"""
 	slot = card["Order"]
 	GemRB.CreatePlayer (template, slot | 0x8000)
 	pc = slot
 	GemRB.SetPlayerName (pc, card["Name"], 0)
+	# M3.3: a script name of its own (the template's is everyone's), eg. DCCPEAS07
+	GemRB.DCCSetScriptName (pc, ScriptName (slot))
 	for stat, score in zip (SCORE_STATS, card["Scores"]):
 		GemRB.SetPlayerStat (pc, stat, score)
 	GemRB.SetPlayerStat (pc, IE_DCC_AUGUR, card["Augur"])
@@ -92,6 +99,9 @@ def CreatePeasant (card, template, owner = -1):
 	good = ""
 	if not card["GoodCopper"]:
 		good = _GiveItem (pc, card, card["GoodItem"], card["GoodName"])
+	# M3.3: Table 3-4's random item, in the pack (logged while the game has no item for it)
+	if card.get ("EquipmentName"):
+		_GiveItem (pc, card, card["EquipmentItem"], card["EquipmentName"], None, card["EquipmentCount"] if card["EquipmentCount"] > 1 else 0)
 	GemRB.DCCSetOccupation (pc, card["Occupation"], card["Sub"], good, weapon, card["Skills"])
 	GemRB.DCCSetFunnel (pc, 1, slot, owner, 0)
 	# the body weight was rolled for the template's race when it joined: again for its own

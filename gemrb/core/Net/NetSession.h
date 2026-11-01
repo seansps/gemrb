@@ -137,6 +137,17 @@ public:
 	 * order), shown to every player in the lobby until the game runs; an empty list takes them away */
 	bool SetLobbyCards(const std::vector<std::string>& cards);
 	bool SetPermission(uint8_t slot, NetPermission perm, bool allowed);
+	/** a player's change to one of its own cards on the rolling screen (M3.3, v15) */
+	struct CardEdit {
+		uint8_t partySlot = 0;
+		uint8_t field = 0; // NetCardEdit::Field
+		std::string text;
+		uint8_t player = 0;
+	};
+	/** client, in the lobby: change one of our own cards (the host's screen applies it) */
+	bool EditCard(uint8_t partySlot, uint8_t field, const std::string& text);
+	/** host: the players' card edits since the last call, in the order they came */
+	std::vector<CardEdit> TakeCardEdits();
 	/** everyone is ready: from now on joins get the game, which the GUI starts next */
 	bool StartGame();
 	bool CanStart() const;

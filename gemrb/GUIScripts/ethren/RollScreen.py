@@ -13,8 +13,11 @@
 # Co-op: the host opens it from the lobby's Start (NetLobby.BeforeStart), while everyone waits in the
 # lobby, and deals the cards: a card's player button hands its party slot to the next player (the
 # lobby's own slot split, NetAssign, M2.9). The cards go to everyone with the lobby (NetSetLobbyCards,
-# protocol v14); clients see them read-only, theirs marked (OpenView, WatchLobby). Only the host rolls
+# protocol v14); clients see them, theirs marked (OpenView, WatchLobby). Only the host rolls, deals
 # and accepts; accepting starts the game, and each peasant's funnel record keeps who it was dealt to.
+# M3.3: a card's alignment is the player's choice (the roll is the default; its button cycles lawful,
+# neutral, chaotic), and a client may rename and change the alignment of the cards dealt to it
+# (GemRB.NetEditCard, protocol v15): the host's screen applies them (NetTakeCardEdits) and publishes.
 # Built from code in the demo's plain colours; Phase 5 skins it.
 
 import GemRB
@@ -35,7 +38,7 @@ OPTIONS_ID = 98
 COLUMNS = 4
 GAP = 6
 TOP = 44
-CARD_BASE = 1000 # card i's controls: 1000 + 10 i + 0 backdrop, 1 name, 2 player, 3 reroll, 4 text
+CARD_BASE = 1000 # card i's controls: 1000 + 10 i + 0 backdrop, 1 name, 2 player, 3 reroll, 4 text, 5 alignment
 
 Cards = None # the current roll: FunnelRoll cards, in roster order
 Options = FunnelRoll.Options ()
@@ -51,6 +54,7 @@ Published = None # what the lobby has (host)
 Watching = False
 NamesToShow = set () # cards whose name field must be filled again (a new roll, a rename)
 Shown = {} # what the screen shows, for tests: order -> [name, lines...], "Status", "Owners"
+ClientNames = {} # co-op client: order -> the name the lobby last had for our own card (to see our typing)
 
 def _Log (text):
 	print ("[Roll] " + text)
@@ -116,6 +120,47 @@ def Rename (index, name):
 	NamesToShow.add (index)
 	_Changed ()
 	return True
+
+def SetAlignment (index, code):
+	"""the player's choice of a card's alignment (M3.3; the roll was the default)"""
+	if not Cards or not 0 <= index < len (Cards) or not FunnelRoll.SetAlignment (Cards[index], code):
+		return False
+	_Log ("card %d: %s" % (index + 1, FunnelRoll.ALIGNMENTS[code]))
+	_Changed ()
+	return True
+
+def NextAlignment (index):
+	"""the card's alignment button: the host's (or single player's) for any card, a client's for its own"""
+	if Mode == "client":
+		lines = _ClientCards ().get (index + 1)
+		if not lines or Owners ().get (index + 1) != _Lobby ()["Slot"]:
+			return False
+		code = _AlignmentOf (lines)
+		return GemRB.NetEditCard (index + 1, 1, str (FunnelRoll.NextAlignment (code)))
+	if not Cards or not 0 <= index < len (Cards):
+		return False
+	return SetAlignment (index, FunnelRoll.NextAlignment (Cards[index]["Alignment"]))
+
+def _AlignmentOf (lines):
+	"""a card's alignment from its text (what a client has of it)"""
+	for code, name in FunnelRoll.ALIGNMENTS.items ():
+		if any (name in line for line in lines[1:]):
+			return code
+	return 2
+
+def TakeEdits ():
+	"""host: the players' changes to their own cards (the engine checked they are theirs)"""
+	if Mode != "host" or not Cards:
+		return []
+	edits = GemRB.NetTakeCardEdits ()
+	for edit in edits:
+		index = edit["Slot"] - 1
+		if edit["Field"] == 0:
+			ok = Rename (index, edit["Text"])
+		else:
+			ok = SetAlignment (index, int (edit["Text"]) if edit["Text"].isdigit () else 0)
+		_Log ("player %d changes card %d (%s '%s'): %s" % (edit["Player"], edit["Slot"], "name" if edit["Field"] == 0 else "alignment", edit["Text"], ok))
+	return edits
 
 def SetOption (name, on):
 	setattr (Options, name, bool (on))
@@ -245,12 +290,11 @@ def _Build ():
 	for i in range (count):
 		x, y, w, h = _Frame (i, count)
 		base = CARD_BASE + 10 * i
-		if Mode == "client":
-			win.CreateLabel (base + 1, x + 6, y + 4, w - 70, 24, Font, "", IE_FONT_ALIGN_LEFT | IE_FONT_ALIGN_MIDDLE)
-		else:
-			edit = win.CreateSubview (base + 1, IE_GUI_EDIT, {'x': x + 6, 'y': y + 4, 'w': w - 130, 'h': 24}, (Font, 32, Cursor))
-			edit.SetBackground (EditColor)
-			edit.SetTooltip ("The peasant's name: type to change it")
+		# the name: a text field (a client's own cards are its to rename, M3.3)
+		edit = win.CreateSubview (base + 1, IE_GUI_EDIT, {'x': x + 6, 'y': y + 4, 'w': w - 130, 'h': 24}, (Font, 32, Cursor))
+		edit.SetBackground (EditColor)
+		edit.SetTooltip ("The peasant's name: type to change it" if Mode != "client" else "Your peasants' names are yours to change")
+		align = _Button (win, base + 5, x + w - 84, y + h - 28, 78, 24, "", lambda index = i: NextAlignment (index), "Alignment: the player's choice (the roll is only the default)", CardFont)
 		player = _Button (win, base + 2, x + w - 120, y + 4, 54, 24, "", lambda order = i + 1: DealNext (order), None, CardFont)
 		if Mode != "host":
 			player.SetState (IE_GUI_BUTTON_LOCKED)
@@ -307,10 +351,23 @@ def Refresh ():
 		name, body = _Control (index, 1), _Control (index, 4)
 		if not name or not body:
 			continue
-		# the host's own name fields only when the card changed under them (typing is read by _ReadNames)
-		if Mode == "client" or index in NamesToShow:
+		# the host's own name fields only when the card changed under them (typing is read by _ReadNames);
+		# a client's own likewise (its typing goes to the host, _SendNames), the others' always
+		if Mode == "client":
+			mine = owners.get (order) == me
+			typed = (name.QueryText () or "").strip ()
+			# our own card: only while we aren't typing something else into it
+			if not mine or not typed or typed == ClientNames.get (order) or typed == lines[0]:
+				if typed != lines[0]:
+					name.SetText (lines[0])
+				ClientNames[order] = lines[0]
+		elif index in NamesToShow:
 			name.SetText (lines[0])
 			NamesToShow.discard (index)
+		align = _Control (index, 5)
+		if align:
+			align.SetText (FunnelRoll.ALIGNMENTS.get (_AlignmentOf (lines), "?"))
+			align.SetState (IE_GUI_BUTTON_ENABLED if Mode != "client" or owners.get (order) == me else IE_GUI_BUTTON_LOCKED)
 		body.SetText ("\n".join (lines[1:]))
 		owner = owners.get (order, 0)
 		player, backdrop, reroll = _Control (index, 2), _Control (index, 0), _Control (index, 3)
@@ -328,7 +385,7 @@ def Refresh ():
 	status = Window.GetControl (0x10000001)
 	if Mode == "client":
 		mine = sorted (order for order in cards if owners.get (order) == me)
-		text = "The host is rolling and dealing; yours: %s" % (", ".join (str (o) for o in mine) or "none yet")
+		text = "The host is rolling and dealing; yours: %s (rename them and pick their alignment)" % (", ".join (str (o) for o in mine) or "none yet")
 	else:
 		rules = [name for name, on in (("reroll one", Options.rerollOne), ("4d6 drop the lowest", Options.fourDice)) if on]
 		text = "Rename a peasant on its card. House rules: %s." % (", ".join (rules) if rules else "none")
@@ -370,6 +427,7 @@ def _Tick ():
 		return
 	try:
 		_ReadNames ()
+		TakeEdits ()
 		Refresh ()
 	except Exception:
 		Window = None
@@ -485,12 +543,31 @@ def _Watch ():
 			elif len (_ClientCards ()) != _CardCount_Shown ():
 				OpenView ()
 			else:
+				_SendNames ()
 				Refresh ()
 		elif Window and Mode == "client":
 			_Log ("the cards are gone (%s)" % ("the game starts" if lobby["Phase"] != "lobby" else "the host went back"))
 			Close ()
 	except Exception:
 		Window = None
+
+def _SendNames ():
+	"""client: what we typed on our own cards goes to the host (M3.3)"""
+	lobby = _Lobby ()
+	if not lobby or not Window:
+		return
+	owners = Owners ()
+	for order, lines in _ClientCards ().items ():
+		if owners.get (order) != lobby["Slot"]:
+			continue
+		edit = _Control (order - 1, 1)
+		name = (edit.QueryText () or "").strip () if edit else ""
+		if name and name != lines[0] and name != Sent.get (order):
+			Sent[order] = name
+			GemRB.NetEditCard (order, 0, name[:32])
+			_Log ("asked the host to rename card %d to %s" % (order, name))
+
+Sent = {} # client: order -> the last name we asked for
 
 def _CardCount_Shown ():
 	return len ([key for key in Shown if isinstance (key, int)])

@@ -946,6 +946,38 @@ bool NetDCCExtension::Read(NetReader& r)
 	return r.Ok();
 }
 
+void NetDCCRecord::Write(NetWriter& w) const
+{
+	w.Bytes(data.data(), std::min(data.size(), NET_MAX_DCC_RECORD));
+}
+
+bool NetDCCRecord::Read(NetReader& r)
+{
+	data = r.Bytes(NET_MAX_DCC_RECORD);
+	return r.Ok();
+}
+
+void NetCardEdit::Write(NetWriter& w) const
+{
+	w.U8(partySlot);
+	w.U8(field);
+	// at most NET_MAX_CARD_NAME bytes, cut on a character boundary
+	size_t length = std::min(text.size(), NET_MAX_CARD_NAME);
+	while (length < text.size() && length && (uint8_t(text[length]) & 0xc0) == 0x80) {
+		--length;
+	}
+	w.Str(text.substr(0, length));
+}
+
+bool NetCardEdit::Read(NetReader& r)
+{
+	partySlot = r.U8();
+	field = r.U8();
+	text = r.Str();
+	if (!partySlot || partySlot > NET_PARTY_SLOTS || field >= Field::count || text.size() > NET_MAX_CARD_NAME) r.Fail();
+	return r.Ok();
+}
+
 void NetGuiCall::Write(NetWriter& w) const
 {
 	w.U8(uint8_t(op));

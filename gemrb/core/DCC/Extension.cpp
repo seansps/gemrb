@@ -21,6 +21,8 @@ constexpr char TAG_DISAPPROVAL[4] = { 'D', 'I', 'S', 'A' };
 constexpr char TAG_OCCUPATION[4] = { 'O', 'C', 'C', 'U' };
 constexpr char TAG_FUNNEL[4] = { 'F', 'U', 'N', 'L' };
 constexpr char TAG_CHARACTER[4] = { 'C', 'H', 'A', 'R' };
+constexpr char GAME_MAGIC[4] = { 'D', 'C', 'C', 'G' };
+constexpr char TAG_GRAVEYARD[4] = { 'G', 'R', 'A', 'V' };
 
 const char* const SKILL_NAMES[OCCUPATION_SKILL_COUNT] = {
 	"ANIMALS", "FARMING", "HERBALISM", "MEDICINE", "ALCHEMY", "SMITHING", "MASONRY", "CARPENTRY", "MINING", "CRAFT_FINE",
@@ -339,9 +341,11 @@ std::vector<uint8_t> WriteExtension(const CharacterExt& ext)
 	}
 	if (!ext.funnel.Empty()) {
 		const Funnel& funnel = ext.funnel;
-		// version 2 (M3.2) only when there is a cause of death, so other records stay as they were
-		bool cause = !funnel.killer.empty() || !funnel.cause.empty() || !funnel.place.empty();
-		size_t at = BeginRecord(out, TAG_FUNNEL, cause ? 2 : 1);
+		// version 2 (M3.2) only when there is a cause of death, version 3 (M3.3) when it killed or
+		// nearly died, so other records stay as they were
+		bool deeds = funnel.kills || funnel.nearDeaths;
+		bool cause = deeds || !funnel.killer.empty() || !funnel.cause.empty() || !funnel.place.empty();
+		size_t at = BeginRecord(out, TAG_FUNNEL, deeds ? 3 : cause ? 2 : 1);
 		out.U8(uint8_t(funnel.status));
 		out.U8(funnel.order);
 		out.U8(funnel.player);
@@ -353,11 +357,17 @@ std::vector<uint8_t> WriteExtension(const CharacterExt& ext)
 			out.Text(funnel.cause);
 			out.Text(funnel.place);
 		}
+		if (deeds) {
+			out.U16(funnel.kills);
+			out.U8(funnel.nearDeaths);
+			out.U8(0);
+		}
 		EndRecord(out, at);
 		++records;
 	}
 	if (!ext.body.Empty()) {
-		size_t at = BeginRecord(out, TAG_CHARACTER, 2);
+		// version 3 (M3.3) only with a god, so other records stay as they were
+		size_t at = BeginRecord(out, TAG_CHARACTER, ext.body.god ? 3 : 2);
 		out.U16(ext.body.weight);
 		out.U8(uint8_t(ext.body.partyAI));
 		out.U8(0);
@@ -365,6 +375,11 @@ std::vector<uint8_t> WriteExtension(const CharacterExt& ext)
 		out.U8(ext.body.hair);
 		out.U8(ext.body.beard);
 		out.U16(0);
+		if (ext.body.god) {
+			out.U8(ext.body.god);
+			out.U8(0);
+			out.U16(0);
+		}
 		EndRecord(out, at);
 		++records;
 	}
@@ -460,6 +475,11 @@ bool ReadExtension(const uint8_t* data, size_t size, CharacterExt& out)
 				funnel.cause = body.Text();
 				funnel.place = body.Text();
 			}
+			if (recordVersion >= 3) {
+				funnel.kills = body.U16();
+				funnel.nearDeaths = body.U8();
+				body.U8();
+			}
 			if (!body.Ok()) return false;
 		} else if (std::memcmp(tag.data(), TAG_CHARACTER, 4) == 0 && recordVersion >= 1) {
 			ext.body.weight = body.U16();
@@ -468,6 +488,11 @@ bool ReadExtension(const uint8_t* data, size_t size, CharacterExt& out)
 			if (recordVersion >= 2) {
 				ext.body.hair = body.U8();
 				ext.body.beard = body.U8();
+				body.U16();
+			}
+			if (recordVersion >= 3) {
+				ext.body.god = body.U8();
+				body.U8();
 				body.U16();
 			}
 			if (!body.Ok()) return false;
@@ -481,6 +506,138 @@ bool ReadExtension(const uint8_t* data, size_t size, CharacterExt& out)
 	}
 	if (!in.Ok()) return false;
 	out = std::move(ext);
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// the game record (M3.3): "DCCG", the graveyard
+
+bool Grave::operator==(const Grave& o) const
+{
+	return name == o.name && occupation == o.occupation && sub == o.sub && order == o.order && player == o.player && level == o.level &&
+		classID == o.classID && kills == o.kills && diedAt == o.diedAt && diedIn == o.diedIn && killer == o.killer && cause == o.cause && place == o.place;
+}
+
+const Grave* GameRecord::FindGrave(uint8_t order, uint32_t diedAt) const
+{
+	for (const auto& grave : graves) {
+		if (grave.order == order && grave.diedAt == diedAt) return &grave;
+	}
+	return nullptr;
+}
+
+bool GameRecord::RemoveGrave(uint8_t order, uint32_t diedAt)
+{
+	for (auto it = graves.begin(); it != graves.end(); ++it) {
+		if (it->order == order && it->diedAt == diedAt) {
+			graves.erase(it);
+			return true;
+		}
+	}
+	return false;
+}
+
+std::vector<uint8_t> WriteGameRecord(const GameRecord& record)
+{
+	Out out;
+	out.Tag(GAME_MAGIC);
+	out.U16(EXT_VERSION);
+	size_t countAt = out.bytes.size();
+	out.U16(0);
+	out.U32(0);
+	uint16_t records = 0;
+	if (!record.graves.empty()) {
+		size_t at = BeginRecord(out, TAG_GRAVEYARD, 1);
+		out.U16(uint16_t(std::min<size_t>(record.graves.size(), 0xffff)));
+		size_t written = 0;
+		for (const auto& grave : record.graves) {
+			if (written++ == 0xffff) break;
+			out.Text(grave.name);
+			out.U8(grave.occupation);
+			out.U8(grave.sub);
+			out.U8(grave.order);
+			out.U8(grave.player);
+			out.U8(grave.level);
+			out.U8(grave.classID);
+			out.U16(grave.kills);
+			out.U32(grave.diedAt);
+			out.ResRef(grave.diedIn);
+			out.Text(grave.killer);
+			out.Text(grave.cause);
+			out.Text(grave.place);
+		}
+		EndRecord(out, at);
+		++records;
+	}
+	for (const auto& raw : record.other) {
+		size_t at = BeginRecord(out, raw.tag.data(), raw.version);
+		out.bytes.insert(out.bytes.end(), raw.data.begin(), raw.data.end());
+		EndRecord(out, at);
+		++records;
+	}
+	out.bytes[countAt] = uint8_t(records & 0xff);
+	out.bytes[countAt + 1] = uint8_t(records >> 8);
+	out.Patch32(countAt + 2, uint32_t(out.bytes.size()));
+	return out.bytes;
+}
+
+bool ReadGameRecord(const uint8_t* data, size_t size, GameRecord& out)
+{
+	if (!data || size < EXT_HEADER_SIZE || std::memcmp(data, GAME_MAGIC, 4) != 0) return false;
+	size_t total = size_t(data[8]) | (size_t(data[9]) << 8) | (size_t(data[10]) << 16) | (size_t(data[11]) << 24);
+	if (total < EXT_HEADER_SIZE || total > size) return false;
+	In in(data, total);
+	in.U32();
+	if (in.U16() < 1) return false;
+	uint16_t records = in.U16();
+	in.U32();
+
+	GameRecord record;
+	for (uint16_t r = 0; r < records; ++r) {
+		if (!in.Need(EXT_RECORD_HEADER_SIZE)) return false;
+		std::array<char, 4> tag {};
+		for (char& c : tag) {
+			c = char(in.U8());
+		}
+		uint16_t recordVersion = in.U16();
+		in.U16();
+		uint32_t length = in.U32();
+		if (!in.Need(length)) return false;
+		std::vector<uint8_t> bytes(length);
+		for (uint32_t i = 0; i < length; ++i) {
+			bytes[i] = in.U8();
+		}
+		In body(bytes.data(), bytes.size());
+		if (std::memcmp(tag.data(), TAG_GRAVEYARD, 4) == 0 && recordVersion >= 1) {
+			uint16_t count = body.U16();
+			for (uint16_t i = 0; i < count && body.Ok(); ++i) {
+				Grave grave;
+				grave.name = body.Text();
+				grave.occupation = body.U8();
+				grave.sub = body.U8();
+				grave.order = body.U8();
+				grave.player = body.U8();
+				grave.level = body.U8();
+				grave.classID = body.U8();
+				grave.kills = body.U16();
+				grave.diedAt = body.U32();
+				grave.diedIn = body.ResRef();
+				grave.killer = body.Text();
+				grave.cause = body.Text();
+				grave.place = body.Text();
+				if (body.Ok()) record.graves.push_back(std::move(grave));
+			}
+			if (!body.Ok()) return false;
+		} else {
+			RawRecord raw;
+			raw.tag = tag;
+			raw.version = recordVersion;
+			raw.data = std::move(bytes);
+			record.other.push_back(std::move(raw));
+		}
+	}
+	if (!in.Ok()) return false;
+	out = std::move(record);
 	return true;
 }
 

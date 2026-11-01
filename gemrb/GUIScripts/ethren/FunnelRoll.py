@@ -6,8 +6,10 @@
 # (RollScreen.py). docs/rules/funnel.md, "Creation steps": per peasant, 3d6 in order for the six
 # abilities (4d6 drop the lowest as a house option), Table 1-3's occupation (d100, with its sub-rolls:
 # the farmer's crop, a duplicate's animal, the pushcart; 1d6 ammunition for missile weapons), HP 1d4 +
-# Sta (at least 1), the birth augur (d30) with its Luck modifier, 5d12 copper; plus what the game
-# needs: a sex, a name, an alignment and the looks (M2.11's sprites, colours, hair and beard).
+# Sta (at least 1), the birth augur (d30) with its Luck modifier, 5d12 copper, the random equipment
+# item (Table 3-4, d24, M3.3); plus what the game needs: a sex, a name, an alignment (the roll is
+# only the default: the player may pick another on the card, M3.3) and the looks (M2.11's sprites,
+# colours, hair and beard).
 #
 # All of it is here and nothing else: no GUI, and no GemRB import at module level, so the rolls can be
 # unit-tested outside the engine (engine/gemrb/tests/python/test_funnelroll.py). Tables come in as
@@ -85,7 +87,7 @@ def ReadGemRBTable (name):
 		rows.append ((table.GetRowName (r), [str (table.GetValue (r, c, 0)) for c in range (len (columns))]))
 	return Table (columns, rows)
 
-TABLE_NAMES = ("dccoccup", "dccoccit", "dccaugur", "abilmod", "dcclooks", "dccnames")
+TABLE_NAMES = ("dccoccup", "dccoccit", "dccaugur", "abilmod", "dcclooks", "dccnames", "dccequip")
 
 def LoadTables (read = ReadGemRBTable):
 	"""{name: Table} of the tables the rolls need"""
@@ -231,6 +233,30 @@ def RollLooks (die, tables, race, sex):
 		"Colors": [metal, minor, major, skin, leather, metal, hairColour],
 	}
 
+def RollEquipment (die, tables):
+	"""Table 3-4: the random equipment item of a 0-level character (d24, M3.3)"""
+	equipment = tables.get ("dccequip")
+	roll = die (24)
+	if not equipment:
+		return {"Equipment": roll, "EquipmentName": "", "EquipmentItem": "", "EquipmentCount": 0}
+	return {
+		"Equipment": roll,
+		"EquipmentName": equipment.Text (roll, "NAME", "item %d" % roll),
+		"EquipmentItem": (equipment.Get (roll, "ITEM") or "").lower (),
+		"EquipmentCount": max (1, equipment.Int (roll, "COUNT", 1)),
+	}
+
+def SetAlignment (card, code):
+	"""the player's pick (M3.3): 1 lawful, 2 neutral, 3 chaotic; False for another code"""
+	if code not in ALIGNMENTS:
+		return False
+	card["Alignment"] = code
+	return True
+
+def NextAlignment (code):
+	"""the alignment after this one, round: lawful, neutral, chaotic"""
+	return code % 3 + 1
+
 def RollCard (die, tables, order, options = None, earlier = (), taken = ()):
 	"""one peasant. order: its place, 1-16; earlier: the occupation ids rolled before it (duplicate
 	animals); taken: names already given"""
@@ -254,6 +280,8 @@ def RollCard (die, tables, order, options = None, earlier = (), taken = ()):
 	card["Copper"] = sum (die (12) for i in range (5))
 	card["Alignment"] = die (3)
 	card["Looks"] = RollLooks (die, tables, card["Race"], sex)
+	# M3.3: Table 3-4's item, last, so the earlier dice stay where M3.1 had them
+	card.update (RollEquipment (die, tables))
 	return card
 
 def RollAll (die, tables, count = 16, options = None):
@@ -283,7 +311,10 @@ def GearLine (card):
 	weapon = card["WeaponName"]
 	if card["Ammo"]:
 		weapon += ", %d %s" % (card["Ammo"], card["AmmoName"])
-	return "%s; %s" % (weapon, card["GoodName"])
+	line = "%s; %s" % (weapon, card["GoodName"])
+	if card.get ("EquipmentName"):
+		line += "; " + card["EquipmentName"][0].lower () + card["EquipmentName"][1:]
+	return line
 
 def OccupationLine (card):
 	race = card["Race"]

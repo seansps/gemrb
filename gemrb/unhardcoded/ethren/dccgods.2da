@@ -1,0 +1,26 @@
+2DA V1.0
+*
+# ethren (M3.3): the gods a cleric may serve, by alignment (docs/rules/classes.md, "Gods"). A cleric's god
+# must share its alignment: the level-1 class pick offers the gods of the character's alignment, and an
+# alignment change at level 0 drops a god of another one. ID is the CRE extension's CHAR god (IE_DCC_GOD);
+# ALIGN L, N or C; NAME with _ for spaces. The game's own pantheon replaces this list when it is written.
+             ID  ALIGN  NAME
+SHUL         1   L      Shul
+KLAZATH      2   L      Klazath
+ULESH        3   L      Ulesh
+CHORANUS     4   L      Choranus
+DAENTHAR     5   L      Daenthar
+GORHAN       6   L      Gorhan
+JUSTICIA     7   L      Justicia
+ARISTEMIS    8   L      Aristemis
+AMUN_TOR     9   N      Amun_Tor
+ILDAVIR      10  N      Ildavir
+PELAGIA      11  N      Pelagia
+CTHULHU      12  N      Cthulhu
+AHRIMAN      13  C      Ahriman
+HIDDEN_LORD  14  C      The_Hidden_Lord
+AZI_DAHAKA   15  C      Azi_Dahaka
+BOBUGBUBILZ  16  C      Bobugbubilz
+CADIXTAT     17  C      Cadixtat
+NIMLURUN     18  C      Nimlurun
+MALOTOCH     19  C      Malotoch
