@@ -290,6 +290,11 @@ class FunnelRollTest (unittest.TestCase):
 			text = FunnelRoll.CardText (card)
 			self.assertEqual (len (text.split ("\n")), 7)
 			self.assertTrue (len (text.encode ("utf-8")) < 1024) # NetSetLobbyCards' limit
+			# co-op players get the choices too (M3.5): the same text, and the numbers for their buttons
+			lines, choices = FunnelRoll.SplitLobbyText (FunnelRoll.LobbyText (card))
+			self.assertEqual ("\n".join (lines), text)
+			self.assertEqual (choices, {"Race": card["Race"], "Sex": card["Sex"], "Looks": card["Looks"]})
+			self.assertTrue (len (FunnelRoll.LobbyText (card).encode ("utf-8")) < 1024)
 		# the same seed, the same sixteen; another seed, others
 		self.assertEqual (FunnelRoll.RollAll (Seeded (1), TABLES), cards)
 		self.assertNotEqual (FunnelRoll.RollAll (Seeded (2), TABLES), cards)

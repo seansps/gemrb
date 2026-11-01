@@ -1108,7 +1108,7 @@ TEST(NetProtocolTest, VersionProofReject)
 TEST(NetProtocolTest, FunnelRecordAndCardEdits)
 {
 	// v15 (M3.3): the game's DCC record (the graveyard) and a player's change to its own card
-	EXPECT_EQ(NET_PROTOCOL_VERSION, 15);
+	EXPECT_GE(NET_PROTOCOL_VERSION, 15);
 	NetDCCRecord record;
 	record.data = { 'D', 'C', 'C', 'G', 1, 0, 0, 0, 12, 0, 0, 0 };
 	auto data = NetEncode(record);
@@ -1140,13 +1140,33 @@ TEST(NetProtocolTest, FunnelRecordAndCardEdits)
 	ASSERT_TRUE(NetDecode(data.data(), data.size(), back));
 	EXPECT_EQ(back.text, std::string(31, 'a'));
 	// no slot 0 or past 16, no unknown field
-	for (auto bad : { std::make_pair(0, 0), std::make_pair(17, 0), std::make_pair(3, 2) }) {
+	for (auto bad : { std::make_pair(0, 0), std::make_pair(17, 0), std::make_pair(3, 5) }) {
 		edit.partySlot = uint8_t(bad.first);
 		edit.field = uint8_t(bad.second);
 		edit.text = "x";
 		data = NetEncode(edit);
 		EXPECT_FALSE(NetDecode(data.data(), data.size(), back)) << bad.first << " " << bad.second;
 	}
+}
+
+TEST(NetProtocolTest, CardChoiceEdits)
+{
+	// v16 (M3.5): a player picks its own card's species, sex and looks
+	EXPECT_EQ(NET_PROTOCOL_VERSION, 16);
+	NetCardEdit edit;
+	NetCardEdit back;
+	edit.partySlot = 16;
+	for (auto field : { NetCardEdit::Species, NetCardEdit::Sex, NetCardEdit::Look }) {
+		edit.field = field;
+		edit.text = field == NetCardEdit::Look ? "2 -1" : "4";
+		auto data = NetEncode(edit);
+		ASSERT_TRUE(NetDecode(data.data(), data.size(), back));
+		EXPECT_EQ(back.partySlot, 16);
+		EXPECT_EQ(back.field, field);
+		EXPECT_EQ(back.text, edit.text);
+	}
+	EXPECT_STREQ(NetCardEdit::FieldName(NetCardEdit::Look), "look");
+	EXPECT_STREQ(NetCardEdit::FieldName(NetCardEdit::count), "?");
 }
 
 }

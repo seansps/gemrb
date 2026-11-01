@@ -113,11 +113,11 @@ def OpenRoster ():
 	w = (inner - (GROUPS - 1) * 2) // GROUPS
 	for n in range (1, GROUPS + 1):
 		button = _Button (win, 110 + n, GAP + (n - 1) * (w + 2), GROUPS_Y, w, 18, str (n), lambda n = n: SelectGroup (n), None)
-		button.OnRightPress (lambda n = n: SaveGroup (n))
+		button.OnRightPress (lambda control, n = n: SaveGroup (n))
 		button.SetBackground (GroupEmpty)
 		# hot keys are the button's own (one key each), so the saving keys get buttons of their own, hidden
 		saver = win.CreateButton (130 + n, 0, 0, 0, 0)
-		saver.OnPress (lambda n = n: SaveGroup (n))
+		saver.OnPress (lambda control, n = n: SaveGroup (n))
 		saver.SetHotKey (str (n), GEM_MOD_CTRL, True)
 		button.SetHotKey (str (n), GEM_MOD_ALT, True)
 	for i in range (count):
@@ -128,9 +128,9 @@ def OpenRoster ():
 		tile.SetFlags (IE_GUI_BUTTON_ALIGN_LEFT | IE_GUI_BUTTON_ALIGN_TOP | IE_GUI_BUTTON_ALIGN_ANCHOR, OP_OR)
 		tile.SetFlags (IE_GUI_BUTTON_NO_IMAGE, OP_NAND) # its borders (the owner, the HP bar) need it off
 		tile.SetAnchor (OWNER_W + 4, 3)
-		tile.OnShiftPress (lambda slot = i + 1: ToggleSelect (slot))
-		tile.OnRightPress (lambda slot = i + 1: ToggleSelect (slot))
-		tile.OnDoublePress (lambda slot = i + 1: CenterOn (slot))
+		tile.OnShiftPress (lambda control, slot = i + 1: ToggleSelect (slot))
+		tile.OnRightPress (lambda control, slot = i + 1: ToggleSelect (slot))
+		tile.OnDoublePress (lambda control, slot = i + 1: CenterOn (slot))
 	RosterWindow = win
 	_StartTimer ()
 	UpdateRoster ()
@@ -167,7 +167,9 @@ def _Button (win, id, x, y, w, h, text, action, tooltip = None, font = None):
 	button.SetBackground (ButtonColor)
 	button.SetText (text)
 	if action:
-		button.OnPress (action)
+		# the engine passes the button to a handler that takes arguments, which would fill a lambda's
+		# defaults (lambda i = i: ...): the action is called without any
+		button.OnPress (lambda: action ())
 	if tooltip:
 		button.SetTooltip (tooltip)
 	return button

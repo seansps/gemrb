@@ -81,7 +81,7 @@ def OpenLearnWindow (pc = None):
 			offer = choices[index]
 			swap = _Button (win, 10 + i, 316, y, 150, 30, "Swap: " + offer["Name"].replace ("_", " "), lambda old = spell["Spell"], new = offer["Spell"]: Swap (old, new))
 			swap.SetTooltip ("Right click: another choice")
-			swap.OnRightPress (lambda old = spell["Spell"], n = len (choices): _NextChoice (old, n))
+			swap.OnRightPress (lambda control, old = spell["Spell"], n = len (choices): _NextChoice (old, n))
 		if magic["PicksLucky"]:
 			_Button (win, 40 + i, 472, y, 76, 30, "Lucky", lambda s = spell["Spell"]: PickLucky (s), Lucky == spell["Spell"])
 		y += 36
@@ -106,7 +106,9 @@ def _Button (win, id, x, y, w, h, text, action, chosen = False):
 	button.SetFlags (IE_GUI_BUTTON_NO_IMAGE, OP_OR)
 	button.SetBackground (ChosenColor if chosen else ButtonColor)
 	button.SetText (text)
-	button.OnPress (action)
+	# the engine passes the button to a handler that takes arguments, which would fill a lambda's
+	# defaults (lambda i = i: ...): the action is called without any
+	button.OnPress (lambda: action ())
 	return button
 
 def _NextChoice (spell, count):

@@ -454,6 +454,32 @@ def CardText (card):
 	"""the name and the lines, one per line (what co-op players get, NetSetLobbyCards)"""
 	return "\n".join ([card["Name"]] + CardLines (card))
 
+CHOICES_MARK = "~"
+
+def ChoicesLine (card):
+	"""M3.5: the player's choices as numbers, for co-op players' own buttons and paper doll: the race, the
+	sex, the animation, the hair and beard styles and the seven colours"""
+	looks = card["Looks"]
+	return " ".join ([CHOICES_MARK] + [str (v) for v in [card["Race"], card["Sex"], looks["Animation"], looks["Hair"], looks["Beard"]] + looks["Colors"]])
+
+def LobbyText (card):
+	"""what co-op players get of a card (NetSetLobbyCards): its text and, last, its choices line"""
+	return CardText (card) + "\n" + ChoicesLine (card)
+
+def SplitLobbyText (text):
+	"""a lobby card -> (the name and lines, {Race, Sex, Looks} or None)"""
+	lines = text.split ("\n")
+	if len (lines) < 2 or not lines[-1].startswith (CHOICES_MARK + " "):
+		return lines, None
+	try:
+		values = [int (v) for v in lines[-1].split ()[1:]]
+	except ValueError:
+		return lines[:-1], None
+	if len (values) != 12:
+		return lines[:-1], None
+	looks = {"Animation": values[2], "Hair": values[3], "Beard": values[4], "Colors": values[5:]}
+	return lines[:-1], {"Race": values[0], "Sex": values[1], "Looks": looks}
+
 def Summary (card):
 	"""one line for logs and tests"""
 	return "%d %s: %s, %s, HP %d, %s, %d cp" % (card["Order"], card["Name"], " ".join (str (s) for s in card["Scores"]), card["OccupationName"], card["HP"], card["AugurName"], card["Copper"])

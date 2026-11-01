@@ -117,7 +117,9 @@ def _Button (win, id, x, y, w, h, text, action):
 	button.SetFont (CardFont)
 	button.SetBackground (ButtonColor)
 	button.SetText (text)
-	button.OnPress (action)
+	# the engine passes the button to a handler that takes arguments, which would fill a lambda's
+	# defaults (lambda i = i: ...): the action is called without any
+	button.OnPress (lambda: action ())
 	return button
 
 def _Gods ():

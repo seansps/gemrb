@@ -18,6 +18,8 @@
 # M3.3: a card's alignment is the player's choice (the roll is the default; its button cycles lawful,
 # neutral, chaotic), and a client may rename and change the alignment of the cards dealt to it
 # (GemRB.NetEditCard, protocol v15): the host's screen applies them (NetTakeCardEdits) and publishes.
+# M3.5: the species, sex and looks are the player's too, a client's for its own cards (protocol v16); each
+# card in the lobby ends with its choices as numbers (FunnelRoll.LobbyText), for a client's buttons and doll.
 # Built from code in the demo's plain colours; Phase 5 skins it.
 
 import GemRB
@@ -52,7 +54,7 @@ Window = None
 OptionsWindow = None
 LooksWindow = None
 LooksIndex = None # the card the paper doll shows
-Doll = {"Face": 0, "Frame": 0, "Ticking": False}
+Doll = {"Face": 0, "Frame": 0, "Ticking": False, "Looks": None, "Shown": None}
 Mode = None # "single", "host" or "client"
 OnAccept = None # single: starts the game; host: NetLobby's start, False if it can't
 OnBack = None
@@ -159,6 +161,35 @@ def _Card (index):
 		return None
 	return Cards[index]
 
+def _View (index, parsed = None):
+	"""what the choice buttons and the paper doll show of a card: Name, Title, Race, Sex, Looks; the
+	host's own card, or a client's copy from the lobby (parsed: _ClientParsed's, if the caller has it)"""
+	card = _Card (index)
+	if card:
+		return {"Name": card["Name"], "Title": "%s: %s" % (card["Name"], FunnelRoll.OccupationLine (card)),
+			"Race": card["Race"], "Sex": card["Sex"], "Looks": card["Looks"]}
+	if Mode != "client" or index is None:
+		return None
+	lines, choices = (parsed if parsed is not None else _ClientParsed ()).get (index + 1, (None, None))
+	if not lines or not choices:
+		return None
+	return dict (choices, Name = lines[0], Title = "%s: %s" % (lines[0], lines[3] if len (lines) > 3 else ""))
+
+def _Editable (index):
+	"""the host (or single player) changes any card, a client only those dealt to it"""
+	if Mode != "client":
+		return _Card (index) is not None
+	lobby = _Lobby ()
+	return bool (lobby) and Owners ().get (index + 1) == lobby["Slot"]
+
+def _AskHost (index, field, text):
+	"""client: a choice on one of our own cards goes to the host, whose screen makes it (M3.5)"""
+	if not _Editable (index):
+		return False
+	ok = GemRB.NetEditCard (index + 1, field, text)
+	_Log ("asked the host to change card %d (field %d '%s'): %s" % (index + 1, field, text, ok))
+	return ok
+
 def SetSpecies (index, race):
 	card = _Card (index)
 	_ReadNames ()
@@ -171,24 +202,42 @@ def SetSpecies (index, race):
 	return True
 
 def NextSpecies (index):
-	card = _Card (index)
-	if not card:
+	view = _View (index)
+	if not view:
 		return False
 	races = [race for race, name in FunnelRoll.SPECIES]
-	return SetSpecies (index, races[(races.index (card["Race"]) + 1) % len (races)] if card["Race"] in races else 1)
+	race = races[(races.index (view["Race"]) + 1) % len (races)] if view["Race"] in races else 1
+	if Mode == "client":
+		return _AskHost (index, 2, str (race))
+	return SetSpecies (index, race)
 
-def NextSex (index):
+def SetSex (index, sex):
 	card = _Card (index)
 	_ReadNames ()
+	if not card or sex not in (1, 2):
+		return False
 	others = [c["Name"] for i, c in enumerate (Cards) if i != index]
-	if not card or not FunnelRoll.SetSex (card, 2 if card["Sex"] == 1 else 1, FunnelRoll.EngineDie, _Tables (), others):
+	if not FunnelRoll.SetSex (card, sex, FunnelRoll.EngineDie, _Tables (), others):
 		return False
 	NamesToShow.add (index)
 	_Changed ()
 	_ShowLooks ()
 	return True
 
+def NextSex (index):
+	view = _View (index)
+	if not view:
+		return False
+	sex = 2 if view["Sex"] == 1 else 1
+	if Mode == "client":
+		return _AskHost (index, 3, str (sex))
+	return SetSex (index, sex)
+
 def StepLook (index, part, step):
+	"""the paper doll's arrows: the host's change, or (client, its own card) the host's to make"""
+	if Mode == "client":
+		names = [p[0] for p in FunnelRoll.LOOK_PARTS]
+		return _AskHost (index, 4, "%d %d" % (names.index (part), step)) if part in names else False
 	card = _Card (index)
 	if not card:
 		return None
@@ -209,7 +258,7 @@ def _StyleNames ():
 def OpenLooks (index):
 	"""the paper doll (M3.5): the card's peasant as the game draws it, turning, its looks to step through"""
 	global LooksWindow, LooksIndex
-	if not _Card (index):
+	if not _View (index):
 		return
 	CloseLooks ()
 	LooksIndex = index
@@ -259,10 +308,9 @@ def _DollTick ():
 		_DrawDoll ()
 
 def _DrawDoll ():
-	card = _Card (LooksIndex) if LooksIndex is not None else None
-	if not LooksWindow or not card:
+	looks = Doll["Looks"]
+	if not LooksWindow or not looks:
 		return
-	looks = card["Looks"]
 	got = GemRB.DCCAvatarFrame (looks["Animation"], looks["Colors"], looks["Hair"], looks["Beard"], DOLL_STANCE,
 		Doll["Face"], Doll["Frame"], DOLL_SCALE, DOLL_DROP)
 	try:
@@ -272,13 +320,21 @@ def _DrawDoll ():
 	if got:
 		doll.SetPictures (got[0])
 
-def _ShowLooks ():
+StyleNames = None
+
+def _ShowLooks (parsed = None):
 	"""the paper doll window's labels, after any change"""
-	card = _Card (LooksIndex) if LooksIndex is not None else None
+	global StyleNames
+	card = _View (LooksIndex, parsed) if LooksIndex is not None else None
 	if not LooksWindow or not card:
 		return
-	styles = _StyleNames ()
-	LooksWindow.GetControl (0x10000000).SetText ("%s: %s" % (card["Name"], FunnelRoll.OccupationLine (card)))
+	Doll["Looks"] = card["Looks"]
+	Doll["Shown"] = repr (card)
+	if StyleNames is None:
+		StyleNames = _StyleNames ()
+	styles = StyleNames
+	editable = _Editable (LooksIndex)
+	LooksWindow.GetControl (0x10000000).SetText (card["Title"])
 	for i, (part, slot, column, fallback) in enumerate (FunnelRoll.LOOK_PARTS):
 		options = FunnelRoll.LookOptions (_Tables (), card["Race"], card["Sex"], part)
 		value = FunnelRoll.LookValue (card, part)
@@ -289,10 +345,12 @@ def _ShowLooks ():
 		LooksWindow.GetControl (0x10000020 + i).SetText (text)
 		# a woman's rig has no beards: nothing to step through
 		for id in (10 + 2 * i, 11 + 2 * i):
-			LooksWindow.GetControl (id).SetState (IE_GUI_BUTTON_ENABLED if len (options) > 1 else IE_GUI_BUTTON_LOCKED)
+			LooksWindow.GetControl (id).SetState (IE_GUI_BUTTON_ENABLED if editable and len (options) > 1 else IE_GUI_BUTTON_LOCKED)
 	LooksWindow.GetControl (30).SetText ("Species: " + FunnelRoll.SpeciesName (card["Race"]))
 	LooksWindow.GetControl (31).SetText ("Female" if card["Sex"] == 2 else "Male")
-	note = "Looks are yours to choose; the numbers stay as rolled."
+	for id in (30, 31):
+		LooksWindow.GetControl (id).SetState (IE_GUI_BUTTON_ENABLED if editable else IE_GUI_BUTTON_LOCKED)
+	note = "Looks are yours to choose; the numbers stay as rolled." if editable else "Another player's peasant: theirs to choose."
 	if card["Race"] != 1:
 		note += " " + FunnelRoll.SPECIES_NOTE
 	LooksWindow.GetControl (0x10000030).SetText (note)
@@ -300,14 +358,16 @@ def _ShowLooks ():
 
 def CloseLooks ():
 	global LooksWindow
-	if LooksWindow:
-		try:
-			LooksWindow.Close ()
-		except RuntimeError:
-			pass
-		LooksWindow = None
-	if Window:
-		Window.Focus ()
+	if not LooksWindow:
+		return
+	try:
+		LooksWindow.Close ()
+		if Window:
+			Window.Focus ()
+	except RuntimeError:
+		pass # gone with the screen (the game starting)
+	LooksWindow = None
+	Doll["Looks"] = Doll["Shown"] = None
 
 def _AlignmentOf (lines):
 	"""a card's alignment from its text (what a client has of it)"""
@@ -323,12 +383,33 @@ def TakeEdits ():
 	edits = GemRB.NetTakeCardEdits ()
 	for edit in edits:
 		index = edit["Slot"] - 1
-		if edit["Field"] == 0:
-			ok = Rename (index, edit["Text"])
+		field, text = edit["Field"], edit["Text"]
+		number = int (text) if text.isdigit () else 0
+		if field == 0:
+			ok = Rename (index, text)
+		elif field == 1:
+			ok = SetAlignment (index, number)
+		elif field == 2:
+			ok = SetSpecies (index, number)
+		elif field == 3:
+			ok = SetSex (index, number)
 		else:
-			ok = SetAlignment (index, int (edit["Text"]) if edit["Text"].isdigit () else 0)
-		_Log ("player %d changes card %d (%s '%s'): %s" % (edit["Player"], edit["Slot"], "name" if edit["Field"] == 0 else "alignment", edit["Text"], ok))
+			ok = _TakeLook (index, text)
+		_Log ("player %d changes card %d (%s '%s'): %s" % (edit["Player"], edit["Slot"], EDIT_FIELDS.get (field, "?"), text, ok))
 	return edits
+
+EDIT_FIELDS = {0: "name", 1: "alignment", 2: "species", 3: "sex", 4: "look"}
+
+def _TakeLook (index, text):
+	"""a client's look step: 'PART STEP', the part's index in LOOK_PARTS and -1 or 1"""
+	words = text.split ()
+	try:
+		part, step = int (words[0]), int (words[1])
+	except (ValueError, IndexError):
+		return False
+	if not 0 <= part < len (FunnelRoll.LOOK_PARTS) or step not in (-1, 1):
+		return False
+	return StepLook (index, FunnelRoll.LOOK_PARTS[part][0], step) is not None
 
 def SetOption (name, on):
 	setattr (Options, name, bool (on))
@@ -372,7 +453,7 @@ def _Publish ():
 	global Published
 	if Mode != "host" or not Cards:
 		return
-	texts = [FunnelRoll.CardText (card) for card in Cards]
+	texts = [FunnelRoll.LobbyText (card) for card in Cards]
 	if texts != Published:
 		Published = texts
 		GemRB.NetSetLobbyCards (texts)
@@ -423,7 +504,9 @@ def _Button (win, id, x, y, w, h, text, action, tooltip = None, font = None):
 	button.SetBackground (ButtonColor)
 	button.SetText (text)
 	if action:
-		button.OnPress (action)
+		# the engine passes the button to a handler that takes arguments, which would fill a lambda's
+		# defaults (lambda i = i: ...): the action is called without any
+		button.OnPress (lambda: action ())
 	if tooltip:
 		button.SetTooltip (tooltip)
 	return button
@@ -469,7 +552,7 @@ def _Build ():
 		else:
 			player.SetTooltip ("Who plays this peasant: press to deal it to the next player")
 		reroll = _Button (win, base + 3, x + w - 60, y + 4, 54, 24, "Reroll", lambda index = i: RerollOne (index), "Roll this card again (house rule)", CardFont)
-		# M3.5: the player's choices (the host's and single player's for now)
+		# M3.5: the player's choices (a client's on its own cards; any card's paper doll to look at)
 		_Button (win, base + 6, x + 6, y + h - 28, 76, 24, "", lambda index = i: NextSpecies (index), FunnelRoll.SPECIES_NOTE, CardFont)
 		_Button (win, base + 7, x + 86, y + h - 28, 64, 24, "", lambda index = i: NextSex (index), "Male or female", CardFont)
 		_Button (win, base + 8, x + 154, y + h - 28, 70, 24, "Looks...", lambda index = i: OpenLooks (index), "The peasant as drawn: hair, beard and colours", CardFont)
@@ -495,12 +578,16 @@ def _Control (index, part):
 	except Exception:
 		return None
 
-def _ClientCards ():
-	"""client: the lobby's cards as [name, lines...] by roster order"""
+def _ClientParsed ():
+	"""client: the lobby's cards by roster order: ([name, lines...], the choices or None)"""
 	lobby = _Lobby ()
 	if not lobby:
 		return {}
-	return dict ((slot["Slot"], slot["Card"].split ("\n")) for slot in lobby["Party"] if slot["Card"])
+	return dict ((slot["Slot"], FunnelRoll.SplitLobbyText (slot["Card"])) for slot in lobby["Party"] if slot["Card"])
+
+def _ClientCards ():
+	"""client: the lobby's cards as [name, lines...] by roster order"""
+	return dict ((order, lines) for order, (lines, choices) in _ClientParsed ().items ())
 
 def Refresh ():
 	if not Window:
@@ -514,8 +601,10 @@ def Refresh ():
 	lobby = _Lobby ()
 	me = lobby["Slot"] if lobby else 0
 	coop = bool (lobby)
+	parsed = None
 	if Mode == "client":
-		cards = _ClientCards ()
+		parsed = _ClientParsed ()
+		cards = dict ((order, lines) for order, (lines, choices) in parsed.items ())
 	else:
 		cards = dict ((card["Order"], [card["Name"]] + FunnelRoll.CardLines (card)) for card in Cards or [])
 	for order, lines in cards.items ():
@@ -537,17 +626,22 @@ def Refresh ():
 			name.SetText (lines[0])
 			NamesToShow.discard (index)
 		choices = [_Control (index, part) for part in (6, 7, 8)]
-		card = _Card (index)
+		card = _View (index, parsed)
+		editable = Mode != "client" or owners.get (order) == me
 		for button in choices:
 			if button:
 				button.SetVisible (card is not None)
 		if card and choices[0]:
 			choices[0].SetText (FunnelRoll.SpeciesName (card["Race"]))
 			choices[1].SetText ("Female" if card["Sex"] == 2 else "Male")
+			for button in choices[:2]:
+				button.SetState (IE_GUI_BUTTON_ENABLED if editable else IE_GUI_BUTTON_LOCKED)
+				button.SetBackground (ButtonColor if editable else OffColor) # another player's: dimmed
 		align = _Control (index, 5)
 		if align:
 			align.SetText (FunnelRoll.ALIGNMENTS.get (_AlignmentOf (lines), "?"))
 			align.SetState (IE_GUI_BUTTON_ENABLED if Mode != "client" or owners.get (order) == me else IE_GUI_BUTTON_LOCKED)
+			align.SetBackground (ButtonColor if Mode != "client" or owners.get (order) == me else OffColor)
 		body.SetText ("\n".join (lines[1:]))
 		owner = owners.get (order, 0)
 		player, backdrop, reroll = _Control (index, 2), _Control (index, 0), _Control (index, 3)
@@ -562,10 +656,15 @@ def Refresh ():
 		reroll.SetVisible (Mode != "client" and Options.rerollOne)
 		Shown[order] = lines
 	Shown["Owners"] = dict ((order, owners.get (order, 0)) for order in cards) if coop else {}
+	# a client's paper doll follows the host's answer to its choices (and the host's own changes)
+	if Mode == "client" and LooksWindow and LooksIndex is not None:
+		view = _View (LooksIndex, parsed)
+		if view and repr (view) != Doll["Shown"]:
+			_ShowLooks (parsed)
 	status = Window.GetControl (0x10000001)
 	if Mode == "client":
 		mine = sorted (order for order in cards if owners.get (order) == me)
-		text = "The host is rolling and dealing; yours: %s (rename them and pick their alignment)" % (", ".join (str (o) for o in mine) or "none yet")
+		text = "The host is rolling and dealing; yours: %s (name them, pick species, sex, looks and alignment)" % (", ".join (str (o) for o in mine) or "none yet")
 	else:
 		rules = [name for name, on in (("reroll one", Options.rerollOne), ("4d6 drop the lowest", Options.fourDice)) if on]
 		text = "Rename a peasant on its card. House rules: %s." % (", ".join (rules) if rules else "none")
@@ -744,7 +843,9 @@ def _SendNames ():
 			continue
 		edit = _Control (order - 1, 1)
 		name = (edit.QueryText () or "").strip () if edit else ""
-		if name and name != lines[0] and name != Sent.get (order):
+		# only what we typed: a field still showing the lobby's last name is one the host changed since
+		# (a new species or sex brings its own name), which Refresh puts in the field
+		if name and name != lines[0] and name != ClientNames.get (order) and name != Sent.get (order):
 			Sent[order] = name
 			GemRB.NetEditCard (order, 0, name[:32])
 			_Log ("asked the host to rename card %d to %s" % (order, name))
