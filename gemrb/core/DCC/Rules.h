@@ -21,6 +21,7 @@
 #include "DCC/Character.h"
 #include "DCC/Classes.h"
 #include "DCC/CombatTables.h"
+#include "DCC/Funnel.h"
 #include "DCC/Deeds.h"
 #include "DCC/Body.h"
 #include "DCC/Looks.h"
@@ -85,6 +86,7 @@ public:
 	ClericSpellsTable clericSpells; // Table 1-5's spells known (dccclesp.2da)
 	BodyTable body; // M2.10: body weight by race and the load limits (dccbody.2da)
 	HairTable hair; // M2.11: the hair and beard overlays (dcchair.2da)
+	GodTable gods; // M3.3: the gods a cleric may serve by alignment (dccgods.2da)
 
 	/** loads every table through gamedata; logs and returns false if one is missing or bad */
 	bool Load();

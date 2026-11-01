@@ -1169,6 +1169,7 @@ static void pcf_hitpoint(Actor* actor, ieDword oldValue, ieDword hp)
 		if (core->HasFeature(GFFlags::RULES_DCC)) {
 			actor->DCCHealed(static_cast<int>(oldValue), static_cast<int>(hp));
 			actor->DCCHurt(static_cast<int>(oldValue), static_cast<int>(hp));
+			actor->DCCFunnelNearDeath(static_cast<int>(oldValue), static_cast<int>(hp));
 		}
 		// in testing it popped up somewhere between 39% and 25.3% (single run) -> 1/3
 		if (signed(3 * oldValue) > maxhp && signed(3 * hp) < maxhp) {

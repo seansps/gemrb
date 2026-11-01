@@ -342,6 +342,8 @@ struct NetSession::Impl {
 	NetLobbyState lobby;
 	uint32_t lobbyRevision = 1;
 	std::vector<std::string> lobbyCards; // host: the rolling screen's cards (M3.1)
+	std::vector<NetSession::CardEdit> cardEdits; // host: the players' changes to their own cards (M3.3)
+	uint64_t dccRecordHash = 0; // host: the game's DCC record the clients have (M3.3)
 	std::deque<NetChat> chatLines; // what our player saw, the newest NET_CHAT_HISTORY
 	std::vector<std::string> chatLog; // the same as plain text, for the lobby
 	int lastWhisperer = -1; // for /r
@@ -1317,6 +1319,27 @@ struct NetSession::Impl {
 					if (!info->welcomed || !NetDecode(data, size, ready)) return false;
 					roster.SetReady(info->slot, ready.ready);
 					Log(MESSAGE, "Net", "Slot {} ({}) is {}.", info->slot, info->name, ready.ready ? "ready" : "not ready");
+					return true;
+				}
+			case NetMsgType::CardEdit:
+				{
+					// M3.3: a player changes one of its own cards while the host rolls (the lobby)
+					NetCardEdit edit;
+					if (!info->welcomed || !NetDecode(data, size, edit)) return false;
+					uint8_t owner = NetSlotOwner(edit.partySlot, assigned, roster);
+					if (phase != NetPhase::Lobby || lobbyCards.size() < edit.partySlot || owner != info->slot) {
+						Log(MESSAGE, "Net", "Refused slot {}'s ({}) edit of card {}: {}.", info->slot, info->name, edit.partySlot,
+						    phase != NetPhase::Lobby ? "the game runs" : lobbyCards.size() < edit.partySlot ? "no such card" : fmt::format("it is player {}'s", owner));
+						Notify(*info, "That card isn't yours to change.");
+						return true;
+					}
+					NetSession::CardEdit entry;
+					entry.partySlot = edit.partySlot;
+					entry.field = edit.field;
+					entry.text = edit.text;
+					entry.player = info->slot;
+					cardEdits.push_back(std::move(entry));
+					Log(MESSAGE, "Net", "Slot {} ({}) changes card {}: {} '{}'.", info->slot, info->name, edit.partySlot, edit.field == NetCardEdit::Name ? "name" : "alignment", edit.text);
 					return true;
 				}
 			default:
@@ -2392,6 +2415,20 @@ struct NetSession::Impl {
 				Log(MESSAGE, "Net", "Event: party gold {}, reputation {}.", now.gold, now.reputation);
 			}
 		}
+
+		// M3.3: the game's own DCC record, the funnel's graveyard
+		if (core->HasFeature(GFFlags::RULES_DCC)) {
+			NetDCCRecord record;
+			record.data = DCC::WriteGameRecord(game->dccRecord);
+			uint64_t hash = NetHash(record.data.data(), record.data.size());
+			if (hash != dccRecordHash) {
+				dccRecordHash = hash;
+				if (send) {
+					SendEvent(record, true);
+					Log(MESSAGE, "Net", "Event: the game's DCC record: {} bytes, {} grave(s).", record.data.size(), game->dccRecord.graves.size());
+				}
+			}
+		}
 	}
 
 	static bool ReadFiles(const path_t& dir, std::vector<NetFile>& files)
@@ -2521,6 +2558,20 @@ struct NetSession::Impl {
 	void UpdateOwnership()
 	{
 		const Game* game = core->GetGame();
+		// M3.3, DCC games: a funnel character's player is part of its record (FUNL), so its party
+		// slot follows the character when the party changes (the four, a reserve swapped in)
+		if (core->HasFeature(GFFlags::RULES_DCC)) {
+			for (int slot = 1; slot <= game->GetPartySize(false) && slot <= NET_PARTY_SLOTS; ++slot) {
+				const Actor* pc = game->FindPC(slot);
+				if (!pc) continue;
+				uint8_t player = pc->dccExt.funnel.player;
+				if (player == DCC::FUNNEL_NO_PLAYER || !roster.Find(player)) continue;
+				auto it = assigned.find(uint8_t(slot));
+				if (it != assigned.end() && it->second == player) continue;
+				assigned[uint8_t(slot)] = player;
+				Log(MESSAGE, "Net", "Party slot {} ({}) goes to player slot {}, whose character it is.", slot, fmt::WideToChar { pc->GetShortName() }, player);
+			}
+		}
 		NetOwnership now;
 		for (int slot = 1; slot <= game->GetPartySize(false); ++slot) {
 			const Actor* pc = game->FindPC(slot);
@@ -2615,6 +2666,13 @@ struct NetSession::Impl {
 		// players may join later, until then the slot goes by the default
 		if (mode != Mode::Host || !partySlot || partySlot > NET_PARTY_SLOTS || playerSlot > NET_MAX_PEERS) return false;
 		assigned[partySlot] = playerSlot;
+		// M3.3: in the game a funnel character's record says whose it is; it goes with the slot
+		const Game* game = core->GetGame();
+		Actor* pc = game && phase == NetPhase::Game ? game->FindPC(partySlot) : nullptr;
+		if (pc && pc->dccExt.funnel.status != DCC::FunnelStatus::None) {
+			pc->dccExt.funnel.player = playerSlot;
+			pc->DCCExtChanged();
+		}
 		Log(MESSAGE, "Net", "Party slot {} assigned to player slot {}.", partySlot, playerSlot);
 		SendLobby();
 		return true;
@@ -3288,6 +3346,8 @@ struct NetSession::Impl {
 				return ClientEvent<NetSpellbook>(data, size, live, [this](const NetSpellbook& msg) { ApplySpellbook(msg); });
 			case NetMsgType::DCCExtension:
 				return ClientEvent<NetDCCExtension>(data, size, live, [this](const NetDCCExtension& msg) { ApplyDCCExtension(msg); });
+			case NetMsgType::DCCRecord:
+				return ClientEvent<NetDCCRecord>(data, size, live, [this](const NetDCCRecord& msg) { ApplyDCCRecord(msg); });
 			case NetMsgType::StoreState:
 				return ClientEvent<NetStoreState>(data, size, live, [this](const NetStoreState& msg) { ApplyStore(msg); });
 			case NetMsgType::ContainerOpen:
@@ -4264,6 +4324,20 @@ struct NetSession::Impl {
 		    actor->dccExt.spells.size(), actor->dccExt.corruptions.size(), int(actor->dccExt.disapproval.range));
 	}
 
+	void ApplyDCCRecord(const NetDCCRecord& msg)
+	{
+		Game* game = core->GetGame();
+		if (!game) return;
+		DCC::GameRecord record;
+		if (!DCC::ReadGameRecord(msg.data.data(), msg.data.size(), record)) {
+			Log(WARNING, "Net", "Bad DCC game record ({} bytes).", msg.data.size());
+			return;
+		}
+		game->dccRecord = std::move(record);
+		refreshGUI = true;
+		Log(MESSAGE, "Net", "The game's DCC record: {} grave(s).", game->dccRecord.graves.size());
+	}
+
 	void ApplySpellbook(const NetSpellbook& msg)
 	{
 		Actor* actor = LocalActor(msg.netID);
@@ -5227,6 +5301,26 @@ bool NetSession::SetLobbyCards(const std::vector<std::string>& cards)
 	return impl->SetLobbyCards(cards);
 }
 
+bool NetSession::EditCard(uint8_t partySlot, uint8_t field, const std::string& text)
+{
+	if (mode != Mode::Client || !impl->server || impl->state == Impl::ClientState::Connecting) return false;
+	NetCardEdit msg;
+	msg.partySlot = partySlot;
+	msg.field = field;
+	msg.text = text;
+	if (!partySlot || partySlot > NET_PARTY_SLOTS || field >= NetCardEdit::count) return false;
+	impl->Send(impl->server, msg);
+	Log(MESSAGE, "Net", "Asked the host to change card {}: {} '{}'.", partySlot, field == NetCardEdit::Name ? "name" : "alignment", text);
+	return true;
+}
+
+std::vector<NetSession::CardEdit> NetSession::TakeCardEdits()
+{
+	std::vector<CardEdit> edits;
+	edits.swap(impl->cardEdits);
+	return edits;
+}
+
 bool NetSession::SetPermission(uint8_t slot, NetPermission perm, bool allowed)
 {
 	return impl->SetPermission(slot, perm, allowed);
@@ -5452,6 +5546,16 @@ bool NetSession::Assign(uint8_t, uint8_t)
 bool NetSession::SetLobbyCards(const std::vector<std::string>&)
 {
 	return false;
+}
+
+bool NetSession::EditCard(uint8_t, uint8_t, const std::string&)
+{
+	return false;
+}
+
+std::vector<NetSession::CardEdit> NetSession::TakeCardEdits()
+{
+	return {};
 }
 
 bool NetSession::SetPermission(uint8_t, NetPermission, bool)

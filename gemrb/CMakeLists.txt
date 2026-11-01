@@ -244,6 +244,7 @@ IF (BUILD_TESTING)
     tests/core/DCC/Test_Deeds.cpp
     tests/core/DCC/Test_DiceChain.cpp
     tests/core/DCC/Test_Extension.cpp
+    tests/core/DCC/Test_Funnel.cpp
     tests/core/DCC/Test_Luck.cpp
     tests/core/DCC/Test_Magic.cpp
     tests/core/DCC/Test_Learning.cpp
@@ -290,6 +291,8 @@ IF (BUILD_TESTING)
   FIND_PROGRAM(GEMRB_TEST_PYTHON NAMES python3 python)
   IF (GEMRB_TEST_PYTHON)
     ADD_TEST(NAME Test_FunnelRoll COMMAND ${GEMRB_TEST_PYTHON} ${CMAKE_SOURCE_DIR}/gemrb/tests/GUIScripts/test_funnelroll.py)
+    # M3.3: the end of the funnel's rules (GUIScripts/ethren/FunnelChoose.py)
+    ADD_TEST(NAME Test_FunnelChoose COMMAND ${GEMRB_TEST_PYTHON} ${CMAKE_SOURCE_DIR}/gemrb/tests/GUIScripts/test_funnelchoose.py)
   ENDIF()
 
   ADD_CUSTOM_COMMAND(TARGET Test_gemrb_core POST_BUILD

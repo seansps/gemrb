@@ -431,6 +431,7 @@ IE_DCC_WEIGHT                   = 320 # body weight in pounds (0: the race's ave
 IE_DCC_PARTYAI                  = 321 # the party AI mode (DCC_AI_*)
 IE_DCC_HAIR                     = 322 # the hair overlay's style id (dcchair.2da), 0 none (M2.11)
 IE_DCC_BEARD                    = 323 # the beard overlay's style id, 0 none
+IE_DCC_GOD                      = 324 # a cleric's god (dccgods.2da's ID), 0 none (M3.3)
 
 # the DCC party AI modes (IE_DCC_PARTYAI, the DCCPARTY script) and loads (GetDCCStats "Load"), M2.10
 DCC_AI_DEFEND = 0

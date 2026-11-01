@@ -79,8 +79,9 @@ class FunnelRollTest (unittest.TestCase):
 		# (bountiful harvest), HP d4, 5d12 copper, alignment d3, looks: hair style, bald %, beard %,
 		# beard style, skin, hair colour, two dyes, leather, metal
 		names = [n for n in TABLES["dccnames"].order if TABLES["dccnames"].Int (n, "SEX") == 1]
+		# beard style, skin, hair colour, two dyes, leather, metal; Table 3-4's item d24 14 (a lantern)
 		dice = Scripted (self, [1, 1,  6, 6, 6,  1, 1, 2,  5, 5, 4,  3, 3, 3,  1, 1, 1,  6, 6, 5,  42, 2,  25,  1,  12, 12, 1, 1, 1,  3,
-			1, 50, 20, 1, 3, 4, 1, 21, 2, 7])
+			1, 50, 20, 1, 3, 4, 1, 21, 2, 7,  14])
 		card = FunnelRoll.RollCard (dice, TABLES, 1)
 		self.assertEqual (dice.values, [])
 		self.assertEqual (card["Name"], names[0].capitalize ())
@@ -102,14 +103,15 @@ class FunnelRollTest (unittest.TestCase):
 		self.assertEqual (lines[0], "Str 18 (+3)  Agi 4 (-2)  Sta 14 (+1)")
 		self.assertEqual (lines[1], "Per 9 (0)  Int 3 (-3)  Luck 17 (+2)")
 		self.assertEqual (lines[2], "Farmer (wheat)")
-		self.assertEqual (lines[3], "Pitchfork (as spear); Hen")
+		self.assertEqual ([card["Equipment"], card["EquipmentName"], card["EquipmentItem"], card["EquipmentCount"]], [14, "Lantern", "", 1])
+		self.assertEqual (lines[3], "Pitchfork (as spear); Hen; lantern")
 		self.assertEqual (lines[4], "HP 4   27 cp   Chaotic male")
 		self.assertEqual (lines[5], "Augur: Bountiful harvest (hit points) +2")
 
 	def test_hp_at_least_one (self):
 		# Sta 3 (-3) and a 1 on the d4
 		dice = Scripted (self, [2, 1,  3, 3, 3,  3, 3, 3,  1, 1, 1,  3, 3, 3,  3, 3, 3,  3, 3, 3,  1,  1,  1,  1, 1, 1, 1, 1,  2,
-			1, 1, 1, 1, 1, 1, 1])
+			1, 1, 1, 1, 1, 1, 1,  24])
 		card = FunnelRoll.RollCard (dice, TABLES, 2)
 		self.assertEqual ([card["Sex"], card["Scores"][2], card["Occupation"], card["HP"], card["Copper"]], [2, 3, 1, 1, 5])
 		# a woman: no beard, her hair is the body's own
@@ -138,6 +140,26 @@ class FunnelRollTest (unittest.TestCase):
 		occ = FunnelRoll.RollOccupation (Scripted (self, [62]), TABLES, [])
 		self.assertEqual ([occ["GoodCopper"], occ["Race"]], [800, 5])
 		self.assertTrue (die)
+
+	def test_equipment_and_alignment (self):
+		# M3.3: Table 3-4 (d24) and the player's choice of alignment
+		equipment = TABLES["dccequip"]
+		self.assertEqual (equipment.order, [str (n) for n in range (1, 25)])
+		names = [FunnelRoll.RollEquipment (Scripted (self, [n]), TABLES)["EquipmentName"] for n in range (1, 25)]
+		self.assertEqual ([names[0], names[11], names[13], names[22], names[23]], ["Backpack", "Holy water", "Lantern", "Torch", "Waterskin"])
+		self.assertEqual (len (set (names)), 24)
+		# without the table (an older game) the die is still rolled, and the card shows no item
+		item = FunnelRoll.RollEquipment (Scripted (self, [3]), {})
+		self.assertEqual ([item["Equipment"], item["EquipmentName"]], [3, ""])
+		card = FunnelRoll.RollCard (Seeded (4), TABLES, 1)
+		self.assertTrue (card["EquipmentName"])
+		self.assertIn ("; " + card["EquipmentName"][0].lower (), FunnelRoll.GearLine (card))
+		self.assertTrue (FunnelRoll.SetAlignment (card, 1))
+		self.assertEqual (card["Alignment"], 1)
+		self.assertIn ("Lawful", FunnelRoll.CardLines (card)[4])
+		self.assertFalse (FunnelRoll.SetAlignment (card, 4))
+		self.assertEqual (card["Alignment"], 1)
+		self.assertEqual ([FunnelRoll.NextAlignment (code) for code in (1, 2, 3)], [2, 3, 1])
 
 	def test_four_dice (self):
 		dice = Scripted (self, [1, 6, 6, 6])

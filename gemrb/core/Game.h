@@ -17,6 +17,7 @@
 #include "versions.h"
 
 #include "Callback.h"
+#include "DCC/Extension.h"
 
 #include "Scriptable/Scriptable.h"
 
@@ -241,6 +242,8 @@ public:
 	ieDword BanterBlockFlag = 0;
 	ieDword BanterBlockTime = 0;
 	int nextBored = 0;
+	/** DCC games (M3.3): the game's own record, the funnel's graveyard (saved with the GAM) */
+	DCC::GameRecord dccRecord;
 
 	/** Index of PC selected in non-walking environment (shops, inventory...) */
 	int SelectedSingle = 1;
@@ -326,6 +329,19 @@ public:
 	void ConsolidateParty() const;
 	/** Removes actor from party (if in there) */
 	int LeaveParty(Actor* pc, bool returnCriticalItems = true);
+	// DCC games (M3.3, the end of the funnel; GameDCC.cpp)
+	/** the funnel is over: every survivor gets the XP for level 1 and its class pick pending; the
+	 * chosen (1-4, in this order) are the party, the other survivors go to the reserves (level-1 XP,
+	 * class pending) and the dead leave it; 0 on success, -1 if a pick isn't a living party member */
+	int DCCEndFunnel(const std::vector<Actor*>& chosen);
+	/** a party member leaves: a living one goes to the reserves, a dead one is buried (its grave
+	 * stays in dccRecord); -1 if it isn't in the party */
+	int DCCDismiss(Actor* pc);
+	/** a reserve joins the party next to its leader, as the last party member (a class pick still
+	 * pending is made now); -1 if it isn't a reserve or the party is full */
+	int DCCRecruit(Actor* reserve);
+	/** the reserves (living funnel characters waiting off the map), in roster order */
+	std::vector<Actor*> DCCReserves() const;
 	/** Returns slot*/
 	int DelPC(unsigned int slot, bool autoFree = false);
 	int DelNPC(unsigned int slot, bool autoFree = false);

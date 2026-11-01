@@ -70,7 +70,10 @@ def Lines (pc):
 		return [name, "No DCC rules in this game."]
 
 	lines = []
-	lines.append ("%s, %s (%s)" % (name, ClassText (stats), Alignments[stats["Alignment"]]))
+	first = "%s, %s (%s)" % (name, ClassText (stats), Alignments[stats["Alignment"]])
+	if stats.get ("GodName"):
+		first += ", serves %s" % stats["GodName"] # M3.3: a cleric's god
+	lines.append (first)
 	xp = "XP %d" % stats["XP"]
 	if stats["NextXP"] >= 0:
 		xp += " / %d" % stats["NextXP"]

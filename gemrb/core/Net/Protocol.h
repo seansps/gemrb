@@ -31,7 +31,7 @@
 namespace GemRB {
 
 constexpr uint8_t NET_MAGIC = 0xE7;
-constexpr uint8_t NET_PROTOCOL_VERSION = 14;
+constexpr uint8_t NET_PROTOCOL_VERSION = 15;
 constexpr uint16_t NET_DEFAULT_PORT = 27015;
 constexpr size_t NET_HEADER_SIZE = 3;
 constexpr size_t NET_MAX_STRING = 1024;
@@ -45,6 +45,9 @@ constexpr size_t NET_SAVE_CHUNK = 32 * 1024;
 constexpr size_t NET_MAX_SAVE_SIZE = 64 * 1024 * 1024;
 // a DCC character's extension (DCC/Extension.h EXT_MAX_SIZE)
 constexpr size_t NET_MAX_DCC_EXTENSION = 64 * 1024;
+// v15 (M3.3): the game's DCC record (the graveyard), and a lobby card's name
+constexpr size_t NET_MAX_DCC_RECORD = 256 * 1024;
+constexpr size_t NET_MAX_CARD_NAME = 32;
 // a spawned creature travels as a CRE file
 constexpr size_t NET_MAX_CREATURE_SIZE = 1024 * 1024;
 // slot 0 is always the host, clients get 1..NET_MAX_PEERS
@@ -111,6 +114,8 @@ enum class NetMsgType : uint8_t {
 	Prompt, // host -> client, the open prompt ("ask the owning player") as everyone sees it, or its outcome
 	PromptAnswer, // client -> host, the asked player's answer
 	DCCExtension, // host -> client, a party member's DCC extension changed (v11: spells, corruptions, spellburn, disapproval)
+	DCCRecord, // host -> client, the game's DCC record changed (v15, M3.3: the funnel's graveyard)
+	CardEdit, // client -> host, the player changes one of its own cards on the rolling screen (v15, M3.3)
 	count
 };
 
@@ -672,6 +677,32 @@ struct GEM_EXPORT NetDCCExtension {
 	bool Read(NetReader& r);
 };
 
+// v15 (M3.3): the game's own DCC record (DCC::WriteGameRecord: the graveyard), whenever it changes
+struct GEM_EXPORT NetDCCRecord {
+	static constexpr NetMsgType Type = NetMsgType::DCCRecord;
+	std::vector<uint8_t> data;
+
+	void Write(NetWriter& w) const;
+	bool Read(NetReader& r);
+};
+
+// v15 (M3.3): a client changes a card of its own on the funnel's rolling screen, in the lobby; the
+// host's screen applies it (the cards are the host's) and sends the cards back with the lobby
+struct GEM_EXPORT NetCardEdit {
+	static constexpr NetMsgType Type = NetMsgType::CardEdit;
+	enum Field : uint8_t {
+		Name, // text: the new name (at most NET_MAX_CARD_NAME bytes)
+		Alignment, // text: "1" lawful, "2" neutral, "3" chaotic
+		count
+	};
+	uint8_t partySlot = 0; // the card's, 1-16
+	uint8_t field = Name;
+	std::string text;
+
+	void Write(NetWriter& w) const;
+	bool Read(NetReader& r);
+};
+
 // the GemRB.* GUI functions a client may ask the host to run for it
 enum class NetGuiOp : uint8_t {
 	DragItem = 1, // actor, slot, count, type (1: from the pile at its feet)
@@ -709,6 +740,7 @@ enum class NetGuiOp : uint8_t {
 	DCCReplaceSpell, // actor (text: the fresh spell and its replacement) (v12)
 	DCCConfirmSpells, // actor (text: the elf's lucky spell, may be empty) (v12)
 	DCCSetPartyAI, // actor, party AI mode (v13, M2.10)
+	DCCSetAlignment, // actor, alignment (1-3), god (-1: it follows) (v15, M3.3)
 	count
 };
 

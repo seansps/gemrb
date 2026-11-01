@@ -144,6 +144,13 @@ def _Tick ():
 	except Exception:
 		# the window went with the game (back to the menu, a load)
 		RosterWindow = None
+	# M3.3: the end of the funnel and the reserves, when the game's state asks for them
+	try:
+		if RosterWindow:
+			import ChooseFour
+			ChooseFour.Watch ()
+	except Exception as error:
+		print ("[Choose] watch failed: %s" % error)
 
 ###################################################
 # selection
@@ -399,7 +406,14 @@ def UpdateRoster ():
 		button = win.GetControl (i)
 		slot = i + 1
 		if slot > size:
+			# M3.3: the party of four after the funnel; an empty place shows nothing (also where a
+			# capture draws hidden views)
 			button.SetVisible (False)
+			button.SetText ("")
+			button.SetTooltip ("")
+			button.SetBackground (WindowColor)
+			for border in (0, 1, 2):
+				button.EnableBorder (border, 0)
 			Shown.pop (slot, None)
 			Tiles.pop (slot, None)
 			continue
@@ -452,6 +466,23 @@ def Graves ():
 			graves.append ((place["Order"] or slot, slot))
 	return [slot for order, slot in sorted (graves)]
 
+def GraveLinesAll ():
+	"""the graveyard (M3.3): every funnel character who died, from the game's own record (in the party or
+	not any more), plus a dead party member only its funnel record knows (a save from before M3.3); in
+	roster order"""
+	import FunnelChoose
+	entries = []
+	seen = set ()
+	for grave in GemRB.GetDCCGraveyard ():
+		seen.add ((grave["Order"], grave["DiedAt"]))
+		occupation = OccupationName ({"Id": grave["Occupation"], "Sub": grave["Sub"]})
+		entries.append ((grave["Order"], grave["DiedAt"], FunnelChoose.GraveLine (grave, occupation)))
+	for slot in Graves ():
+		place = GemRB.GetDCCFunnel (slot)["Funnel"]
+		if (place["Order"], place["DiedAt"]) not in seen:
+			entries.append ((place["Order"] or slot, place["DiedAt"], GraveLine (slot)))
+	return [line for order, died, line in sorted (entries)]
+
 def OpenGraveyard ():
 	global GraveyardWindow
 	if GraveyardWindow:
@@ -475,7 +506,7 @@ def OpenGraveyard ():
 
 def UpdateGraveyard ():
 	global GraveLines, GraveyardWindow
-	lines = [GraveLine (slot) for slot in Graves ()]
+	lines = GraveLinesAll ()
 	if not GraveyardWindow:
 		GraveLines = lines
 		return

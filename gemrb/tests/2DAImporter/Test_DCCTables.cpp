@@ -8,6 +8,7 @@
 
 #include "../../core/DCC/Deeds.h"
 #include "../../core/DCC/Extension.h"
+#include "../../core/DCC/Funnel.h"
 #include "../../core/DCC/Rules.h"
 #include "../../core/Streams/FileStream.h"
 #include "../../plugins/2DAImporter/2DAImporter.h"
@@ -1050,6 +1051,40 @@ TEST(DCC_Tables, BodyWeight)
 		EXPECT_EQ(body.Row(race).capPercent, 50) << race;
 		EXPECT_EQ(body.Row(race).halfPercent, 33) << race;
 	}
+}
+
+// M3.3: the gods by alignment (dccgods.2da, classes.md "Gods") and Table 3-4 (dccequip.2da)
+TEST(DCC_Tables, GodsAndEquipment)
+{
+	auto table = Open2DA("dccgods");
+	ASSERT_TRUE(table);
+	GodTable gods;
+	ASSERT_TRUE(gods.Load(*table));
+	EXPECT_EQ(gods.For(Alignment::Lawful).size(), 8u);
+	EXPECT_EQ(gods.For(Alignment::Neutral).size(), 4u);
+	EXPECT_EQ(gods.For(Alignment::Chaotic).size(), 7u);
+	EXPECT_EQ(gods.Find(gods.Default(Alignment::Lawful))->name, "Shul");
+	EXPECT_EQ(gods.Find(9)->name, "Amun Tor");
+	EXPECT_EQ(gods.Find(14)->name, "The Hidden Lord");
+	// every id below 256 (the CHAR record keeps one byte), none twice
+	std::set<int> ids;
+	for (Alignment a : { Alignment::Lawful, Alignment::Neutral, Alignment::Chaotic }) {
+		for (const God* god : gods.For(a)) {
+			EXPECT_TRUE(ids.insert(god->id).second) << god->id;
+			EXPECT_LT(god->id, 256);
+		}
+	}
+	EXPECT_EQ(ids.size(), 19u);
+
+	auto equip = Open2DA("dccequip");
+	ASSERT_TRUE(equip);
+	ASSERT_EQ(equip->GetRowCount(), 24u);
+	for (TableMgr::index_t r = 0; r < 24; ++r) {
+		EXPECT_EQ(equip->GetRowName(r), std::to_string(r + 1));
+		EXPECT_EQ(equip->QueryFieldSigned<int>(r, equip->GetColumnIndex("COUNT")), 1) << r;
+		EXPECT_NE(equip->QueryField(r, equip->GetColumnIndex("NAME")), "*") << r;
+	}
+	EXPECT_EQ(equip->QueryField(equip->GetRowIndex("14"), equip->GetColumnIndex("NAME")), "Lantern");
 }
 
 // M2.11: the hair and beard overlays (dcchair.2da), the walk speeds (moverate.2da) and the avatars

@@ -10,6 +10,8 @@
 	#include "ActorMgr.h"
 	#include "SaveGameMgr.h"
 
+	#include <vector>
+
 namespace GemRB {
 
 class PCStatsStruct;
@@ -35,6 +37,9 @@ private:
 	ieDword SavedLocCount = 0;
 	ieDword PPLocOffset = 0;
 	ieDword PPLocCount = 0;
+	// DCC games (M3.3): the game's own record (DCC::GameRecord), after the last section
+	ieDword DCCOffset = 0;
+	std::vector<uint8_t> dccRecord;
 
 public:
 	GAMImporter() noexcept = default;

@@ -479,6 +479,9 @@ NetGuiOpInfo NetGuiInfo(NetGuiOp op)
 		// M2.10 (v13): what a character does on its own (the DCC party AI), its owner's choice
 		case NetGuiOp::DCCSetPartyAI:
 			return { 0, 2, NetPermission::Control, "DCCSetPartyAI" };
+		// M3.3 (v15): a level-0 character's alignment and god, its owner's choice
+		case NetGuiOp::DCCSetAlignment:
+			return { 0, 3, NetPermission::Control, "DCCSetAlignment" };
 		default:
 			return {};
 	}

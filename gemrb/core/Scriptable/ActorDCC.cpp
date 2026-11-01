@@ -18,6 +18,7 @@
 #include "RNG.h"
 
 #include "DCC/Combat.h"
+#include "DCC/Funnel.h"
 #include "DCC/Luck.h"
 #include "DCC/Magic.h"
 #include "DCC/Rules.h"
@@ -530,6 +531,17 @@ int Actor::DCCLevelUp(int classID, const Roller* roller)
 
 	SetBase(IE_CLASS, classID);
 	SetBase(IE_LEVEL, level + 1);
+	// M3.3: a cleric serves a god of its alignment; one picked without a god gets the first
+	if (classID == static_cast<int>(ClassID::Cleric)) {
+		DCC::Alignment alignment = DCC::AlignmentFromIE(GetStat(IE_ALIGNMENT));
+		int god = rules->gods.Follow(Signed(BaseStats[IE_DCC_GOD]), alignment);
+		if (!god) {
+			god = rules->gods.Default(alignment);
+			const DCC::God* info = rules->gods.Find(god);
+			Log(MESSAGE, "DCC", "{} becomes a cleric without a god of its alignment: {} by default.", fmt::WideToChar { GetShortName() }, info ? info->name : std::string("none"));
+		}
+		SetBase(IE_DCC_GOD, ieDword(god));
+	}
 	SetBase(IE_MAXHITPOINTS, BaseStats[IE_MAXHITPOINTS] + hp);
 	SetBase(IE_HITPOINTS, BaseStats[IE_HITPOINTS] + hp);
 	CreateDerivedStatsDCC();
@@ -545,6 +557,24 @@ int Actor::DCCLevelUp(int classID, const Roller* roller)
 		DCCLearnLevelSpells(roller);
 	}
 	return hp;
+}
+
+bool Actor::DCCSetAlignment(int code, int god)
+{
+	const RulesData* rules = Rules();
+	if (!rules || !IsDCCCharacter()) return false;
+	unsigned int ie = DCC::AlignmentCodeToIE(code);
+	// chosen at level 0 (the rolling card, the class pick); fixed once a class is taken (Ethren decision)
+	if (!ie || BaseStats[IE_LEVEL] > 0) return false;
+	DCC::Alignment alignment = DCC::AlignmentFromIE(ie);
+	if (god < 0) {
+		god = rules->gods.Follow(Signed(BaseStats[IE_DCC_GOD]), alignment);
+	} else if (god > 0 && rules->gods.Follow(god, alignment) != god) {
+		return false;
+	}
+	SetBase(IE_ALIGNMENT, ie);
+	SetBase(IE_DCC_GOD, ieDword(god));
+	return true;
 }
 
 void Actor::DCCRestHeal(bool bedRest)

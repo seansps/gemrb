@@ -177,6 +177,149 @@ TEST(DCC_Extension, FunnelCauseOfDeath)
 	EXPECT_FALSE(ReadExtension(bytes.data(), bytes.size(), back));
 }
 
+TEST(DCC_Extension, FunnelDeeds)
+{
+	// M3.3, the choose-your-four cards: kills and near deaths (record version 3)
+	CharacterExt ext;
+	ext.funnel.status = FunnelStatus::Alive;
+	ext.funnel.order = 3;
+	std::vector<uint8_t> v1 = WriteExtension(ext);
+	EXPECT_EQ(v1[EXT_HEADER_SIZE + 4], 1); // nothing done yet: still version 1
+	ext.funnel.kills = 2;
+	ext.funnel.nearDeaths = 3;
+	EXPECT_FALSE(ext.Empty());
+	std::vector<uint8_t> bytes = WriteExtension(ext);
+	EXPECT_EQ(bytes[EXT_HEADER_SIZE + 4], 3);
+	// three empty texts (a length byte each), then u16 kills, u8 near deaths, u8 0
+	EXPECT_EQ(bytes.size(), v1.size() + 3 + 4);
+	CharacterExt back;
+	ASSERT_TRUE(ReadExtension(bytes.data(), bytes.size(), back));
+	EXPECT_EQ(back, ext);
+	EXPECT_EQ(back.funnel.kills, 2);
+	EXPECT_EQ(back.funnel.nearDeaths, 3);
+	// with a cause of death too
+	ext.funnel.status = FunnelStatus::Dead;
+	ext.funnel.killer = "Marauder";
+	ext.funnel.cause = "cudgel";
+	bytes = WriteExtension(ext);
+	ASSERT_TRUE(ReadExtension(bytes.data(), bytes.size(), back));
+	EXPECT_EQ(back.funnel.killer, "Marauder");
+	EXPECT_EQ(back.funnel.kills, 2);
+	// a version 2 reader's view: the texts end where version 2 ends; the deeds are only in 3
+	ext.funnel.kills = 0;
+	ext.funnel.nearDeaths = 0;
+	bytes = WriteExtension(ext);
+	EXPECT_EQ(bytes[EXT_HEADER_SIZE + 4], 2);
+}
+
+TEST(DCC_Extension, ClericsGod)
+{
+	// M3.3: the CHAR record's god (version 3, only with a god)
+	CharacterExt ext;
+	ext.body.weight = 140;
+	std::vector<uint8_t> v2 = WriteExtension(ext);
+	EXPECT_EQ(v2[EXT_HEADER_SIZE + 4], 2);
+	ext.body.god = 9;
+	std::vector<uint8_t> bytes = WriteExtension(ext);
+	EXPECT_EQ(bytes[EXT_HEADER_SIZE + 4], 3);
+	EXPECT_EQ(bytes.size(), v2.size() + 4);
+	CharacterExt back;
+	ASSERT_TRUE(ReadExtension(bytes.data(), bytes.size(), back));
+	EXPECT_EQ(back.body.god, 9);
+	EXPECT_EQ(back.body.weight, 140);
+	CharacterExt godOnly;
+	godOnly.body.god = 1;
+	EXPECT_FALSE(godOnly.Empty());
+}
+
+static GameRecord SampleGraves()
+{
+	GameRecord record;
+	Grave rolf;
+	rolf.name = "Rolf";
+	rolf.occupation = 51;
+	rolf.order = 12;
+	rolf.player = 1;
+	rolf.level = 0;
+	rolf.classID = 8;
+	rolf.kills = 1;
+	rolf.diedAt = 4500;
+	rolf.diedIn = "fnt01";
+	rolf.cause = "Slay";
+	rolf.place = "the glade";
+	record.graves.push_back(rolf);
+	Grave mira;
+	mira.name = "Mira";
+	mira.occupation = 97;
+	mira.order = 2;
+	mira.level = 1;
+	mira.classID = 1;
+	mira.diedAt = 9000;
+	mira.diedIn = "fnt02";
+	mira.killer = "Marauder";
+	mira.cause = "bled out";
+	mira.place = "the cave";
+	record.graves.push_back(mira);
+	return record;
+}
+
+TEST(DCC_GameRecord, Graveyard)
+{
+	// M3.3: the game's own record, the graveyard, in the GAM and on the net
+	GameRecord empty;
+	EXPECT_TRUE(empty.Empty());
+	EXPECT_EQ(WriteGameRecord(empty).size(), EXT_HEADER_SIZE);
+	GameRecord record = SampleGraves();
+	EXPECT_FALSE(record.Empty());
+	std::vector<uint8_t> bytes = WriteGameRecord(record);
+	EXPECT_EQ(std::string(bytes.begin(), bytes.begin() + 4), "DCCG");
+	GameRecord back;
+	ASSERT_TRUE(ReadGameRecord(bytes.data(), bytes.size(), back));
+	ASSERT_EQ(back.graves.size(), 2u);
+	EXPECT_TRUE(back.graves[0] == record.graves[0]);
+	EXPECT_TRUE(back.graves[1] == record.graves[1]);
+	EXPECT_EQ(back.graves[1].killer, "Marauder");
+	EXPECT_EQ(back.graves[0].player, 1);
+	EXPECT_EQ(back.graves[1].player, FUNNEL_NO_PLAYER);
+	EXPECT_EQ(WriteGameRecord(back), bytes);
+	// found and taken back by order and time of death (a body rolled over)
+	ASSERT_TRUE(back.FindGrave(12, 4500));
+	EXPECT_EQ(back.FindGrave(12, 4500)->name, "Rolf");
+	EXPECT_FALSE(back.FindGrave(12, 4501));
+	EXPECT_TRUE(back.RemoveGrave(12, 4500));
+	EXPECT_FALSE(back.RemoveGrave(12, 4500));
+	EXPECT_EQ(back.graves.size(), 1u);
+	// unknown records are kept
+	RawRecord later;
+	later.tag = { 'R', 'S', 'R', 'V' };
+	later.version = 2;
+	later.data = { 9, 8, 7 };
+	record.other.push_back(later);
+	bytes = WriteGameRecord(record);
+	ASSERT_TRUE(ReadGameRecord(bytes.data(), bytes.size(), back));
+	ASSERT_EQ(back.other.size(), 1u);
+	EXPECT_EQ(back.other[0].data, later.data);
+	EXPECT_EQ(WriteGameRecord(back), bytes);
+}
+
+TEST(DCC_GameRecord, BadDataIsRefused)
+{
+	std::vector<uint8_t> bytes = WriteGameRecord(SampleGraves());
+	GameRecord out;
+	out.graves.resize(5);
+	// a character extension isn't a game record
+	std::vector<uint8_t> ext = WriteExtension(Sample());
+	EXPECT_FALSE(ReadGameRecord(ext.data(), ext.size(), out));
+	// cut short, or a size past the data
+	EXPECT_FALSE(ReadGameRecord(bytes.data(), bytes.size() - 5, out));
+	std::vector<uint8_t> cut(bytes.begin(), bytes.end() - 5);
+	cut[8] = uint8_t(cut.size() & 0xff);
+	cut[9] = uint8_t(cut.size() >> 8);
+	EXPECT_FALSE(ReadGameRecord(cut.data(), cut.size(), out));
+	EXPECT_FALSE(ReadGameRecord(nullptr, 0, out));
+	EXPECT_EQ(out.graves.size(), 5u); // untouched
+}
+
 TEST(DCC_Extension, EmptyAndDefaults)
 {
 	CharacterExt ext;

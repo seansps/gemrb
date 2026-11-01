@@ -22,6 +22,16 @@
 
 namespace GemRB {
 
+// DCC games (M3.3): where the GAM header keeps the offset and size of the game's own record (the
+// first of its 52 unused bytes, after the plane locations), in the versions with that header
+constexpr ieDword DCC_RECORD_AT = 0x80;
+constexpr ieDword DCC_RECORD_MAX = 1024 * 1024;
+
+static bool DCCRecordHere(GAMVersion version)
+{
+	return core->HasFeature(GFFlags::RULES_DCC) && !core->HasFeature(GFFlags::HAS_EE_EFFECTS) && version != GAMVersion::PST;
+}
+
 bool GAMImporter::Import(DataStream* stream)
 {
 	char Signature[8];
@@ -301,6 +311,21 @@ std::unique_ptr<Game> GAMImporter::LoadGame(std::unique_ptr<Game> newGame, GAMVe
 			GAMLocationEntry* gle = newGame->GetPlaneLocationEntry(i);
 			str->ReadResRef(gle->AreaResRef);
 			str->ReadPoint(gle->Pos);
+		}
+	}
+
+	// DCC games (M3.3): the game's own record, its offset and size in the header's unused bytes
+	if (DCCRecordHere(version)) {
+		ieDword offset = 0;
+		ieDword size = 0;
+		str->Seek(DCC_RECORD_AT, GEM_STREAM_START);
+		str->ReadDword(offset);
+		str->ReadDword(size);
+		if (offset && size && size <= DCC_RECORD_MAX && str->Seek(offset, GEM_STREAM_START) == GEM_OK) {
+			std::vector<uint8_t> bytes(size);
+			if (str->Read(bytes.data(), size) == size && !DCC::ReadGameRecord(bytes.data(), bytes.size(), newGame->dccRecord)) {
+				Log(ERROR, "GAMImporter", "The game's DCC record ({} bytes) is damaged; it is left out.", size);
+			}
 		}
 	}
 	return newGame;
@@ -673,7 +698,17 @@ int GAMImporter::GetStoredFileSize(const Game* game)
 		PPLocOffset = 0;
 	}
 
-	return headersize + PPLocCount * 12;
+	headersize += PPLocCount * 12;
+
+	// DCC games (M3.3): the game's own record goes last
+	DCCOffset = 0;
+	dccRecord.clear();
+	if (DCCRecordHere(game->version) && !game->dccRecord.Empty()) {
+		dccRecord = DCC::WriteGameRecord(game->dccRecord);
+		DCCOffset = headersize;
+		headersize += int(dccRecord.size());
+	}
+	return headersize;
 }
 
 int GAMImporter::PutJournals(DataStream* stream, const Game* game) const
@@ -842,6 +877,11 @@ int GAMImporter::PutHeader(DataStream* stream, const Game* game) const
 		stream->WriteResRef(game->CurrentCampaign);
 		stream->WriteDword(game->FamiliarOwner);
 		stream->WriteString(game->RandomEncounterEntry, game->RandomEncounterEntry.Size);
+	} else if (DCCOffset) {
+		// DCC games (M3.3): where the game's own record is
+		stream->WriteDword(DCCOffset);
+		stream->WriteDword(ieDword(dccRecord.size()));
+		stream->WriteFilling(44);
 	} else {
 		stream->WriteFilling(52); // unused
 	}
@@ -1250,6 +1290,9 @@ int GAMImporter::PutGame(DataStream* stream, Game* game) const
 		if (ret) {
 			return ret;
 		}
+	}
+	if (DCCOffset) {
+		stream->Write(dccRecord.data(), dccRecord.size());
 	}
 
 	return 0;

@@ -28,6 +28,7 @@ FILE(GLOB gemrb_core_LIB_SRCS
 	DCC/Body.cpp
 	DCC/Looks.cpp
 	DCC/Extension.cpp
+	DCC/Funnel.cpp
 	DCC/Learning.cpp
 	DCC/Luck.cpp
 	DCC/Magic.cpp
@@ -42,6 +43,7 @@ FILE(GLOB gemrb_core_LIB_SRCS
 	FogRenderer.cpp
 	FontManager.cpp
 	Game.cpp
+	GameDCC.cpp
 	GameData.cpp
 	Geometry.cpp
 	GlobalTimer.cpp
