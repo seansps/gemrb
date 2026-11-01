@@ -46,6 +46,12 @@
 #      (a cleric with its god, a wizard's learn window), the end screen; screenshots
 #   g. the reserves (reserves): a death among the four, the camp's roster, a swap and the newcomer's
 #      class pick, a dismissal; save and load (the reserves, the graveyard, the party size)
+# M3.4:
+#   h. occupation skills (skills, after the class picks): each peasant's tags and how it rolls (trained d20,
+#      untrained d10, familiar d10+2, anyone's d20; a level-1 wizard keeps hers), checks with forced dice and
+#      their log lines, Luck burned by the policy, the party's best placed; the world (the area script's
+#      action: the weather; its trigger: a snare), a dialog (Old Wat's lock: the one talking, then the party),
+#      a deadly check's Luck prompt, an acquired tag, the record sheet; screenshots
 # Every check logs "[FNT] ok ..." or "[FNT] FAIL ...", the end "[FNT] autotest done: N checks,
 # F failed"; FNT_AT_DONE becomes 1 if all passed, 2 if not.
 
@@ -990,6 +996,190 @@ def _StepLoaded ():
 	_Check ("loaded: the roster", len (Roster.Shown), 16)
 	return _After ("save")
 
+# --- M3.4: occupation skills ---------------------------------------------------------------------
+
+def _SkillLine (text):
+	"""the newest combat log line with text"""
+	lines = [line for line in GemRB.GetDCCCombatLog () if text in line]
+	return lines[-1] if lines else ""
+
+def _InDialog ():
+	import GUIWORLD
+	return GUIWORLD.ContinueWindow is not None
+
+def _Reply (transition):
+	"""picks a transition of the dialog's current state, as a click on a reply (or Continue) does"""
+	GemRB.SetVar ("DialogChoose", transition)
+
+def _Talk (tinker, who):
+	"""the tinker starts his conversation with a party member (a script name or Player1)"""
+	GemRB.ExecuteString ('StartDialogNoSet(%s)' % who, tinker)
+	yield from _Wait (_InDialog, 20)
+
+def _Skills ():
+	"""M3.4: occupation skills: the tags through OCCU (past level 1 too), how each rolls, checks from Python, the
+	world (an area script's action and trigger), a dialog (the one talking and the party), Luck by the policy and
+	by a prompt, an acquired tag, the record sheet; screenshots"""
+	jora, brin, odo, essa, mira, gorm, hilde = [_Slot (name) for name in ("protagon", "fntbrin", "fntodo", "fntessa", "fntmira", "fntgorm", "fnthild")]
+	INT = 5
+	# how each would roll: the tags from the CRE's OCCU record, the tag's own ability or the one asked for
+	plan = GemRB.GetDCCSkillPlan (brin, "SMITHING", 0, 12)
+	_Check ("brin on smithing: trained d20, the tag's Str (+1)", [plan["Training"], plan["Die"], plan["AbilityMod"], plan["Matched"]], ["trained", 20, 1, ["SMITHING"]])
+	plan = GemRB.GetDCCSkillPlan (jora, "SMITHING", INT, 12)
+	_Check ("jora on smithing: untrained d10, Int -1", [plan["Training"], plan["Die"], plan["Modifier"]], ["untrained", 10, -1])
+	plan = GemRB.GetDCCSkillPlan (gorm, "SMITHING", INT, 12)
+	_Check ("gorm (a miner) on smithing: familiar d10+2", [plan["Training"], plan["Die"], plan["Familiarity"], plan["Matched"]], ["familiar", 10, 2, ["MINING"]])
+	plan = GemRB.GetDCCSkillPlan (essa, "ANYONE", 1, 10)
+	_Check ("essa on anyone's task: d20", [plan["Training"], plan["Die"]], ["anyone", 20])
+	# a level-1 wizard keeps her occupation's tags
+	stats = GemRB.GetDCCStats (mira)
+	plan = GemRB.GetDCCSkillPlan (mira, "LORE_ARCANE", INT, 14)
+	_Check ("mira, a level-1 wizard, still trained in her apprentice's arcana (Int +2)", [stats["Level"], plan["Training"], plan["Die"], plan["Modifier"]], [1, "trained", 20, 2])
+	_Check ("mira's tags after the class pick", GemRB.GetDCCFunnel (mira)["Occupation"]["Tags"], ["ALCHEMY", "LORE_ARCANE", "LETTERS"])
+
+	# checks from Python with forced dice, logged with the dice
+	GemRB.DCCForceDice (brin, [11])
+	r = GemRB.DCCSkillCheck (brin, "SMITHING", 0, 12)
+	_Check ("brin's smithing check (d20 11 + 1 vs 12)", [r["Die"], r["Natural"], r["Total"], r["Success"], r["Training"]], [20, 11, 12, 1, "trained"])
+	_Check ("its log line", _SkillLine ("Brin (blacksmith"), "Brin (blacksmith, trained d20) Smithing check: 11 +1 Str = 12 vs DC 12: success")
+	GemRB.DCCForceDice (jora, [10])
+	r = GemRB.DCCSkillCheck (jora, "SMITHING", INT, 12)
+	_Check ("jora's (d10 10 - 1 vs 12)", [r["Die"], r["Total"], r["Success"]], [10, 9, 0])
+	_Check ("its log line", _SkillLine ("Jora the Seeker (farmer"), "Jora the Seeker (farmer, untrained d10) Smithing check: 10 -1 Int = 9 vs DC 12: failure")
+	GemRB.DCCForceDice (gorm, [9])
+	r = GemRB.DCCSkillCheck (gorm, "SMITHING", INT, 12)
+	_Check ("gorm's (d10 9 + 2 familiar vs 12)", [r["Total"], r["Success"]], [11, 0])
+	_Check ("its log line", _SkillLine ("Gorm (dwarven miner"), "Gorm (dwarven miner, familiar d10+2) Smithing check: 9 +2 familiar = 11 vs DC 12: failure")
+
+	# Luck: by the policy ("miss to hit", keeping 5) a miss by 1 burns a point; not on a check where Luck can't help
+	luck = _Luck (brin)
+	GemRB.DCCSetLuckPolicy (brin, 2, 5, 3)
+	GemRB.DCCForceDice (brin, [10])
+	r = GemRB.DCCSkillCheck (brin, "SMITHING", 0, 12)
+	_Check ("brin burns a Luck point on a miss by 1", [r["Natural"], r["LuckBurned"], r["LuckBonus"], r["Total"], r["Success"], _Luck (brin)], [10, 1, 1, 12, 1, luck - 1])
+	_Check ("the burn's line", _Logged ("Brin burns 1 Luck on a Smithing check (+1): 11 -> 12 vs 12, success"), True)
+	_Check ("the check's line with the Luck", _SkillLine ("Brin (blacksmith"), "Brin (blacksmith, trained d20) Smithing check: 10 +1 Str +1 Luck = 12 vs DC 12: success")
+	GemRB.DCCForceDice (brin, [10])
+	r = GemRB.DCCSkillCheck (brin, "SMITHING", 0, 12, 2)
+	_Check ("no Luck on a no-Luck check", [r["LuckBurned"], r["Success"], _Luck (brin)], [0, 0, luck - 1])
+	GemRB.DCCSetLuckPolicy (brin, 1, 10, 3)
+	GemRB.SetPlayerStat (brin, IE_DCC_LOSS_LCK, 0)
+
+	# the party's best placed: the blacksmith for smithing, the farmer for farming, nobody for the untrainable
+	_Check ("best placed for smithing", GemRB.GetDCCBestSkillRoller ("SMITHING", INT, 12), _Id (brin))
+	_Check ("best placed for farming", GemRB.GetDCCBestSkillRoller ("FARMING", 0, 10), _Id (jora))
+
+	# the world: the area script's action (a farmer reading the weather), a variable per result
+	GemRB.DCCForceDice (jora, [14, 11])
+	GemRB.DCCForceDice (brin, [9])
+	GemRB.SetGlobal ("FNT_SKILL", "GLOBAL", 1)
+	names = ("FNT_WX_JORA", "FNT_WX_BRIN", "FNT_WX_PARTY")
+	yield from _Wait (lambda: all (GemRB.GetGameVar (name) in (1, 2) for name in names), 20)
+	_Check ("the weather: jora passes, brin fails, the party (jora) passes", [GemRB.GetGameVar (name) for name in names], [1, 2, 1])
+	_Check ("jora's line", _Logged ("Jora the Seeker (farmer, trained d20) Farming check: 14 -1 Int = 13 vs DC 10: success"), True)
+	_Check ("brin's line", _Logged ("Brin (blacksmith, untrained d10) Farming check: 9 = 9 vs DC 10: failure"), True)
+	_Check ("the party's line", _Logged ("Jora the Seeker (farmer, trained d20) Farming check for the party: 11 -1 Int = 10 vs DC 10: success"), True)
+	# the trigger (spotting a snare): the check picks the block, rolled once
+	GemRB.DCCForceDice (odo, [12])
+	GemRB.SetGlobal ("FNT_SKILL", "GLOBAL", 2)
+	yield from _Wait (lambda: GemRB.GetGameVar ("FNT_SNARE_ODO") in (1, 2), 20)
+	GemRB.DCCForceDice (essa, [8])
+	GemRB.SetGlobal ("FNT_SKILL", "GLOBAL", 3)
+	yield from _Wait (lambda: GemRB.GetGameVar ("FNT_SNARE_ESSA") in (1, 2), 20)
+	_Check ("the snare: odo (woodcutter) spots it, essa (scribe) doesn't", [GemRB.GetGameVar ("FNT_SNARE_ODO"), GemRB.GetGameVar ("FNT_SNARE_ESSA")], [1, 2])
+	_Check ("odo's line, rolled once", [_LogCount ("Odo (woodcutter, trained d20) Outdoors check: 12 -1 Int = 11 vs DC 10: success"), _LogCount ("Odo (woodcutter")], [1, 1])
+	_Check ("essa's line", _LogCount ("Essa (scribe, untrained d10) Outdoors check: 8 +1 Int = 9 vs DC 10: failure"), 1)
+	_ShotScreen ("skills_log", jora)
+
+	# the dialog: Old Wat's lock (FNTTINK.DLG from src/dialogs/fnttink.d); the one who talks judges it
+	where = GemRB.GetActorPosition (brin)
+	tinker = GemRB.CreateCreature (1, "FNTTINK", where["X"] + 40, where["Y"])
+	_Put (tinker, where["X"] + 40, where["Y"])
+	yield
+	GemRB.DCCForceDice (brin, [15])
+	yield from _Talk (tinker, '"fntbrin"')
+	_Check ("the conversation with brin is up", _InDialog (), True)
+	_Reply (0) # [Smithing, Int 12] Let me look at it.
+	yield
+	yield
+	_Check ("brin judges the lock (d20 15 vs 12)", [_LogCount ("Brin (blacksmith, trained d20) Smithing check: 15 = 15 vs DC 12: success"), GemRB.GetToken ("DCCSKILLER")], [1, "Brin"])
+	_ShotScreen ("skills_dialog", brin)
+	_Reply (GemRB.GetVar ("DialogOption")) # Continue: the passing branch
+	yield
+	yield
+	_Reply (0) # Glad to help.
+	yield from _Wait (lambda: GemRB.GetGameVar ("FNT_DLG_LOCK") in (1, 2) and not _InDialog (), 20)
+	_Check ("the dialog's passing branch", GemRB.GetGameVar ("FNT_DLG_LOCK"), 1)
+	# the message window's history (its text while no replies are offered): the line after the check names the roller
+	_Check ("the next line names the roller (<DCCSKILLER>)", "says Brin. Wat grins." in GemRB.GetView ("MsgSys", 0).QueryText (), True)
+	# jora, untrained, fails it
+	GemRB.SetGlobal ("FNT_DLG_LOCK", "GLOBAL", 0)
+	where = GemRB.GetActorPosition (jora)
+	_Put (tinker, where["X"] + 40, where["Y"])
+	yield
+	GemRB.DCCForceDice (jora, [10])
+	yield from _Talk (tinker, "Player1")
+	_Reply (0)
+	yield
+	yield
+	_Check ("jora fails to judge it (d10 10 - 1 vs 12)", _LogCount ("Jora the Seeker (farmer, untrained d10) Smithing check: 10 -1 Int = 9 vs DC 12: failure"), 2)
+	_Reply (GemRB.GetVar ("DialogOption"))
+	yield
+	yield
+	_Reply (0)
+	yield from _Wait (lambda: GemRB.GetGameVar ("FNT_DLG_LOCK") in (1, 2) and not _InDialog (), 20)
+	_Check ("the dialog's failing branch", GemRB.GetGameVar ("FNT_DLG_LOCK"), 2)
+	# jora asks the party: the blacksmith steps up and rolls
+	GemRB.DCCForceDice (brin, [12])
+	yield from _Talk (tinker, "Player1")
+	_Reply (1) # [Smithing, Int 12] Does anyone here know metalwork?
+	yield
+	yield
+	_Check ("the party's check: brin rolls for jora", [_LogCount ("Brin (blacksmith, trained d20) Smithing check for the party: 12 = 12 vs DC 12: success"), GemRB.GetToken ("DCCSKILLER")], [1, "Brin"])
+	_Reply (GemRB.GetVar ("DialogOption"))
+	yield
+	yield
+	_Reply (0)
+	yield from _Wait (lambda: GemRB.GetGameVar ("FNT_DLG_PARTY") in (1, 2) and not _InDialog (), 20)
+	_Check ("the party's passing branch", GemRB.GetGameVar ("FNT_DLG_PARTY"), 1)
+	GemRB.ExecuteString ("DestroySelf()", tinker)
+
+	# a deadly check (the action, flag DEADLY) by a level-1 wizard who pauses on key rolls: her owner is asked
+	luck = _Luck (mira)
+	GemRB.DCCForceDice (mira, [10])
+	GemRB.SetGlobal ("FNT_SKILL", "GLOBAL", 4)
+	yield from _Wait (lambda: GemRB.GetPrompt () is not None, 20)
+	prompt = GemRB.GetPrompt ()
+	_Check ("the deadly check waits for mira's Luck prompt", [prompt and prompt["Tag"], GemRB.GetGameVar ("FNT_DEADLY")], ["luckburn", 3])
+	GemRB.AnswerPrompt (prompt["ID"], [2])
+	yield from _Wait (lambda: GemRB.GetGameVar ("FNT_DEADLY") in (1, 2), 20)
+	last = GemRB.GetDCCLastSkillCheck ()
+	_Check ("2 Luck burned turn it into a success", [GemRB.GetGameVar ("FNT_DEADLY"), last["LuckBurned"], last["Total"], last["Success"], _Luck (mira)], [1, 2, 14, 1, luck - 2])
+	_Check ("its lines", [_Logged ("Mira fails a deadly Arcana check: 12 vs DC 14; burn Luck?"),
+		_Logged ("Mira (ex-wizard's apprentice, trained d20) Arcana check: 10 +2 Int +2 Luck = 14 vs DC 14: success")], [True, True])
+	GemRB.SetPlayerStat (mira, IE_DCC_LOSS_LCK, 0)
+
+	# an acquired skill from a story event: at most two beyond the occupation's
+	GemRB.SetGlobal ("FNT_SKILL", "GLOBAL", 5)
+	yield from _Wait (lambda: GemRB.GetGameVar ("FNT_SKILL") == 0 and len (GemRB.GetDCCFunnel (hilde)["Occupation"]["Acquired"]) >= 2, 20)
+	yield
+	occ = GemRB.GetDCCFunnel (hilde)["Occupation"]
+	_Check ("hilde learns two, the third is refused", [occ["Acquired"], "ANIMALS" in occ["Tags"]], [["FARMING", "HERBALISM"], False])
+	plan = GemRB.GetDCCSkillPlan (hilde, "HERBALISM", INT, 10)
+	_Check ("she is trained in herbs now", plan["Training"], "trained")
+
+	# the record sheet lists the tags
+	lines = DCCSheet.SkillLines (brin)
+	_Check ("brin's sheet: the occupation and its tags", lines[:3], ["Occupation: Blacksmith", "Trained (d20): Smithing, Appraisal", "  Smithing: metal, weapons, armor quality"])
+	_Check ("mira's sheet: a former occupation", DCCSheet.SkillLines (mira)[0], "Former occupation: Wizard's apprentice")
+	import GUIREC
+	GUIREC.OpenRecordsWindow (brin)
+	yield
+	_Check ("the record screen shows the tags", "Trained (d20): Smithing, Appraisal" in GUIREC.Text.QueryText (), True)
+	_ShotScreen ("skills_sheet")
+	GUIREC.CloseRecordsWindow ()
+	yield
+
 # Scenarios (scripts/run.sh funneltest-auto --scenario NAMES, default all): the engine sets AT_ONLY
 # and AT_<NAME> for the ones picked. Each runs with the ones it needs before it.
 SCENARIOS = (
@@ -1000,6 +1190,7 @@ SCENARIOS = (
 	("linetravel", _LineTravel), # c
 	("sprites", _Sprites), # M2.11: the peasant sprites, with screenshots
 	("classpicks", _ClassPicks), # 5
+	("skills", _Skills), # M3.4: occupation skills: checks from Python, the world, a dialog; Luck; the sheet
 	("prompts", _Prompts), # 6
 	("travel", _Travel), # 7
 	("roster", _Roster), # d (M3.2): the roster, a fight with deaths, the graveyard
@@ -1010,6 +1201,7 @@ SCENARIOS = (
 )
 NEEDS = {
 	"roster": ["classpicks"], # a level-1 character to bleed out
+	"skills": ["classpicks"], # a level-1 wizard keeps her tags and asks about Luck
 	"prompts": ["classpicks"], # the party settings panel's spellburn lines need the wizards
 	# the load checks what these left: the spells, Rolf's death, the party in the cave
 	"save": ["classpicks", "prompts", "travel"],
@@ -1540,6 +1732,14 @@ def _StepReservesLoaded ():
 	_Check ("loaded: the party size stays four", [GemRB.GetGameVar ("DCC_PARTY_SIZE"), GemRB.GetGameVar ("DCC_FUNNEL")], [4, 4])
 	_Check ("loaded: the reserves with their records", sorted (GemRB.GetPlayerName (i, 0) for i in GemRB.GetDCCReserves ()), Saved.get ("reserveNames"))
 	_Check ("loaded: the reserves' pick still pending, level 0", sorted (set ((GemRB.GetDCCStats (i)["Level"], GemRB.GetDCCStats (i)["XP"], _Funnel (i)["ClassPending"], _Funnel (i)["StatusName"]) for i in GemRB.GetDCCReserves ())), [(0, 10, 1, "reserve")])
+	# M3.4: the skill tags carry through the reserves and the level-1 class picks (the occupation's, from OCCU)
+	import DCCSkills
+	occupations = DCCSkills.Tables ()["dccoccup"]
+	def own (actor):
+		return sorted ((occupations.Get (GemRB.GetDCCFunnel (actor)["Occupation"]["Id"], "SKILLS") or "").split ("|"))
+	carried = [sorted (GemRB.GetDCCFunnel (i)["Occupation"]["Tags"]) == own (i) for i in GemRB.GetDCCReserves ()]
+	carried += [sorted (GemRB.GetDCCFunnel (pc)["Occupation"]["Tags"]) == own (pc) for pc in range (1, GemRB.GetPartySize () + 1)]
+	_Check ("loaded: every reserve and level-1 party member keeps its occupation's tags", carried, [True] * len (carried))
 	_Check ("loaded: the graveyard (the game's record)", GemRB.GetDCCGraveyard (), Saved.get ("graves"))
 	import Roster
 	Roster.UpdateRoster ()

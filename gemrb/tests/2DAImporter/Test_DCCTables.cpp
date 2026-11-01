@@ -10,6 +10,7 @@
 #include "../../core/DCC/Extension.h"
 #include "../../core/DCC/Funnel.h"
 #include "../../core/DCC/Rules.h"
+#include "../../core/DCC/Skills.h"
 #include "../../core/Streams/FileStream.h"
 #include "../../plugins/2DAImporter/2DAImporter.h"
 
@@ -1230,6 +1231,89 @@ TEST(DCC_Tables, FunnelRolling)
 	auto areas = Open2DA("dccarea");
 	ASSERT_TRUE(areas);
 	EXPECT_EQ(areas->GetRowCount(), 0);
+}
+// M3.4: the occupation skill tags. dccskill.2da has every tag of the vocabulary with an ability, familiar
+// tags that exist, the thief overlaps and caps classes.md asks for; dccoccup.2da carries funnel.md's
+// "Suggested tags per occupation" for every row of Table 1-3, read through the engine's loader
+TEST(DCC_Tables, OccupationSkills)
+{
+	auto skillTable = Open2DA("dccskill");
+	ASSERT_TRUE(skillTable);
+	SkillTable skills;
+	ASSERT_TRUE(skills.Load(*skillTable));
+	EXPECT_EQ(skillTable->GetRowCount(), TableMgr::index_t(OCCUPATION_SKILL_COUNT));
+	for (int bit = 0; bit < OCCUPATION_SKILL_COUNT; ++bit) {
+		const SkillInfo* info = skills.Find(1u << bit);
+		ASSERT_TRUE(info) << OccupationSkillName(bit);
+		// rows in bit order, so the table reads like the OCCU record
+		EXPECT_EQ(skillTable->GetRowName(TableMgr::index_t(bit)), OccupationSkillName(bit));
+		EXPECT_FALSE(info->label.empty()) << OccupationSkillName(bit);
+		EXPECT_FALSE(info->uses.empty()) << OccupationSkillName(bit);
+		EXPECT_NE(info->familiar, 0u) << OccupationSkillName(bit);
+		EXPECT_EQ(info->familiar & (1u << bit), 0u) << OccupationSkillName(bit) << " is familiar with itself";
+	}
+	// the thief skills the tags overlap, and where occupation training stops (classes.md: up to DC 10)
+	EXPECT_EQ(skills.Find(SKILL_LOCKS)->thief, static_cast<int>(ThiefSkill::PickLock));
+	EXPECT_EQ(skills.Find(SKILL_LOCKS)->cap, OCCUPATION_THIEF_CAP);
+	EXPECT_EQ(skills.Find(SKILL_STEALTH_STREET)->thief, static_cast<int>(ThiefSkill::PickPocket));
+	EXPECT_EQ(skills.Find(SKILL_STEALTH_STREET)->cap, OCCUPATION_THIEF_CAP);
+	EXPECT_EQ(skills.Find(SKILL_CLIMB)->thief, static_cast<int>(ThiefSkill::Climb));
+	EXPECT_EQ(skills.Find(SKILL_CLIMB)->cap, 0);
+	int overlaps = 0;
+	for (int bit = 0; bit < OCCUPATION_SKILL_COUNT; ++bit) {
+		if (skills.Find(1u << bit)->thief >= 0) ++overlaps;
+	}
+	EXPECT_EQ(overlaps, 3);
+	// funnel.md, "Default abilities for common dungeon actions": climbing Str, the rest by the task
+	EXPECT_EQ(skills.Find(SKILL_CLIMB)->ability, Ability::Str);
+	EXPECT_EQ(skills.Find(SKILL_SMITHING)->ability, Ability::Str);
+	EXPECT_EQ(skills.Find(SKILL_FARMING)->ability, Ability::Int);
+	EXPECT_EQ(skills.Find(SKILL_DECEPTION)->ability, Ability::Per);
+	// the spec's examples of familiarity (funnel.md, "Resolution rule")
+	EXPECT_TRUE(skills.Find(SKILL_FARMING)->familiar & SKILL_HERBALISM);
+	EXPECT_TRUE(skills.Find(SKILL_SMITHING)->familiar & SKILL_MINING);
+	EXPECT_TRUE(skills.Find(SKILL_LOCKS)->familiar & SKILL_SMITHING);
+	EXPECT_EQ(skills.Find(SKILL_CRAFT_FINE)->label, "Craft (fine)");
+
+	auto occupationTable = Open2DA("dccoccup");
+	ASSERT_TRUE(occupationTable);
+	OccupationTable occupations;
+	ASSERT_TRUE(occupations.Load(*occupationTable));
+	static const std::pair<int, const char*> spec[] = {
+		{ 1, "ALCHEMY|LORE_ARCANE|APPRAISAL" }, { 2, "ANIMALS|PERFORMANCE" }, { 3, "SMITHING|MILITARY|APPRAISAL" }, { 4, "LORE_STARS|LETTERS|LORE_ARCANE" },
+		{ 5, "MEDICINE|HAGGLE" }, { 6, "LORE_RELIGION|LETTERS" }, { 7, "ANIMALS|FARMING|COOKING" }, { 8, "SMITHING|APPRAISAL" },
+		{ 9, "BUTCHERY|ANIMALS|COOKING" }, { 10, "MILITARY|OUTDOORS|ANIMALS" }, { 11, "COOKING|HAGGLE" }, { 12, "CRAFT_FINE|HAGGLE" },
+		{ 13, "DECEPTION|STEALTH_STREET|HAGGLE" }, { 14, "CARPENTRY" }, { 15, "HAGGLE|APPRAISAL" }, { 16, "STEALTH_STREET|LOCKS" },
+		{ 17, "DIGGING|MASONRY" }, { 18, "SEA|ROPE|CLIMB" }, { 19, "ALCHEMY|HERBALISM|MEDICINE" }, { 20, "SMITHING|MINING|APPRAISAL" },
+		{ 21, "CARPENTRY|LOCKS" }, { 22, "ANIMALS|OUTDOORS" }, { 23, "MINING|MASONRY|DIGGING" }, { 25, "FARMING|HERBALISM|MINING" },
+		{ 26, "ANIMALS|FILTH|OUTDOORS" }, { 27, "MASONRY|MINING" }, { 29, "CRAFT_FINE|APPRAISAL" }, { 30, "LETTERS|NOBILITY|DECEPTION" },
+		{ 31, "CRAFT_FINE|ALCHEMY" }, { 32, "ANIMALS|OUTDOORS" }, { 33, "OUTDOORS|HERBALISM|CLIMB" }, { 35, "CRAFT_FINE|ALCHEMY" },
+		{ 36, "SEA|LORE_STARS" }, { 37, "LETTERS|LORE_ARCANE|LORE_RELIGION" }, { 39, "FARMING|ANIMALS|OUTDOORS" }, { 48, "LORE_STARS|DECEPTION|PERFORMANCE" },
+		{ 49, "DECEPTION|HAGGLE" }, { 50, "FILTH|DIGGING" }, { 51, "DIGGING|LORE_RELIGION" }, { 53, "STEALTH_STREET|DECEPTION" },
+		{ 55, "BUTCHERY|ANIMALS|COOKING" }, { 56, "CRAFT_FINE|HERBALISM" }, { 58, "CRAFT_FINE|HAGGLE" }, { 59, "DECEPTION|PERFORMANCE|LORE_STARS" },
+		{ 60, "CRAFT_FINE|NOBILITY" }, { 61, "SEA|ROPE|CLIMB" }, { 62, "HAGGLE|APPRAISAL|LETTERS" }, { 63, "HAGGLE|APPRAISAL" },
+		{ 64, "STEALTH_STREET|OUTDOORS" }, { 65, "MEDICINE|HERBALISM|LORE_RELIGION" }, { 66, "HERBALISM|MEDICINE" }, { 67, "ANIMALS|OUTDOORS" },
+		{ 68, "OUTDOORS|BUTCHERY|ANIMALS" }, { 70, "COOKING|NOBILITY" }, { 71, "PERFORMANCE|DECEPTION|NOBILITY" }, { 72, "APPRAISAL|CRAFT_FINE" },
+		{ 73, "LOCKS|SMITHING" }, { 74, "LORE_RELIGION|DECEPTION" }, { 75, "MILITARY|OUTDOORS" }, { 76, "HAGGLE|APPRAISAL|LETTERS" },
+		{ 77, "COOKING|FARMING|CARPENTRY" }, { 78, "PERFORMANCE|NOBILITY" }, { 79, "NOBILITY|LETTERS|MILITARY" }, { 80, "STEALTH_STREET" },
+		{ 81, "ANIMALS" }, { 82, "OUTDOORS|STEALTH_STREET|MILITARY" }, { 83, "ROPE|CLIMB" }, { 84, "LETTERS|LORE_ARCANE" },
+		{ 85, "LORE_RELIGION|HERBALISM|LORE_ARCANE" }, { 86, "DIGGING|COOKING" }, { 87, "SEA|DECEPTION|STEALTH_STREET" }, { 88, "MILITARY" },
+		{ 89, "MILITARY|NOBILITY|ANIMALS" }, { 91, "LETTERS|HAGGLE|NOBILITY" }, { 92, "OUTDOORS|ANIMALS|BUTCHERY" }, { 94, "STEALTH_STREET|CLIMB" },
+		{ 95, "CARPENTRY|ANIMALS" }, { 96, "CRAFT_FINE" }, { 97, "LORE_ARCANE|LETTERS|ALCHEMY" }, { 98, "OUTDOORS|CLIMB|CARPENTRY" }
+	};
+	EXPECT_EQ(sizeof(spec) / sizeof(spec[0]), 80u);
+	for (const auto& row : spec) {
+		const OccupationInfo* info = occupations.Find(row.first);
+		ASSERT_TRUE(info) << row.first;
+		SkillTags tags = ParseSkillTags(row.second);
+		ASSERT_TRUE(tags.valid) << row.second;
+		EXPECT_EQ(info->skills, tags.bits) << row.first << " " << info->name;
+		EXPECT_GE(SkillTagCount(info->skills), 1) << info->name;
+		EXPECT_LE(SkillTagCount(info->skills), 4) << info->name;
+	}
+	EXPECT_EQ(occupations.Find(97)->name, "Wizard's apprentice");
+	EXPECT_EQ(occupations.Find(19)->race, 4); // the dwarven apothecarist
+	EXPECT_EQ(occupations.Find(24), nullptr); // 23-24 is one row, 23
 }
 }
 }

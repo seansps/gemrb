@@ -123,6 +123,10 @@ static const TriggerLink triggernames[] = {
 	{ "damagetaken", GameScript::DamageTaken, 0 },
 	{ "damagetakengt", GameScript::DamageTakenGT, 0 },
 	{ "damagetakenlt", GameScript::DamageTakenLT, 0 },
+	{ "dcchasskill", GameScript::DCCHasSkill, 0 }, // DCC games (M3.4)
+	{ "dccpartyhasskill", GameScript::DCCPartyHasSkill, 0 },
+	{ "dccpartyskillcheck", GameScript::DCCPartySkillCheck, 0 },
+	{ "dccskillcheck", GameScript::DCCSkillCheck, 0 },
 	{ "dead", GameScript::Dead, 0 },
 	{ "delay", GameScript::Delay, 0 },
 	{ "detect", GameScript::Detect, 0 }, //so far i see no difference
@@ -600,6 +604,9 @@ static const ActionLink actionnames[] = {
 	{ "cutsceneid", GameScript::CutSceneID, 0 },
 	{ "damage", GameScript::Damage, 0 },
 	{ "daynight", GameScript::DayNight, 0 },
+	{ "dccaddskill", GameScript::DCCAddSkill, 0 }, // DCC games (M3.4)
+	{ "dccpartyskillcheck", GameScript::DCCPartySkillCheck, 0 },
+	{ "dccskillcheck", GameScript::DCCSkillCheck, 0 },
 	{ "deactivate", GameScript::Deactivate, 0 },
 	{ "deathmatchpositionarea", nullptr, 0 },
 	{ "deathmatchpositionglobal", nullptr, 0 },

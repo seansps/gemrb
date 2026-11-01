@@ -58,6 +58,11 @@ Modules here so far:
   god (the Estaronan pantheon, the domain on hover), then the learn window for
   casters; each player its own characters.
 - Reserves.py (M3.3): the reserves at a camp or tavern: bury, dismiss, join.
+- DCCSkills.py (M3.4): the record sheet's occupation skill lines (the
+  occupation, its tags trained at d20 with their uses, the acquired ones, the
+  tags it has some familiarity with at d10+2), with no GUI (tested by
+  tests/GUIScripts/test_dccskills.py). The checks themselves are the engine's
+  (GemRB.DCCSkillCheck and the scripts' DCCSkillCheck trigger and action).
 - FunnelEnd.py (M3.3): the funnel's end screen: the party, the reserves, the
   graveyard.
 - Game.py (M3.3): the demo's EnterGame with the party size of a DCC game (16

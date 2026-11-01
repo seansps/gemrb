@@ -33,6 +33,7 @@ FILE(GLOB gemrb_core_LIB_SRCS
 	DCC/Luck.cpp
 	DCC/Magic.cpp
 	DCC/Rules.cpp
+	DCC/Skills.cpp
 	Debug.cpp
 	Dialog.cpp
 	DialogHandler.cpp
@@ -100,6 +101,7 @@ FILE(GLOB gemrb_core_LIB_SRCS
 	VEFObject.cpp
 	WorldMap.cpp
 	GameScript/Actions.cpp
+	GameScript/DCCScript.cpp
 	GameScript/GSUtils.cpp
 	GameScript/GameScript.cpp
 	GameScript/Matching.cpp
@@ -138,6 +140,7 @@ FILE(GLOB gemrb_core_LIB_SRCS
 	Scriptable/ActorDCCCombat.cpp
 	Scriptable/ActorDCCLuck.cpp
 	Scriptable/ActorDCCMagic.cpp
+	Scriptable/ActorDCCSkills.cpp
 	Scriptable/CombatInfo.cpp
 	Scriptable/Container.cpp
 	Scriptable/Door.cpp

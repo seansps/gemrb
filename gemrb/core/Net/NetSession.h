@@ -93,6 +93,10 @@ public:
 	void OnSound(StringView resource, const AudioPlaybackConfig& config, bool speech);
 	void OnProjectile(const Map& map, const Projectile& pro, uint32_t targetID, bool fake);
 	void OnAreaVfx(const Map& map, VEFObject& vvc);
+	/** host: simulation that runs outside the tick's window counts as simulation until EndCapture (M3.4:
+	 * a skill check rolled while a dialog evaluates a state, at a reply's pick); returns what to pass back */
+	bool BeginCapture();
+	void EndCapture(bool previous);
 	/** both sides: the game was paused or unpaused here; quiet pauses come from GUI windows */
 	void OnPause(bool paused, bool quiet = false);
 
