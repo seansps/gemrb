@@ -1678,7 +1678,7 @@ def _Rolled ():
 			bad.append ((pc, "items", occ["Weapon"], occ["TradeGood"], weapons, card["WeaponItem"], card["GoodItem"]))
 		elif card["WeaponItem"] and swung != card["WeaponItem"]:
 			# the weapon a swing uses (the engine's cached weapon info), not the slot that reads as equipped
-			bad.append ((pc, "not in hand", swung))
+			bad.append ((pc, "not in hand", swung, card["WeaponItem"], weapons, card.get ("EquipmentItem"), [(slot, item["ItemResRef"].lower (), item["Usages0"]) for slot, item in ((slot, GemRB.GetSlotItem (pc, slot)) for slot in range (40)) if item]))
 		low, high = ranges[card["Race"]]
 		if not stats["BodyRolled"] or not low <= stats["BodyWeight"] <= high:
 			bad.append ((pc, "weight", stats["BodyWeight"]))
@@ -1793,9 +1793,13 @@ def _FunnelHistory ():
 	# STATE_DEAD is set once the die animation has played out (Actor::CheckOnDeath)
 	yield from _Wait (lambda: _Dead (15) and _Dead (16))
 	_Check ("history: 15 and 16 dead", [_Dead (15), _Dead (16)], [True, True])
-	# a kill: the giant rat (worn down to 3 hp first) dies to peasant 3's own weapon (the kill is
-	# credited by DCCOnDeath); lethal blows, not the fists' subdual ones (fixed after M3.3)
-	killer = 3
+	# a kill: the giant rat (worn down to 3 hp first) dies to a peasant's own weapon (the kill is
+	# credited by DCCOnDeath); lethal blows, not the fists' subdual ones (fixed after M3.3). The first
+	# living peasant holding a melee weapon the test game has (the roll decides who: M3.5's species rolls
+	# moved the dice on, and peasant 3 may have only the fists)
+	armed = [pc for pc in range (1, 15) if not _Dead (pc) and _SwungItem (pc) not in ("", "fist")
+		and GemRB.GetCombatDetails (pc, 0).get ("Flags", 0) & 1]
+	killer = armed[0] if armed else 3
 	x, y = spots[killer]
 	rat = GemRB.CreateCreature (1, "FNTRAT", x + 40, y)
 	_Put (rat, x + 40, y)

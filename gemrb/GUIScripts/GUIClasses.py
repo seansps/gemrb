@@ -334,6 +334,7 @@ class GButton(GControl):
 		'SetState': _GemRB.Button_SetState,
 		'SetPictureClipping': _GemRB.Button_SetPictureClipping,
 		'SetPicture': _GemRB.Button_SetPicture,
+		'SetPictures': _GemRB.Button_SetPictures,
 		'SetPLT': _GemRB.Button_SetPLT,
 		'SetSpellIcon': _GemRB.Button_SetSpellIcon,
 		'SetItemIcon': _GemRB.Button_SetItemIcon,

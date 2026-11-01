@@ -171,6 +171,12 @@ bool InfoPoint::Entered(Actor* actor)
 	if (Type == ST_TRAVEL && PersonalDistance(TrapLaunch, actor) < MAX_OPERATING_DISTANCE) {
 		goto check;
 	}
+	// DCC (M3.5): a funnel of sixteen crowds a doorway, and the one sent to the exit can be held a step
+	// short of it by the others; within three times the reach of the launch point is there
+	if (Type == ST_TRAVEL && core->HasFeature(GFFlags::RULES_DCC) && !TrapLaunch.IsZero() &&
+	    PersonalDistance(TrapLaunch, actor) < 3 * MAX_OPERATING_DISTANCE) {
+		goto check;
+	}
 	// fuzzie can't escape pst's ar1405 without this one, maybe we should really be checking
 	// for distance from the outline for travel regions instead?
 	if (Type == ST_TRAVEL && PersonalDistance(TalkPos, actor) < MAX_OPERATING_DISTANCE) {

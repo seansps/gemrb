@@ -44,6 +44,7 @@
 #include "GUI/WindowManager.h"
 #include "GUI/WorldMapControl.h"
 #include "DCC/Funnel.h"
+#include "DCC/Looks.h"
 #include "DCC/Luck.h"
 #include "DCC/Rules.h"
 #include "DCC/Stats.h"
@@ -3438,6 +3439,39 @@ static PyObject* GemRB_Button_SetPicture(PyObject* self, PyObject* args)
 		btn->SetPicture(std::move(pic));
 	}
 
+	Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(GemRB_Button_SetPictures__doc,
+	     "===== Button_SetPictures =====\n\
+\n\
+**Metaclass Prototype:** SetPictures (sprites)\n\
+\n\
+**Description:** Stacks sprites on a button with their hotspots at its centre, the first at the back: \n\
+a sprite's layers (eg. GemRB.DCCAvatarFrame's body, hair and beard). An empty list clears it.\n\
+\n\
+**Parameters:**\n\
+  * sprites - a list of Sprite2D\n\
+\n\
+**Return value:** N/A\n\
+\n\
+**See also:** [DCCAvatarFrame](DCCAvatarFrame.md), [Button_SetPicture](Button_SetPicture.md)");
+
+static PyObject* GemRB_Button_SetPictures(PyObject* self, PyObject* args)
+{
+	PyObject* pylist = nullptr;
+	PARSE_ARGS(args, "OO", &self, &pylist);
+	Button* btn = GetView<Button>(self);
+	ABORT_IF_NULL(btn);
+	if (!PyList_Check(pylist)) {
+		return RuntimeError("sprites must be a list");
+	}
+	btn->SetPicture(nullptr); // also clears the picture list
+	for (Py_ssize_t i = 0; i < PyList_Size(pylist); ++i) {
+		Holder<Sprite2D> spr = SpriteFromPy(PyList_GetItem(pylist, i));
+		if (spr) btn->StackPicture(spr);
+	}
+	btn->SetFlags(IE_GUI_BUTTON_CENTER_PICTURES | IE_GUI_BUTTON_PICTURE, BitOp::OR);
 	Py_RETURN_NONE;
 }
 
@@ -7669,6 +7703,156 @@ static PyObject* GemRB_DCCPose(PyObject* /*self*/, PyObject* args)
 	return PyLong_FromLong(actor->GetStance());
 }
 
+// a paletted sprite blown up s times, smoothly (bilinear, in true colour with alpha), hotspot and mirroring
+// kept; without its shadow pixels (palette index 1), which the game blends and a GUI picture would draw solid
+static Holder<Sprite2D> ScaledSprite(const Holder<Sprite2D>& spr, int s)
+{
+	if (spr->Format().Bpp != 1) return spr;
+	s = std::max(1, s);
+	Holder<Sprite2D> flat = spr->copy();
+	const PixelFormat& old = spr->Format();
+	PixelFormat fmt = PixelFormat::Paletted8Bit(spr->GetPalette(), old.HasColorKey || old.RLE, old.ColorKey);
+	if (old.RLE && !flat->ConvertFormatTo(fmt)) return spr;
+	const Holder<Palette> pal = spr->GetPalette();
+	const int w = spr->Frame.w;
+	const int h = spr->Frame.h;
+	const uint8_t* src = static_cast<const uint8_t*>(flat->LockSprite());
+	const int pitch = flat->GetPitch() ? flat->GetPitch() : w;
+	auto sample = [&](int x, int y, float& r, float& g, float& b) -> float {
+		x = Clamp(x, 0, w - 1);
+		y = Clamp(y, 0, h - 1);
+		uint8_t px = src[y * pitch + x];
+		if (px == uint8_t(fmt.ColorKey) || px == 1) return 0.0f;
+		Color c = pal->GetColorAt(px);
+		r = c.r;
+		g = c.g;
+		b = c.b;
+		return 1.0f;
+	};
+	auto big = VideoDriver->CreateSprite(Region(0, 0, w * s, h * s), nullptr, PixelFormat::ARGB32Bit());
+	uint8_t* dst = static_cast<uint8_t*>(big->LockSprite());
+	const int bigPitch = big->GetPitch() ? big->GetPitch() : w * s * 4;
+	for (int y = 0; y < h * s; ++y) {
+		float v = (y + 0.5f) / s - 0.5f;
+		int y0 = int(std::floor(v));
+		float fy = v - y0;
+		uint32_t* row = reinterpret_cast<uint32_t*>(dst + y * bigPitch);
+		for (int x = 0; x < w * s; ++x) {
+			float u = (x + 0.5f) / s - 0.5f;
+			int x0 = int(std::floor(u));
+			float fx = u - x0;
+			// premultiplied: a transparent neighbour lends no colour, only less cover
+			float r = 0, g = 0, b = 0, a = 0;
+			const float weights[4] = { (1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy };
+			const int dx[4] = { 0, 1, 0, 1 };
+			const int dy[4] = { 0, 0, 1, 1 };
+			for (int k = 0; k < 4; ++k) {
+				float cr, cg, cb;
+				float ca = sample(x0 + dx[k], y0 + dy[k], cr, cg, cb) * weights[k];
+				if (ca > 0) {
+					r += cr * ca;
+					g += cg * ca;
+					b += cb * ca;
+					a += ca;
+				}
+			}
+			uint32_t out = 0;
+			if (a > 0.01f) {
+				out = (uint32_t(a * 255.0f + 0.5f) << 24) | (uint32_t(r / a + 0.5f) << 16) | (uint32_t(g / a + 0.5f) << 8) | uint32_t(b / a + 0.5f);
+			}
+			row[x] = out;
+		}
+	}
+	big->UnlockSprite();
+	flat->UnlockSprite();
+	big->Frame.x = spr->Frame.x * s;
+	big->Frame.y = spr->Frame.y * s;
+	big->renderFlags = spr->renderFlags | BlitFlags::BLENDED;
+	return big;
+}
+
+PyDoc_STRVAR(GemRB_DCCAvatarFrame__doc,
+	     "===== DCCAvatarFrame =====\n\
+\n\
+**Prototype:** GemRB.DCCAvatarFrame (animID, colours, hair, beard, stance, orientation, frame[, scale, drop])\n\
+\n\
+**Description:** The funnel's paper doll (M3.5): one frame of a character's sprite as the game draws \n\
+it, before there is an actor: the body of avatars.2da row animID with its hair and beard overlays \n\
+(dcchair.2da style ids, 0 none), recoloured by colours (the seven colour stats in order: metal, minor, \n\
+major, skin, leather, armor, hair; rows of pal16), in the stance (IE_ANI_*) and facing (0-15) given, \n\
+mirrored where the game mirrors. frame wraps round the stance's length; scale (1-4) blows the layers \n\
+up that many times, smoothly (true colour); the shadow is left out. drop moves the layers that many \n\
+pixels down from their hotspot (to stand a figure in the middle of a button that centres hotspots).\n\
+\n\
+**Return value:** (list of Sprite2D, the layers in drawing order; the stance's frame count), or None\n\
+\n\
+**See also:** [Button_SetPictures](Button_SetPictures.md), [DCCSetLooks](DCCSetLooks.md)");
+
+static PyObject* GemRB_DCCAvatarFrame(PyObject* /*self*/, PyObject* args)
+{
+	unsigned int animID;
+	PyObject* pycolours = nullptr;
+	int hair = 0;
+	int beard = 0;
+	int stance = 0;
+	int orient = 0;
+	int frame = 0;
+	int scale = 1;
+	int drop = 0;
+	PARSE_ARGS(args, "IOiiiii|ii", &animID, &pycolours, &hair, &beard, &stance, &orient, &frame, &scale, &drop);
+	scale = Clamp(scale, 1, 4);
+	if (!PyList_Check(pycolours)) {
+		return RuntimeError("colours must be a list");
+	}
+
+	// one preview at a time: kept for the next frame (CharAnimations caches its BAMs), rebuilt for another body
+	static std::unique_ptr<CharAnimations> anims;
+	static ieDword colours[7] {};
+	if (!anims || anims->GetAnimationID() != animID) {
+		anims = std::make_unique<CharAnimations>(animID, 0);
+		if (anims->AvatarsRowNum == ~size_t(0)) {
+			anims.reset();
+			Py_RETURN_NONE;
+		}
+	}
+	for (Py_ssize_t i = 0; i < 7; ++i) {
+		colours[i] = i < PyList_Size(pycolours) ? ieDword(PyLong_AsLong(PyList_GetItem(pycolours, i))) : 0;
+	}
+	anims->SetColors(colours);
+	const DCC::RulesData* rules = core->GetDCCRules();
+	if (rules) {
+		std::string hairRef = DCC::HairOverlay(rules->hair.Find(hair, false), false);
+		std::string beardRef = DCC::HairOverlay(rules->hair.Find(beard, true), false);
+		anims->SetHairRefs(AnimRef(hairRef.c_str()), AnimRef(beardRef.c_str()));
+	}
+
+	orient_t face = orient_t(Clamp(orient, 0, int(MAX_ORIENT) - 1));
+	const auto* parts = anims->GetAnimation(static_cast<unsigned char>(stance), face);
+	if (!parts) Py_RETURN_NONE;
+	const int* zOrder = anims->GetZOrder(face);
+	PyObject* sprites = PyList_New(0);
+	int count = 0;
+	for (int part = 0; part < anims->GetTotalPartCount(); ++part) {
+		int partnum = zOrder ? zOrder[part] : part;
+		const auto& anim = parts->at(partnum);
+		if (!anim || !anim->GetFrameCount()) continue;
+		if (!count) count = int(anim->GetFrameCount());
+		Holder<Sprite2D> spr = anim->GetFrame(size_t(frame) % anim->GetFrameCount());
+		if (!spr) continue;
+		// a copy carrying the part's palette (the actor passes it at drawing time)
+		Holder<Sprite2D> copy = spr->copy();
+		Holder<Palette> pal = anims->GetPartPalette(partnum);
+		if (pal) copy->SetPalette(pal);
+		Holder<Sprite2D> layer = ScaledSprite(copy, scale);
+		if (drop) {
+			if (layer == copy) layer = copy->copy();
+			layer->Frame.y -= drop;
+		}
+		PyList_Append(sprites, DecRef(PyObject_FromHolder<Sprite2D>, std::move(layer)));
+	}
+	return Py_BuildValue("(Ni)", sprites, count);
+}
+
 PyDoc_STRVAR(GemRB_DCCSetDeeds__doc,
 	     "===== DCCSetDeeds =====\n\
 \n\
@@ -8580,7 +8764,10 @@ static PyObject* GemRB_DCCSetOccupation(PyObject* /*self*/, PyObject* args)
 			CREItem* item = actor->inventory.RemoveItem(carried);
 			actor->inventory.SetSlotItem(item, melee);
 		}
-		if (actor->inventory.FindItem(weaponRef, 0) == melee) {
+		// the weapon slot itself: FindItem finds the first copy, and another of the same item in the pack
+		// (the test game's small hammer is its club) comes before the weapon slots
+		const CREItem* inHand = actor->inventory.GetSlotItem(melee);
+		if (inHand && inHand->ItemResRef == weaponRef) {
 			// the first weapon quick slot holds it, as Inventory::EquipItem sets it up: the equipped
 			// slot is a quick weapon slot's index, and it is mapped through that quick slot again when
 			// the actor first gets its area (Actor::SetMap); a quick slot still on the fist turned
@@ -15842,6 +16029,7 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(SaveScreenshot, METH_VARARGS),
 	METHOD(DCCSetLooks, METH_VARARGS),
 	METHOD(DCCPose, METH_VARARGS),
+	METHOD(DCCAvatarFrame, METH_VARARGS),
 	METHOD(DCCAttack, METH_VARARGS),
 	METHOD(GetDCCLastAttack, METH_VARARGS),
 	METHOD(GetDCCCombatLog, METH_VARARGS),
@@ -16031,6 +16219,7 @@ static PyMethodDef GemRBInternalMethods[] = {
 	METHOD(Button_SetOverlay, METH_VARARGS),
 	METHOD(Button_SetPLT, METH_VARARGS),
 	METHOD(Button_SetPicture, METH_VARARGS),
+	METHOD(Button_SetPictures, METH_VARARGS),
 	METHOD(Button_SetPictureClipping, METH_VARARGS),
 	METHOD(Button_SetPushOffset, METH_VARARGS),
 	METHOD(Button_SetSpellIcon, METH_VARARGS),
