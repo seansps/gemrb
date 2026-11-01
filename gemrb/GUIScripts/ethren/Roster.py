@@ -406,7 +406,14 @@ def UpdateRoster ():
 		button = win.GetControl (i)
 		slot = i + 1
 		if slot > size:
+			# M3.3: the party of four after the funnel; an empty place shows nothing (also where a
+			# capture draws hidden views)
 			button.SetVisible (False)
+			button.SetText ("")
+			button.SetTooltip ("")
+			button.SetBackground (WindowColor)
+			for border in (0, 1, 2):
+				button.EnableBorder (border, 0)
 			Shown.pop (slot, None)
 			Tiles.pop (slot, None)
 			continue

@@ -99,8 +99,17 @@ def Watch ():
 	"""opens what the funnel's state asks for; on the host it moves the state on"""
 	global EndShown, CampShown
 	state = State ()
+	# windows that went with the game (a load; in co-op the host's new save after the party changed)
+	import ClassPick, Reserves, FunnelEnd, DCCLearn
+	for module in (ClassPick, Reserves, FunnelEnd, DCCLearn):
+		if module.Window and not _Valid (module.Window):
+			module.Window = None
+	if Window and not _Alive ():
+		Close ()
 	if state == 1 and not Window:
 		Open ()
+	elif state == 1:
+		Refresh ()
 	elif state != 1 and Window:
 		Close ()
 	if state == 2:
@@ -201,6 +210,13 @@ def _Control (index, part):
 		return Window.GetControl (CARD_BASE + 10 * index + part) if Window else None
 	except Exception:
 		return None
+
+def _Valid (window):
+	try:
+		window.GetFrame ()
+		return True
+	except Exception:
+		return False
 
 def _Alive ():
 	try:
@@ -350,6 +366,6 @@ def Close ():
 	if Window:
 		try:
 			Window.Close ()
-		except RuntimeError:
-			pass
+		except Exception:
+			pass # gone with the game already (a load, the host's new save in co-op)
 		Window = None

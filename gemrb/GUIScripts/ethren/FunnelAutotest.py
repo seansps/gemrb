@@ -897,11 +897,19 @@ def _Roster ():
 def _SaveGames ():
 	return [game for game in GemRB.GetSaveGames () if game.GetName () == SaveName]
 
+def _Records ():
+	"""the sixteen's OCCU and FUNL records (without the global IDs, which a load gives anew)"""
+	records = []
+	for pc in range (1, 17):
+		record = GemRB.GetDCCFunnel (pc)
+		records.append ({"Occupation": record["Occupation"], "Funnel": record["Funnel"], "Slot": record["Slot"]})
+	return records
+
 def _Save ():
 	"""8: save 16 with their records (one marked reserve and dealt to player 2), then load"""
 	last = _Slot ("fntpip")
 	_Check ("pip to the reserve, dealt to player 2", GemRB.DCCSetFunnel (last, 4, -1, 2), True)
-	Saved["funnel"] = [GemRB.GetDCCFunnel (pc) for pc in range (1, 17)]
+	Saved["funnel"] = _Records ()
 	Saved["names"] = [GemRB.GetPlayerName (1, which) for which in (0, 1, 2)]
 	_Log ("the protagonist's names: %s" % Saved["names"])
 	for game in _SaveGames ():
@@ -925,7 +933,7 @@ def _StepSave ():
 
 def _StepLoaded ():
 	_Check ("loaded: party of 16", GemRB.GetPartySize (), 16)
-	after = [GemRB.GetDCCFunnel (pc) for pc in range (1, 17)]
+	after = _Records ()
 	_Check ("loaded: every OCCU and FUNL record", after, Saved.get ("funnel"))
 	pip = GemRB.GetDCCFunnel (_Slot ("fntpip"))["Funnel"]
 	_Check ("loaded: pip in the reserve for player 2", [pip["StatusName"], pip["Player"]], ["reserve", 2])

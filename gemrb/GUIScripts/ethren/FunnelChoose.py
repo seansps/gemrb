@@ -115,7 +115,8 @@ def RecordLine (survivor):
 
 def ClassLine (survivor):
 	if survivor["Level"] <= 0 or survivor["Class"] == LEVEL0:
-		return "Level 0"
+		# the funnel's survivors have the XP for level 1 and pick their class when they join the party
+		return "Level 0, class pick pending" if survivor.get ("ClassPending") else "Level 0"
 	line = "%s %d" % (CLASS_NAMES.get (survivor["Class"], "?"), survivor["Level"])
 	if survivor.get ("GodName"):
 		line += ", of " + survivor["GodName"]

@@ -126,6 +126,6 @@ def Close ():
 	if Window:
 		try:
 			Window.Close ()
-		except RuntimeError:
-			pass
+		except Exception:
+			pass # gone with the game already (a load, the host's new save in co-op)
 		Window = None
