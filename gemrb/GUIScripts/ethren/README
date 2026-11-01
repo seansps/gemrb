@@ -47,3 +47,17 @@ Modules here so far:
   the spellbook's "New spells..." button.
 - FunnelAutotest.py (M2.9): the checks of testdata/funneltest's autotest; idle
   unless the FNT_AUTOTEST global is 1.
+- FunnelChoose.py (M3.3): the rules half of the funnel's end screens (the
+  survivors' cards, sorting, picking up to four, classes and gods, graveyard
+  lines), with no GUI (tested by tests/GUIScripts/test_funnelchoose.py).
+- ChooseFour.py (M3.3): "Choose your four", and Watch (), which the roster's
+  timer runs: it opens the funnel's end screens and the reserves when the
+  game's DCC_FUNNEL and DCC_CAMP globals ask for them (co-op clients too).
+- ClassPick.py (M3.3): the level-1 class pick: alignment, class, a cleric's
+  god, then the learn window for casters; each player its own characters.
+- Reserves.py (M3.3): the reserves at a camp or tavern: bury, dismiss, join.
+- FunnelEnd.py (M3.3): the funnel's end screen: the party, the reserves, the
+  graveyard.
+- Game.py (M3.3): the demo's EnterGame with the party size of a DCC game (16
+  in the funnel, DCC_PARTY_SIZE after it) and no protagonist (the game ends
+  when the whole party is dead).
