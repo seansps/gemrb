@@ -166,6 +166,22 @@ def GodsFor (gods, alignment):
 	letter = ALIGN_LETTERS.get (alignment)
 	return [(gods.Int (row, "ID"), gods.Text (row, "NAME", row)) for row in gods.order if (gods.Get (row, "ALIGN") or "").upper () == letter]
 
+def GodDomain (gods, god):
+	"""what a god is the god of ("death, dark magic"), "" for none or an unknown one"""
+	for row in gods.order:
+		if gods.Int (row, "ID") == god:
+			return gods.Text (row, "DOMAIN")
+	return ""
+
+def GodLine (gods, god):
+	"""a god with its domain, for the class pick ("Wolaeth, god of death, dark magic")"""
+	for row in gods.order:
+		if gods.Int (row, "ID") == god:
+			domain = gods.Text (row, "DOMAIN")
+			name = gods.Text (row, "NAME", row)
+			return "%s, god of %s" % (name, domain) if domain else name
+	return ""
+
 def GodFollows (gods, god, alignment):
 	"""the god after an alignment change: kept if it is of that alignment, else none (DCC::GodTable::Follow)"""
 	return god if god in [g for g, name in GodsFor (gods, alignment)] else 0

@@ -35,11 +35,14 @@ struct God {
 	int id = 0;
 	Alignment alignment = Alignment::Neutral;
 	std::string name;
+	std::string dcc; // the DCC core god it stands in for, a key ("Ahriman", "Three_Fates"): its mechanics
+	std::string domain; // what it is the god of ("death, dark magic")
 };
 
 class GEM_EXPORT GodTable {
 public:
-	/** dccgods.2da: rows by name, columns ID ALIGN (L, N or C) NAME */
+	/** dccgods.2da: rows by name, columns ID ALIGN (L, N or C) NAME, and DCC (the DCC core god it
+	 * stands in for) and DOMAIN where the table has them; _ for spaces in NAME and DOMAIN */
 	bool Load(const TableMgr& table);
 	void Set(const God& god);
 	/** the god with this id, nullptr for 0 or an unknown one */

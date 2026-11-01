@@ -141,15 +141,17 @@ def Refresh ():
 		button.SetVisible (cleric and i < len (gods))
 		if i < len (gods):
 			button.SetText (gods[i][1])
+			button.SetTooltip (FunnelChoose.GodLine (tables["dccgods"], gods[i][0])) # the domain on hover
 			button.SetBackground (LitColor if Choice["God"] == gods[i][0] else ButtonColor)
 	info = FunnelChoose.ClassInfo (tables["dccclass"], Choice["Class"]) if Choice["Class"] else "Pick a class."
 	if cleric:
-		info += "\nA cleric serves a god of its own alignment" + ("." if Choice["God"] else ": pick one.")
+		info += "\nA cleric serves a god of its own alignment" + (": %s." % FunnelChoose.GodLine (tables["dccgods"], Choice["God"]) if Choice["God"] else ": pick one.")
 	valid = FunnelChoose.PickValid (tables["dccclass"], tables["dccgods"], survivor["Race"], Choice["Class"], Choice["Alignment"], Choice["God"])
 	Window.GetControl (0x10000005).SetText (info)
 	Window.GetControl (1).SetState (IE_GUI_BUTTON_ENABLED if valid else IE_GUI_BUTTON_DISABLED)
 	Last.clear ()
 	Last.update ({"Name": survivor["Name"], "Classes": [name for ident, name in classes], "Gods": [name for ident, name in gods] if cleric else [],
+		"GodLines": [FunnelChoose.GodLine (tables["dccgods"], ident) for ident, name in gods] if cleric else [],
 		"Choice": dict (Choice), "Valid": valid, "Info": info})
 
 def SetAlignment (code):

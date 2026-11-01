@@ -1406,6 +1406,16 @@ void CharAnimations::GetAnimResRef(unsigned char stance,
 	}
 }
 
+ResRef CharAnimations::DCCStanceFile(unsigned char stance, orient_t orient, std::string* overlaySuffix) const
+{
+	ResRef file = ResRefBase;
+	unsigned char cycle = 0;
+	EquipResRefData equipment = EquipResRefData();
+	GetAnimResRef(MaybeOverrideStance(stance), orient, file, cycle, 0, equipment);
+	if (overlaySuffix) *overlaySuffix = equipment.Suffix.c_str();
+	return file;
+}
+
 void CharAnimations::GetEquipmentResRef(AnimRef equipRef, bool offhand,
 					ResRef& dest, unsigned char& Cycle,
 					const EquipResRefData& equip) const

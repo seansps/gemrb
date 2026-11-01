@@ -81,8 +81,8 @@ class FunnelChooseTest (unittest.TestCase):
 		self.assertEqual (lines[2], "dwarven miner (dwarf)")
 		self.assertEqual (lines[3], "HP 5/5   Lawful   Level 0")
 		self.assertEqual (lines[4], "Kills 2   Near deaths 0")
-		cleric = dict (card, Level = 1, Class = 3, GodName = "Shul")
-		self.assertEqual (FunnelChoose.ClassLine (cleric), "Cleric 1, of Shul")
+		cleric = dict (card, Level = 1, Class = 3, GodName = "Lom")
+		self.assertEqual (FunnelChoose.ClassLine (cleric), "Cleric 1, of Lom")
 		self.assertEqual (FunnelChoose.OccupationName (TABLES, 39, 2), "farmer (wheat)")
 		self.assertEqual (FunnelChoose.OccupationName (TABLES, 39, 2, True), "farmer")
 		self.assertEqual (FunnelChoose.OccupationName (TABLES, 0), "")
@@ -95,11 +95,18 @@ class FunnelChooseTest (unittest.TestCase):
 		self.assertEqual (FunnelChoose.ClassesFor (classes, 5), [(7, "Halfling")])
 		self.assertIn ("hit die d8", FunnelChoose.ClassInfo (classes, 3))
 		self.assertIn ("deed die", FunnelChoose.ClassInfo (classes, 2))
+		# the Estaronan pantheon, by Ethren's alignments
 		lawful = FunnelChoose.GodsFor (gods, 1)
-		self.assertEqual (len (lawful), 8)
-		self.assertEqual (lawful[0], (1, "Shul"))
-		self.assertEqual (len (FunnelChoose.GodsFor (gods, 2)), 4)
-		self.assertEqual (len (FunnelChoose.GodsFor (gods, 3)), 7)
+		self.assertEqual (len (lawful), 6)
+		self.assertEqual (lawful[0], (1, "Lom"))
+		self.assertEqual ([name for ident, name in FunnelChoose.GodsFor (gods, 2)], ["Maelor", "Aigeya", "Turil", "Mascref", "Hudrey"])
+		self.assertEqual (FunnelChoose.GodsFor (gods, 3)[-1], (17, "Morgen Windwalker"))
+		self.assertEqual (len (FunnelChoose.GodsFor (gods, 3)), 6)
+		# the domain, for the class pick's hover and info line
+		self.assertEqual (FunnelChoose.GodDomain (gods, 14), "death, dark magic")
+		self.assertEqual (FunnelChoose.GodLine (gods, 14), "Wolaeth, god of death, dark magic")
+		self.assertEqual (FunnelChoose.GodDomain (gods, 0), "")
+		self.assertEqual (FunnelChoose.GodLine (gods, 99), "")
 		# the god follows the alignment
 		self.assertEqual (FunnelChoose.GodFollows (gods, 1, 1), 1)
 		self.assertEqual (FunnelChoose.GodFollows (gods, 1, 3), 0)
@@ -108,8 +115,9 @@ class FunnelChooseTest (unittest.TestCase):
 		self.assertFalse (FunnelChoose.PickValid (classes, gods, 1, 5, 2, 0)) # a human dwarf
 		self.assertFalse (FunnelChoose.PickValid (classes, gods, 4, 2, 2, 0)) # a dwarf warrior
 		self.assertFalse (FunnelChoose.PickValid (classes, gods, 1, 3, 1, 0)) # a cleric without a god
-		self.assertFalse (FunnelChoose.PickValid (classes, gods, 1, 3, 1, 13)) # a lawful cleric of Ahriman
-		self.assertTrue (FunnelChoose.PickValid (classes, gods, 1, 3, 3, 13))
+		self.assertFalse (FunnelChoose.PickValid (classes, gods, 1, 3, 1, 14)) # a lawful cleric of Wolaeth
+		self.assertTrue (FunnelChoose.PickValid (classes, gods, 1, 3, 3, 14))
+		self.assertTrue (FunnelChoose.PickValid (classes, gods, 1, 3, 2, 9)) # Turil is neutral
 		self.assertFalse (FunnelChoose.PickValid (classes, gods, 1, 1, 0, 0)) # no alignment
 
 	def test_grave_lines (self):

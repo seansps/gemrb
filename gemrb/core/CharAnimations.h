@@ -186,6 +186,9 @@ public:
 	void SetOffhandRef(AnimRef ref);
 	// DCC (M2.11): the hair and beard overlays' animation codes (empty: none), see DCC/Looks.h
 	void SetHairRefs(AnimRef hair, AnimRef beard);
+	// DCC (tests): the body's file a stance draws with the current weapon type (eg. CHMB1A6), and the
+	// suffix its weapon overlay takes (WQ<size><code><suffix>, eg. A6); loads nothing
+	ResRef DCCStanceFile(unsigned char stance, orient_t orient, std::string* overlaySuffix = nullptr) const;
 	void SetColors(const ieDword* Colors);
 	void CheckColorMod();
 	void SetupColors(PaletteType type);

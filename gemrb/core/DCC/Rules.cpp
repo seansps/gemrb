@@ -138,6 +138,9 @@ bool RulesData::Load()
 	// the gods by alignment (M3.3, the cleric's class pick)
 	table = gamedata->LoadTable("dccgods");
 	if (!table || !gods.Load(*table)) fail("dccgods");
+	// weapons held in both hands though one-handed in DCC: the two-handed stances (animation only)
+	table = gamedata->LoadTable("dcchold");
+	if (!table || !held.Load(*table)) fail("dcchold");
 	return ok;
 }
 

@@ -10,10 +10,15 @@
 #   - Select all, Select mine (co-op), the formation buttons (Block, Column: set the party's formation
 #     and line the selection up in it where its leader stands), the party settings (DCCParty.py);
 #   - saved groups 1-9: Ctrl+1-9 (or a right click) saves the selection, Alt+1-9 (or a click) selects it;
-#   - sixteen tiles in two columns of eight: the name, the occupation, the worst status, an HP bar,
+#   - a tile for each party member (sixteen in the funnel: two columns of eight; the four after it: two
+#     rows of two): the name, the occupation, the worst status, an HP bar,
 #     the selection highlight, the owner's colour as a stripe down the left edge in co-op; a click selects one, a shift
 #     click (or a right click) adds or takes one away; hovering shows occupation, HP, Luck and weapon.
 #     The dying flash, the dead stay in the list, greyed and marked (dead).
+# The tiles are rebuilt whenever the party changes (who is in which slot: the funnel's end, a dismissal,
+# a recruit, the dead taken out, a load, a co-op replica's party), so the panel shows the current party
+# only. A hidden tile would not do: hiding a view doesn't redraw the window under it, so the old tiles'
+# pixels stayed (M3.3's "Alive 4 of 4" over sixteen tiles).
 # Drag-box selection works in the world as before.
 
 import GemRB
@@ -66,13 +71,26 @@ Shown = {} # what each slot shows, for tests: slot -> the tile's text
 Tiles = {} # slot -> {"Text", "Status", "Tooltip", "Owner", "Selected", "Dying", "Dead", "HP"}
 Header = {} # "Summary", "Waiting"
 Groups = {} # 1-9 -> [party slots]
+Built = None # the party the tiles were built for: each slot's global ID, in slot order
+Rebuilds = 0 # how often the tiles were rebuilt for a new party (for tests)
+
+def PartyKey ():
+	"""who is in the party, slot by slot (global IDs): the tiles are rebuilt when it changes"""
+	return tuple (GemRB.GetDCCFunnel (slot)["GlobalID"] for slot in range (1, min (_Size (), MAX_SLOTS) + 1))
+
+def _Rows (count):
+	"""rows of tiles for a party this size: two columns, filled down then across"""
+	return min (ROWS, max (1, (count + COLUMNS - 1) // COLUMNS))
 
 def OpenRoster ():
-	global RosterWindow
+	global RosterWindow, Built
 	if RosterWindow:
 		return RosterWindow
+	Built = PartyKey ()
+	count = len (Built)
+	rows = _Rows (count)
 	width = COLUMNS * TILE_W + (COLUMNS + 1) * GAP
-	height = TILES_Y + ROWS * (TILE_H + GAP) + GAP
+	height = TILES_Y + rows * (TILE_H + GAP) + GAP
 	screen = GemRB.GetSystemVariable (SV_WIDTH), GemRB.GetSystemVariable (SV_HEIGHT)
 	frame = {'x': screen[0] - width, 'y': 4, 'w': width, 'h': height}
 	win = GemRB.CreateView (95, 255, frame)
@@ -102,8 +120,8 @@ def OpenRoster ():
 		saver.OnPress (lambda n = n: SaveGroup (n))
 		saver.SetHotKey (str (n), GEM_MOD_CTRL, True)
 		button.SetHotKey (str (n), GEM_MOD_ALT, True)
-	for i in range (MAX_SLOTS):
-		column, row = divmod (i, ROWS)
+	for i in range (count):
+		column, row = divmod (i, rows)
 		x = GAP + column * (TILE_W + GAP)
 		y = TILES_Y + row * (TILE_H + GAP)
 		tile = _Button (win, i, x, y, TILE_W, TILE_H, "", lambda slot = i + 1: SelectOnly (slot), None)
@@ -117,6 +135,30 @@ def OpenRoster ():
 	_StartTimer ()
 	UpdateRoster ()
 	return win
+
+def Rebuild ():
+	"""the tiles again for the party as it is now (the window closed and made anew)"""
+	global RosterWindow, Rebuilds
+	old = RosterWindow
+	RosterWindow = None
+	if old:
+		try:
+			old.Close ()
+		except Exception:
+			pass # gone with the game already
+	Rebuilds += 1
+	size = _Size ()
+	for n in list (Groups):
+		Groups[n] = [slot for slot in Groups[n] if slot <= size]
+	Shown.clear ()
+	Tiles.clear ()
+	return OpenRoster ()
+
+def TileCount ():
+	"""the tiles the window has (for tests: a tile beyond the party would be a stale one)"""
+	if not RosterWindow:
+		return 0
+	return sum (1 for i in range (MAX_SLOTS) if RosterWindow.GetControl (i))
 
 def _Button (win, id, x, y, w, h, text, action, tooltip = None, font = None):
 	button = win.CreateButton (id, x, y, w, h)
@@ -399,25 +441,16 @@ def UpdateRoster ():
 	if not win.GetControl (100):
 		RosterWindow = None
 		return
-	size = _Size ()
+	if PartyKey () != Built:
+		# the party changed (the funnel's end, a dismissal or recruit, the dead taken out, a load, a
+		# co-op replica): tiles for the party as it is now
+		Rebuild ()
+		return
 	owners = _Owners ()
 	infos = []
-	for i in range (MAX_SLOTS):
+	for i in range (len (Built)):
 		button = win.GetControl (i)
 		slot = i + 1
-		if slot > size:
-			# M3.3: the party of four after the funnel; an empty place shows nothing (also where a
-			# capture draws hidden views)
-			button.SetVisible (False)
-			button.SetText ("")
-			button.SetTooltip ("")
-			button.SetBackground (WindowColor)
-			for border in (0, 1, 2):
-				button.EnableBorder (border, 0)
-			Shown.pop (slot, None)
-			Tiles.pop (slot, None)
-			continue
-		button.SetVisible (True)
 		info = TileInfo (slot, owners)
 		infos.append (info)
 		_ShowTile (button, info)

@@ -161,6 +161,11 @@ def _Party ():
 	farmer = GemRB.GetDCCFunnel (_Slot ("protagon"))["Occupation"]
 	_Check ("the farmer's items and sub-roll", [farmer["Weapon"], farmer["TradeGood"], farmer["Sub"]], ["fntpfork", "fnthen", 2])
 	_Check ("class picks pending", [GemRB.GetDCCFunnel (_Slot (n))["Funnel"]["ClassPending"] for n in ("fntmira", "fntlael", "fnttobb", "fntodo")], [1, 1, 1, 0])
+	# the weapon a swing uses is the occupation's, the protagonist's too (made by CreatePlayer, its quick
+	# weapon slot was the fists until the engine lined it up with the equipped weapon)
+	unarmed = [(pc, _SwungItem (pc)) for pc in range (1, size + 1) if GemRB.GetDCCFunnel (pc)["Occupation"]["Weapon"] and _SwungItem (pc) != GemRB.GetDCCFunnel (pc)["Occupation"]["Weapon"]]
+	_Check ("everyone swings its occupation's weapon", unarmed, [])
+	_HeldStances ()
 	yield
 
 	# 2: the roster: sixteen slots; one, a toggle, everyone
@@ -793,6 +798,37 @@ def _ExpectedSummary ():
 	text = "Alive %d of 16" % (16 - dead - dying)
 	return text + (", %d dying" % dying if dying else "") + (", %d dead" % dead if dead else "")
 
+def _HeldStances ():
+	"""a weapon held in both hands though one-handed in DCC (dcchold.2da; the autotest's copy lists
+	FNTSPEAR): Wyn's spear takes the two-handed stances with her off hand free, its ITM's 100% thrust
+	picking the two-handed jab (A6); the rules still see a one-handed weapon (d20 initiative). A club
+	keeps the one-handed files"""
+	wyn = _Slot ("fntwyn")
+	stats = GemRB.GetDCCStats (wyn)
+	files = stats["StanceFiles"]
+	_Log ("held stances: Wyn %s %s %s" % (stats["WeaponAnim"], stats["AttackWeights"], files))
+	_Check ("held: the spear in both hands (two-handed animation, ITM weights all thrust)", [stats["WeaponAnim"], stats["AttackWeights"]], [1, [0, 0, 100]])
+	_Check ("held: ready is G13, the thrust A6 (body and overlay)", [files["Ready"][0][-3:].upper (), files["Ready"][1].upper (), files["Thrust"][0][-2:].upper (), files["Thrust"][1].upper ()], ["G13", "G1", "A6", "A6"])
+	spear = GemRB.GetSlotItem (wyn, GemRB.GetCombatDetails (wyn, 0)["Slot"], 1)
+	_Check ("held: the rules see a one-handed spear (no two-handed flag: d20 initiative, a shield allowed)", [spear["ItemResRef"].lower (), bool (spear["Flags"] & 0x200)], ["fntspear", False])
+	# a one-handed weapon not in the table: the one-handed files
+	club = [pc for pc in range (1, GemRB.GetPartySize () + 1) if _SwungItem (pc) == "fntclub"]
+	if club:
+		other = GemRB.GetDCCStats (club[0])
+		_Check ("held: a club stays one-handed (G1, A1 A3 A5)", [other["WeaponAnim"], other["StanceFiles"]["Ready"][0][-2:].upper (), [other["StanceFiles"][s][0][-2:].upper () for s in ("Backhand", "Overhand", "Thrust")]], [0, "G1", ["A1", "A3", "A5"]])
+
+def _RosterIsParty (what):
+	"""the roster's tiles are the party as it is: one tile per member (no stale ones from a bigger
+	party), in slot order, no name twice"""
+	import Roster
+	Roster.UpdateRoster ()
+	size = GemRB.GetPartySize ()
+	names = [GemRB.GetPlayerName (pc, 0) for pc in range (1, size + 1)]
+	shown = [Roster.Shown.get (pc, "").split ("\n")[0].split ("  ")[0] for pc in range (1, size + 1)]
+	_Check ("%s: the roster's tiles are the party (tiles, built for, names)" % what,
+		[Roster.TileCount (), Roster.Built == tuple (_Id (pc) for pc in range (1, size + 1)), shown, len (set (shown))],
+		[size, True, names, size])
+
 def _Kill (attacker, victim):
 	"""the marauder hits a peasant (a natural 20: the weak marauder needs it) until it is down"""
 	for i in range (4):
@@ -1140,12 +1176,12 @@ def _Rolled ():
 			bad.append ((pc, got, want))
 		# the items funneltest has (dccoccit.2da), the weapon in a weapon slot; the others logged
 		weapons = [GemRB.GetSlotItem (pc, slot)["ItemResRef"].lower () for slot in GemRB.GetSlots (pc, SLOT_WEAPON, 1)]
-		equipped = GemRB.GetEquippedQuickSlot (pc)
-		held = GemRB.GetSlotItem (pc, equipped) if card["WeaponItem"] else None
+		swung = _SwungItem (pc)
 		if [occ["Weapon"], occ["TradeGood"]] != [card["WeaponItem"], card["GoodItem"] if not card["GoodCopper"] else ""] or (card["WeaponItem"] and card["WeaponItem"] not in weapons):
 			bad.append ((pc, "items", occ["Weapon"], occ["TradeGood"], weapons, card["WeaponItem"], card["GoodItem"]))
-		elif card["WeaponItem"] and (not held or held["ItemResRef"].lower () != card["WeaponItem"]):
-			bad.append ((pc, "not equipped", equipped, held and held["ItemResRef"]))
+		elif card["WeaponItem"] and swung != card["WeaponItem"]:
+			# the weapon a swing uses (the engine's cached weapon info), not the slot that reads as equipped
+			bad.append ((pc, "not in hand", swung))
 		low, high = ranges[card["Race"]]
 		if not stats["BodyRolled"] or not low <= stats["BodyWeight"] <= high:
 			bad.append ((pc, "weight", stats["BodyWeight"]))
@@ -1177,6 +1213,45 @@ def _Rolled ():
 	yield
 	_Shot ("rolled_party", 1)
 	_ShotScreen ("rolled_roster")
+	yield from _ArmedHit (cards)
+
+def _SwungItem (pc):
+	"""the item a melee or missile swing of this party member uses (its cached weapon info: the slot
+	that GetCombatDetails reports, in the engine's own numbering), lower case; "fist" for none"""
+	details = GemRB.GetCombatDetails (pc, 0)
+	if "Slot" not in details:
+		return ""
+	item = GemRB.GetSlotItem (pc, details["Slot"], 1)
+	return item["ItemResRef"].lower () if item else ""
+
+def _ArmedHit (cards):
+	"""e: a rolled peasant's weapon really strikes: a lethal (not subdual) blow with its occupation's
+	weapon (M3.1's weapon check once passed while every swing was the fists')"""
+	armed = [c["Order"] for c in cards if c["WeaponItem"] and GemRB.GetCombatDetails (c["Order"], 0).get ("Flags", 0) & 1]
+	_Check ("rolled: a peasant with a melee weapon", bool (armed), True)
+	if not armed:
+		return
+	pc = armed[0]
+	weapon = [c["WeaponItem"] for c in cards if c["Order"] == pc][0]
+	GemRB.GameSetScreenFlags (GS_PARTYAI, OP_NAND) # nobody joins in
+	where = GemRB.GetActorPosition (pc)
+	gob = GemRB.CreateCreature (1, "FNTGOB", where["X"] + 40, where["Y"])
+	_Put (gob, where["X"] + 40, where["Y"])
+	yield
+	before = GemRB.GetPlayerStat (gob, IE_HITPOINTS)
+	GemRB.DCCForceDice (pc, [19, 6, 6, 6, 6])
+	GemRB.DCCAttack (pc, gob)
+	GemRB.DCCForceDice (pc, [])
+	attack = (GemRB.GetDCCLastAttack (pc) or [{}])[0]
+	yield
+	lost = before - GemRB.GetPlayerStat (gob, IE_HITPOINTS)
+	_Log ("rolled: %s's armed hit: %s" % (GemRB.GetPlayerName (pc, 0), attack))
+	_Check ("rolled: the swing is the occupation's weapon", _SwungItem (pc), weapon)
+	_Check ("rolled: an armed hit (hit, not subdual, damage taken)", [attack.get ("Hit"), attack.get ("Subdual"), attack.get ("Damage", 0) > 0 and lost == attack.get ("Damage")], [1, 0, True])
+	_Shot ("rolled_armed_hit", pc)
+	GemRB.ExecuteString ("DestroySelf()", gob)
+	GemRB.GameSetScreenFlags (GS_PARTYAI, OP_OR)
+	yield
 
 def _StepRolled ():
 	global RolledSteps
@@ -1194,6 +1269,8 @@ def _StepRolled ():
 
 ChooseSteps = None
 ReserveSteps = None
+
+WOLAETH = 14 # dccgods.2da: the chaotic god of death and dark magic, the DCC Ahriman
 
 def _Funnel (pc):
 	return GemRB.GetDCCFunnel (pc)["Funnel"]
@@ -1217,26 +1294,24 @@ def _FunnelHistory ():
 		GemRB.ExecuteString ("DestroySelf()", gob)
 		yield
 	_Check ("history: 15 and 16 dead", [_Dead (15), _Dead (16)], [True, True])
-	# a kill: the giant rat dies to peasant 3 (the kill is credited by DCCOnDeath; a rolled peasant's
-	# blows are its fists' for now, subdual ones, so the rat is knocked out first and then dies to a
-	# blow of the same peasant's once it is down: see the M3.3 notes in the README)
+	# a kill: the giant rat (worn down to 3 hp first) dies to peasant 3's own weapon (the kill is
+	# credited by DCCOnDeath); lethal blows, not the fists' subdual ones (fixed after M3.3)
 	killer = 3
 	x, y = spots[killer]
 	rat = GemRB.CreateCreature (1, "FNTRAT", x + 40, y)
 	_Put (rat, x + 40, y)
+	GemRB.SetPlayerStat (rat, IE_HITPOINTS, 3)
 	yield
-	for i in range (10):
+	subdual = []
+	for i in range (5):
 		if GemRB.GetPlayerStat (rat, IE_STATE_ID) & STATE_DEAD:
 			break
 		GemRB.DCCForceDice (killer, [19, 6, 6, 6, 6])
 		GemRB.DCCAttack (killer, rat)
 		GemRB.DCCForceDice (killer, [])
+		subdual += [a["Subdual"] for a in GemRB.GetDCCLastAttack (killer)]
 		yield
-	if not GemRB.GetPlayerStat (rat, IE_STATE_ID) & STATE_DEAD:
-		_Log ("history: the rat is only knocked out; the peasant finishes it with a script kill on its behalf")
-		GemRB.DCCKillFor (rat, killer)
-		yield
-	_Check ("history: the rat died", bool (GemRB.GetPlayerStat (rat, IE_STATE_ID) & STATE_DEAD), True)
+	_Check ("history: the rat died to the peasant's weapon (no subdual blows)", [bool (GemRB.GetPlayerStat (rat, IE_STATE_ID) & STATE_DEAD), any (subdual)], [True, False])
 	_Check ("history: the killer's kill on its funnel record", _Funnel (killer)["Kills"], 1)
 	# one with 2 hp or more nearly dies: down to 1
 	near = [pc for pc in range (1, 15) if pc != killer and GemRB.GetPlayerStat (pc, IE_HITPOINTS) >= 2][0]
@@ -1255,6 +1330,7 @@ def _Choose ():
 	"""f: choose your four, their class picks (a cleric with its god, a wizard and the learn window), the end screen"""
 	import ChooseFour, ClassPick, DCCLearn, FunnelEnd, FunnelChoose, Roster
 	yield from _FunnelHistory ()
+	Saved["rebuilds"] = Roster.Rebuilds
 	# the funnel ends by a script action (the adventure's last scene will do the same)
 	GemRB.ExecuteString ('SetGlobal("DCC_FUNNEL","GLOBAL",1)')
 	yield from _Wait (lambda: ChooseFour.Window, 10)
@@ -1307,6 +1383,10 @@ def _Choose ():
 	_Check ("funnel's end: the dead are out of the party, in the graveyard", [len (Roster.GraveLinesAll ()), any (_Funnel (pc)["StatusName"] == "dead" for pc in range (1, 5))], [2, False])
 	Roster.UpdateRoster ()
 	_Check ("funnel's end: the roster shows four", [len (Roster.Tiles), Roster.Header["Summary"]], [4, "Alive 4 of 4"])
+	_Check ("funnel's end: the roster was rebuilt for the four", Roster.Rebuilds > Saved["rebuilds"], True)
+	_RosterIsParty ("funnel's end")
+	yield
+	_ShotScreen ("roster_four")
 	# the class picks: one window at a time, for each of the four
 	classes = {}
 	for index, ident in enumerate (Saved["picks"]):
@@ -1319,18 +1399,20 @@ def _Choose ():
 			want, alignment, god = ClassPick.Last["Choice"]["Class"], None, None
 			_Check ("class pick: a demihuman takes its own class", len (ClassPick.Last["Classes"]), 1)
 		elif index == 0:
-			want, alignment, god = 3, 3, 13 # a chaotic cleric of Ahriman
+			want, alignment, god = 3, 3, WOLAETH # a chaotic cleric of Wolaeth (the Ethren Ahriman)
 		elif index == 1:
 			want, alignment, god = 1, None, None # a wizard
 		else:
 			want, alignment, god = 2 if index == 2 else 4, None, None
 		valid = ClassPick.Choose (want, alignment, god)
 		if index == 0:
-			_Check ("class pick: the cleric's gods are its alignment's", ClassPick.Last["Gods"], [name for i, name in FunnelChoose.GodsFor (ChooseFour.Tables ()["dccgods"], 3)])
+			chaotic = FunnelChoose.GodsFor (ChooseFour.Tables ()["dccgods"], 3)
+			_Check ("class pick: the cleric's gods are its alignment's (the Ethren pantheon)", ClassPick.Last["Gods"], ["Naseen", "Olyka", "Wolaeth", "Buudred", "Hemliget", "Morgen Windwalker"])
+			_Check ("class pick: each god's button names its domain on hover, the info line the chosen one's", [ClassPick.Last["GodLines"][2], "Wolaeth, god of death, dark magic" in ClassPick.Last["Info"]], ["Wolaeth, god of death, dark magic", True])
 			ClassPick.SetAlignment (1)
-			_Check ("class pick: a lawful cleric can't keep Ahriman (the god follows)", [ClassPick.Choice["God"], ClassPick.Last["Valid"]], [0, False])
+			_Check ("class pick: a lawful cleric can't keep Wolaeth (the god follows)", [ClassPick.Choice["God"], ClassPick.Last["Valid"]], [0, False])
 			ClassPick.SetAlignment (3)
-			ClassPick.SetGod (0)
+			ClassPick.SetGod ([i for i, name in chaotic].index (WOLAETH))
 			valid = ClassPick.Last["Valid"]
 			_ShotScreen ("class_pick")
 		_Check ("class pick %d: valid" % (index + 1), valid, True)
@@ -1345,8 +1427,8 @@ def _Choose ():
 	cleric = Saved["picks"][0]
 	stats = GemRB.GetDCCStats (cleric)
 	if GemRB.GetPlayerStat (cleric, IE_RACE) == 1:
-		_Check ("the cleric: chaotic, of Ahriman", [stats["AlignmentCode"], stats["God"], stats["GodName"]], [3, 13, "Ahriman"])
-		_Check ("the cleric's sheet names its god", "serves Ahriman" in DCCSheet.Lines (cleric)[0], True)
+		_Check ("the cleric: chaotic, of Wolaeth (death, dark magic; the DCC Ahriman's mechanics)", [stats["AlignmentCode"], stats["God"], stats["GodName"], stats["GodDomain"], stats["GodDCC"]], [3, WOLAETH, "Wolaeth", "death, dark magic", "Ahriman"])
+		_Check ("the cleric's sheet names its god", "serves Wolaeth" in DCCSheet.Lines (cleric)[0], True)
 		_Check ("alignment is fixed past level 0", GemRB.DCCSetAlignment (cleric, 1), False)
 	Saved["classes"] = classes
 	# the end screen, once every pick is made
@@ -1403,6 +1485,7 @@ def _Reserves ():
 	_Check ("reserves: it is chosen, level 0, 10 XP, its pick pending", [_Funnel (newcomer)["StatusName"], GemRB.GetDCCStats (newcomer)["Level"], GemRB.GetDCCStats (newcomer)["XP"], _Funnel (newcomer)["ClassPending"]], ["chosen", 0, 10, 1])
 	_Check ("reserves: nine wait now", len (GemRB.GetDCCReserves ()), 9)
 	_Check ("reserves: the dead one is buried, its grave kept", [Saved["victim"] in [GemRB.GetPlayerName (pc, 0) for pc in range (1, 5)], len (Roster.GraveLinesAll ())], [False, 3])
+	_RosterIsParty ("reserves: after the swap")
 	# its class pick comes up
 	yield from _Wait (lambda: ClassPick.Window, 10)
 	_Check ("reserves: the newcomer's class pick opens", [bool (ClassPick.Window), ClassPick.Shown], [True, newcomer])
@@ -1420,6 +1503,7 @@ def _Reserves ():
 	Reserves.Open ()
 	_Check ("reserves: dismiss the first", Reserves.Dismiss (1), 0)
 	_Check ("reserves: dismissed, in the reserves, still level 1", [GemRB.GetPartySize (), first in GemRB.GetDCCReserves (), GemRB.GetDCCStats (first)["Level"], _Funnel (first)["StatusName"]], [3, True, 1, "reserve"])
+	_RosterIsParty ("reserves: a party of three")
 	_Check ("reserves: and back again (room for one)", Reserves.Join (first) >= 0, True)
 	Reserves.Leave ()
 	_Check ("reserves: closed, the camp's global cleared", [Reserves.Window, GemRB.GetGameVar ("DCC_CAMP")], [None, 0])
@@ -1460,6 +1544,7 @@ def _StepReservesLoaded ():
 	import Roster
 	Roster.UpdateRoster ()
 	_Check ("loaded: the roster of four", len (Roster.Tiles), 4)
+	_RosterIsParty ("loaded")
 	return "done"
 
 StepTable = {

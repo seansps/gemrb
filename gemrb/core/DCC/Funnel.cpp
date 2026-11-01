@@ -22,6 +22,8 @@ bool GodTable::Load(const TableMgr& table)
 		cols[i] = table.GetColumnIndex(std::string(columns[i]));
 		if (cols[i] == TableMgr::npos) return false;
 	}
+	TableMgr::index_t dccCol = table.GetColumnIndex(std::string("DCC"));
+	TableMgr::index_t domainCol = table.GetColumnIndex(std::string("DOMAIN"));
 	for (TableMgr::index_t r = 0; r < table.GetRowCount(); ++r) {
 		God god;
 		const std::string& id = table.QueryField(r, cols[0]);
@@ -41,6 +43,13 @@ bool GodTable::Load(const TableMgr& table)
 		}
 		god.name = table.QueryField(r, cols[2]);
 		std::replace(god.name.begin(), god.name.end(), '_', ' ');
+		if (dccCol != TableMgr::npos) god.dcc = table.QueryField(r, dccCol);
+		if (domainCol != TableMgr::npos) {
+			god.domain = table.QueryField(r, domainCol);
+			std::replace(god.domain.begin(), god.domain.end(), '_', ' ');
+		}
+		if (god.dcc == "*") god.dcc.clear();
+		if (god.domain == "*") god.domain.clear();
 		Set(god);
 	}
 	return !gods.empty();

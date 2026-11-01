@@ -359,6 +359,8 @@ def Accept ():
 		return False
 	SetState (2)
 	Close ()
+	import Roster
+	Roster.UpdateRoster () # the four's tiles at once
 	return True
 
 def Close ():

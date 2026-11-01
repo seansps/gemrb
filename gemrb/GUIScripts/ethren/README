@@ -30,8 +30,9 @@ Modules here so far:
   demo GUI has no portrait window: the summary ("Alive 12 of 16, 2 dying, 2
   dead"), the prompts waiting, select all and mine, Block and Column on the
   selection, the party settings, groups 1-9 (Ctrl+N saves, Alt+N selects),
-  sixteen tiles (name, occupation, worst status, HP bar, owner colour, hover
-  line; the dying flash, the dead stay greyed), and the graveyard page.
+  a tile per party member, rebuilt whenever the party changes (name,
+  occupation, worst status, HP bar, owner colour, hover line; the dying flash,
+  the dead stay greyed), and the graveyard page.
 - FunnelRoll.py (M3.1): the rolls of the funnel's peasants, with no GUI and no
   GemRB import at module level (tested by tests/GUIScripts/test_funnelroll.py).
 - RollScreen.py (M3.1): the rolling screen, sixteen cards, renaming, reroll
@@ -54,7 +55,8 @@ Modules here so far:
   timer runs: it opens the funnel's end screens and the reserves when the
   game's DCC_FUNNEL and DCC_CAMP globals ask for them (co-op clients too).
 - ClassPick.py (M3.3): the level-1 class pick: alignment, class, a cleric's
-  god, then the learn window for casters; each player its own characters.
+  god (the Estaronan pantheon, the domain on hover), then the learn window for
+  casters; each player its own characters.
 - Reserves.py (M3.3): the reserves at a camp or tavern: bury, dismiss, join.
 - FunnelEnd.py (M3.3): the funnel's end screen: the party, the reserves, the
   graveyard.

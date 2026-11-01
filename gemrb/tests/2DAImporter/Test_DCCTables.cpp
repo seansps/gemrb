@@ -1060,21 +1060,35 @@ TEST(DCC_Tables, GodsAndEquipment)
 	ASSERT_TRUE(table);
 	GodTable gods;
 	ASSERT_TRUE(gods.Load(*table));
-	EXPECT_EQ(gods.For(Alignment::Lawful).size(), 8u);
-	EXPECT_EQ(gods.For(Alignment::Neutral).size(), 4u);
-	EXPECT_EQ(gods.For(Alignment::Chaotic).size(), 7u);
-	EXPECT_EQ(gods.Find(gods.Default(Alignment::Lawful))->name, "Shul");
-	EXPECT_EQ(gods.Find(9)->name, "Amun Tor");
-	EXPECT_EQ(gods.Find(14)->name, "The Hidden Lord");
+	// the Estaronan pantheon (docs/world/ethren.md): six lawful, five neutral, six chaotic, in its order
+	EXPECT_EQ(gods.For(Alignment::Lawful).size(), 6u);
+	EXPECT_EQ(gods.For(Alignment::Neutral).size(), 5u);
+	EXPECT_EQ(gods.For(Alignment::Chaotic).size(), 6u);
+	EXPECT_EQ(gods.Find(gods.Default(Alignment::Lawful))->name, "Lom");
+	EXPECT_EQ(gods.Find(1)->dcc, "Ulesh");
+	EXPECT_EQ(gods.Find(9)->name, "Turil"); // Ethren's alignment, not Aristemis's
+	EXPECT_EQ(gods.Find(9)->alignment, Alignment::Neutral);
+	EXPECT_EQ(gods.Find(9)->dcc, "Aristemis");
+	EXPECT_EQ(gods.Find(14)->name, "Wolaeth");
+	EXPECT_EQ(gods.Find(14)->dcc, "Ahriman");
+	EXPECT_EQ(gods.Find(14)->domain, "death, dark magic");
+	EXPECT_EQ(gods.Find(16)->dcc, "The_Hidden_Lord");
+	EXPECT_EQ(gods.Find(17)->name, "Morgen Windwalker");
+	EXPECT_EQ(gods.Find(17)->dcc, "Three_Fates");
+	EXPECT_EQ(gods.Find(17)->domain, "freedom, the traveller");
 	// every id below 256 (the CHAR record keeps one byte), none twice
 	std::set<int> ids;
 	for (Alignment a : { Alignment::Lawful, Alignment::Neutral, Alignment::Chaotic }) {
 		for (const God* god : gods.For(a)) {
 			EXPECT_TRUE(ids.insert(god->id).second) << god->id;
 			EXPECT_LT(god->id, 256);
+			EXPECT_FALSE(god->dcc.empty()) << god->name; // each stands in for a DCC core god
+			EXPECT_FALSE(god->domain.empty()) << god->name;
 		}
 	}
-	EXPECT_EQ(ids.size(), 19u);
+	EXPECT_EQ(ids.size(), 17u);
+	EXPECT_EQ(*ids.begin(), 1);
+	EXPECT_EQ(*ids.rbegin(), 17);
 
 	auto equip = Open2DA("dccequip");
 	ASSERT_TRUE(equip);
@@ -1085,6 +1099,29 @@ TEST(DCC_Tables, GodsAndEquipment)
 		EXPECT_NE(equip->QueryField(r, equip->GetColumnIndex("NAME")), "*") << r;
 	}
 	EXPECT_EQ(equip->QueryField(equip->GetRowIndex("14"), equip->GetColumnIndex("NAME")), "Lantern");
+}
+
+// weapons held in both hands though one-handed in DCC (dcchold.2da): the staff and pole, the spear, the
+// pitchfork and the shovel by their animation codes (art/sprites/engine_rows.md); none of the true
+// two-handed weapons, which go by the ITM's flag, and none that dccweap.2da makes two-handed
+TEST(DCC_Tables, HeldInBothHands)
+{
+	auto table = Open2DA("dcchold");
+	ASSERT_TRUE(table);
+	HeldTable held;
+	ASSERT_TRUE(held.Load(*table));
+	for (const char* code : { "QS", "SP", "PF", "SV" }) {
+		EXPECT_TRUE(held.BothHands("", code)) << code;
+	}
+	for (const char* code : { "CL", "DD", "KN", "SS", "S1", "AX", "MC", "BA", "S2", "PL", "BW", "LB", "CB" }) {
+		EXPECT_FALSE(held.BothHands("", code)) << code;
+	}
+	auto weapons = Open2DA("dccweap");
+	ASSERT_TRUE(weapons);
+	auto hands = weapons->GetColumnIndex("HANDS");
+	for (const char* weapon : { "STAFF", "SPEAR" }) {
+		EXPECT_NE(weapons->QueryField(weapons->GetRowIndex(std::string(weapon)), hands), "2") << weapon; // one-handed for the rules
+	}
 }
 
 // M2.11: the hair and beard overlays (dcchair.2da), the walk speeds (moverate.2da) and the avatars
