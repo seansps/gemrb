@@ -1,0 +1,18 @@
+2DA V1.0
+*
+# ethren (M3.1): how a new peasant looks, by species and sex (the funnel's rolling screen, FunnelRoll.py;
+# the M2.11 sprites, DCC/Looks.h). ANIM is the animation id (avatars.2da, decimal): the demihumans use the
+# human bodies until their sprites exist (0x6501 CPM2, the bald male body with the hair and beard overlays;
+# 0x6510 CPF1, the female with her hair baked in). HAIR lists the hair styles of dcchair.2da it may take (|
+# between them, 0 the body's own); BALD and BEARD are the chances in % of no hair overlay and of a beard
+# (BEARDS the beard styles). The colour columns are ranges of Ethren's pal16 rows: SKIN, HAIRCOL, the dyes of
+# the minor and major colours (DYES), LEATHER and METAL (metal and armor).
+            ANIM    HAIR  BALD  BEARD  BEARDS  SKIN   HAIRCOL  DYES   LEATHER  METAL
+HUMAN_M     25857   1     15    45     1       28-35  36-45    7-27   46-51    0-6
+HUMAN_F     25872   0     0     0      0       28-35  36-45    7-27   46-51    0-6
+ELF_M       25857   1     5     0      0       28-33  36-45    7-27   46-51    0-6
+ELF_F       25872   0     0     0      0       28-33  36-45    7-27   46-51    0-6
+DWARF_M     25857   1     30    95     1       29-35  36-45    7-27   46-51    0-6
+DWARF_F     25872   0     0     0      0       29-35  36-45    7-27   46-51    0-6
+HALFLING_M  25857   1     10    15     1       28-35  36-45    7-27   46-51    0-6
+HALFLING_F  25872   0     0     0      0       28-35  36-45    7-27   46-51    0-6

@@ -1064,6 +1064,7 @@ void NetLobbyState::Write(NetWriter& w) const
 		w.U8(party[i].owner);
 		w.U8(party[i].controller);
 		w.Str(party[i].name);
+		w.Str(party[i].card);
 	}
 }
 
@@ -1088,6 +1089,7 @@ bool NetLobbyState::Read(NetReader& r)
 		slot.controller = r.U8();
 		if (!slot.partySlot || slot.partySlot > NET_PARTY_SLOTS || slot.owner > NET_MAX_PEERS || slot.controller > NET_MAX_PEERS) r.Fail();
 		slot.name = r.Str();
+		slot.card = r.Str();
 	}
 	return r.Ok();
 }

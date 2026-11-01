@@ -4322,6 +4322,7 @@ static PyObject* GemRB_NetGetLobby(PyObject* /*self*/, PyObject* /*args*/)
 		PyDict_SetItemString(entry, "Owner", DecRef(PyLong_FromLong, slot.owner));
 		PyDict_SetItemString(entry, "Controller", DecRef(PyLong_FromLong, slot.controller));
 		PyDict_SetItemString(entry, "Name", DecRef(NetPyString, slot.name));
+		PyDict_SetItemString(entry, "Card", DecRef(NetPyString, slot.card));
 		PyList_Append(party, entry);
 		Py_DecRef(entry);
 	}
@@ -4373,6 +4374,34 @@ static PyObject* GemRB_NetAssign(PyObject* /*self*/, PyObject* args)
 	PARSE_ARGS(args, "ii", &partySlot, &playerSlot);
 	NetSession* net = core->GetNetSession();
 	RETURN_BOOL(net && net->Assign(uint8_t(partySlot), uint8_t(playerSlot)));
+}
+
+PyDoc_STRVAR(GemRB_NetSetLobbyCards__doc,
+	     "===== NetSetLobbyCards =====\n\
+\n\
+**Prototype:** GemRB.NetSetLobbyCards (cards)\n\
+\n\
+**Description:** Host only, before the game runs: the funnel's rolling screen (M3.1) shows \n\
+its cards to every player in the lobby. cards is a list of strings, one per party slot in \n\
+order (at most 1024 bytes each, opaque to the engine); NetGetLobby gives each slot's as \n\
+Card. An empty list takes them away.\n\
+\n\
+**Return value:** bool\n\
+");
+
+static PyObject* GemRB_NetSetLobbyCards(PyObject* /*self*/, PyObject* args)
+{
+	PyObject* list = nullptr;
+	PARSE_ARGS(args, "O", &list);
+	if (!PyList_Check(list)) return AttributeError(GemRB_NetSetLobbyCards__doc);
+	std::vector<std::string> cards;
+	for (Py_ssize_t i = 0; i < PyList_Size(list); ++i) {
+		PyObject* item = PyList_GetItem(list, i);
+		const char* text = PyUnicode_Check(item) ? PyUnicode_AsUTF8(item) : nullptr;
+		cards.emplace_back(text ? text : "");
+	}
+	NetSession* net = core->GetNetSession();
+	RETURN_BOOL(net && net->SetLobbyCards(cards));
 }
 
 PyDoc_STRVAR(GemRB_NetSetPermission__doc,
@@ -7097,14 +7126,15 @@ static PyObject* GemRB_DCCLevelUp(PyObject* /*self*/, PyObject* args)
 PyDoc_STRVAR(GemRB_SaveScreenshot__doc,
 	     "===== SaveScreenshot =====\n\
 \n\
-**Prototype:** GemRB.SaveScreenshot (path[, globalID])\n\
+**Prototype:** GemRB.SaveScreenshot (path[, globalID[, screen]])\n\
 \n\
 **Description:** Draws the game window (the area, without the GUI) and writes it to a BMP file, \n\
 so autotests can look at sprites and colours. For tests.\n\
 \n\
 **Parameters:**\n\
   * path - the file to write\n\
-  * globalID - party ID or global ID of an actor to centre the view on first\n\
+  * globalID - party ID or global ID of an actor to centre the view on first (0 none)\n\
+  * screen - 1: every window as drawn (the GUI too, eg. the funnel's screens), not just the game's\n\
 \n\
 **Return value:** True if it was written");
 
@@ -7112,13 +7142,14 @@ static PyObject* GemRB_SaveScreenshot(PyObject* /*self*/, PyObject* args)
 {
 	const char* cpath = nullptr;
 	int globalID = 0;
-	PARSE_ARGS(args, "s|i", &cpath, &globalID);
+	int screen = 0;
+	PARSE_ARGS(args, "s|ii", &cpath, &globalID, &screen);
 	const Actor* center = nullptr;
 	const Game* game = core->GetGame();
 	if (globalID && game) {
 		center = globalID > 1000 ? game->GetActorByGlobalID(globalID) : game->FindPC(globalID);
 	}
-	if (!core->WriteScreenshot(path_t(cpath), center)) {
+	if (!core->WriteScreenshot(path_t(cpath), center, screen != 0)) {
 		Py_RETURN_FALSE;
 	}
 	Py_RETURN_TRUE;
@@ -8060,6 +8091,9 @@ static PyObject* GemRB_GetDCCFunnel(PyObject* /*self*/, PyObject* args)
 	DictInt(place, "Recovered", (funnel.flags & DCC::FUNNEL_RECOVERED) != 0);
 	DictInt(place, "DiedAt", long(funnel.diedAt));
 	PyDict_SetItemString(place, "DiedIn", DecRef(PyUnicode_FromString, funnel.diedIn.c_str()));
+	PyDict_SetItemString(place, "Killer", DecRef(PyUnicode_FromString, funnel.killer.c_str()));
+	PyDict_SetItemString(place, "Cause", DecRef(PyUnicode_FromString, funnel.cause.c_str()));
+	PyDict_SetItemString(place, "Place", DecRef(PyUnicode_FromString, funnel.place.c_str()));
 	PyObject* dict = PyDict_New();
 	PyDict_SetItemString(dict, "Occupation", occupation);
 	PyDict_SetItemString(dict, "Funnel", place);
@@ -8100,6 +8134,72 @@ static PyObject* GemRB_DCCSetFunnel(PyObject* /*self*/, PyObject* args)
 	else if (player >= 0) funnel.player = static_cast<uint8_t>(std::min(player, 254));
 	if (flags >= 0) funnel.flags = static_cast<uint8_t>(flags);
 	actor->DCCExtChanged();
+	Py_RETURN_TRUE;
+}
+
+PyDoc_STRVAR(GemRB_DCCSetOccupation__doc,
+	     "===== DCCSetOccupation =====\n\
+\n\
+**Prototype:** GemRB.DCCSetOccupation (globalID, id, sub, tradeGood, weapon, skills)\n\
+\n\
+**Description:** Sets a character's 0-level occupation (OCCU), as the funnel's rolling screen \n\
+creates the peasants (M3.1): id its Table 1-3 row by the lowest d100 number; sub the row's \n\
+sub-roll (0 none); tradeGood and weapon the items ('' when there is none); skills a list of \n\
+skill tag names (funnel.md, eg. 'FARMING'). The weapon it last fought with starts as the \n\
+occupation's; if the character carries the weapon, it goes to the first weapon slot (if that \n\
+is free) and is equipped. Host or single player only.\n\
+\n\
+**Return value:** bool (False for a co-op client or an unknown tag)\n\
+\n\
+**See also:** [GetDCCFunnel](GetDCCFunnel.md), [DCCSetFunnel](DCCSetFunnel.md)");
+
+static PyObject* GemRB_DCCSetOccupation(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int id;
+	int sub;
+	char* tradeGood = nullptr;
+	char* weapon = nullptr;
+	PyObject* skills = nullptr;
+	PARSE_ARGS(args, "iiissO", &globalID, &id, &sub, &tradeGood, &weapon, &skills);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	const NetSession* net = core->GetNetSession();
+	if (net && !net->IsHost()) Py_RETURN_FALSE;
+	if (!PyList_Check(skills) || id < 0 || id > 100 || sub < 0 || sub > 255) Py_RETURN_FALSE;
+	uint32_t bits = 0;
+	for (Py_ssize_t i = 0; i < PyList_Size(skills); ++i) {
+		const char* tag = PyUnicode_AsUTF8(PyList_GetItem(skills, i));
+		uint32_t bit = tag ? DCC::OccupationSkillBit(tag) : 0;
+		if (!bit) Py_RETURN_FALSE;
+		bits |= bit;
+	}
+	auto lower = [](std::string text) {
+		std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+		return text.substr(0, 8);
+	};
+	DCC::Occupation& occ = actor->dccExt.occupation;
+	occ.id = uint8_t(id);
+	occ.sub = uint8_t(sub);
+	occ.tradeGood = lower(tradeGood);
+	occ.weapon = lower(weapon);
+	occ.lastWeapon = occ.weapon;
+	occ.skills = bits;
+	actor->DCCExtChanged();
+	// the occupation's weapon in hand: the first weapon slot, equipped
+	if (!occ.weapon.empty()) {
+		ResRef weaponRef(occ.weapon);
+		int melee = Inventory::GetWeaponSlot();
+		int carried = actor->inventory.FindItem(weaponRef, 0);
+		if (carried >= 0 && carried != melee && actor->inventory.IsSlotEmpty(melee)) {
+			CREItem* item = actor->inventory.RemoveItem(carried);
+			actor->inventory.SetSlotItem(item, melee);
+		}
+		if (actor->inventory.FindItem(weaponRef, 0) == melee) {
+			actor->inventory.SetEquippedSlot(0, 0);
+			actor->ReinitQuickSlots();
+		}
+	}
 	Py_RETURN_TRUE;
 }
 
@@ -15152,6 +15252,7 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(GetActorPosition, METH_VARARGS),
 	METHOD(DCCSetPromptOptions, METH_VARARGS),
 	METHOD(DCCSetFunnel, METH_VARARGS),
+	METHOD(DCCSetOccupation, METH_VARARGS),
 	METHOD(DCCCast, METH_VARARGS),
 	METHOD(GetDCCLastCast, METH_VARARGS),
 	METHOD(DCCSetSpellburn, METH_VARARGS),
@@ -15211,6 +15312,7 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(MoveToArea, METH_VARARGS),
 	METHOD(NetAllowed, METH_VARARGS),
 	METHOD(NetAssign, METH_VARARGS),
+	METHOD(NetSetLobbyCards, METH_VARARGS),
 	METHOD(NetChat, METH_VARARGS),
 	METHOD(NetChatReplay, METH_NOARGS),
 	METHOD(NetGetConfig, METH_NOARGS),

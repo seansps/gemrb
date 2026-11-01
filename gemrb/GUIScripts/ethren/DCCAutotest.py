@@ -1456,6 +1456,11 @@ def _Tick (token):
 	global Step, Failures
 	if token != Token or Step in ("loading", "finished"):
 		return
+	if Step == "wait":
+		try:
+			GemRB.GetGameVar ("DCC_AUTOTEST")
+		except RuntimeError:
+			return # no game right now (funneltest's rolling screen starts a new one, M3.1)
 	try:
 		if Step == "wait":
 			if GemRB.GetGameVar ("DCC_AUTOTEST") == 1:

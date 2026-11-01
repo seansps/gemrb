@@ -606,8 +606,8 @@ private:
 	int DCCInitiativeDelay() const;
 	/* DCC: attacks per round (doubled, like IE_NUMBEROFATTACKS) */
 	int DCCNumberOfAttacks() const;
-	/* DCC: Die() records the time of death for recovering the body */
-	void DCCOnDeath();
+	/* DCC: Die() records the time of death for recovering the body, and in the funnel the cause */
+	void DCCOnDeath(const Scriptable* killer);
 	/* DCC: one roll of an attack action, see ActorDCCCombat.cpp */
 	struct DCCSwing;
 	struct DCCAttackState;
@@ -874,6 +874,12 @@ public:
 	 * lost for the day), corruptions, spellburn, disapproval. Saved as the CRE's extension and
 	 * replicated (NetDCCExtension); call DCCExtChanged after changing it */
 	DCC::CharacterExt dccExt;
+	// M3.2, the funnel's cause of death: the weapon or the spell whose harm is being applied
+	// (an item's or spell's resref, set around a swing's damage and while an effect runs), and
+	// what killed it when nothing did ("bled out")
+	ResRef dccHitSource;
+	ieDword dccHitBy = 0; // and who brought it (a global ID), when the death itself has no killer
+	std::string dccDeathNote;
 	uint32_t dccExtRevision = 0;
 	uint32_t dccMutations = 0; // DCC::Mutation bits of the corruption list (DCCSyncSpellbook)
 	/** tests and scripts: the next cast's spellburn (Str, Agi, Sta), instead of the policy and prompt */

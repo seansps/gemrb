@@ -22,6 +22,9 @@ MenuWindow = None
 LobbyWindow = None
 PermissionsWindow = None
 StartGame = None # the game type's new game function, run on the host once everyone is ready
+# a game type's step between the lobby's Start and the game (ethren: the funnel's rolling screen, M3.1);
+# it gets the function that starts the game (False if it can't: someone isn't ready any more)
+BeforeStart = None
 Ready = False
 LastRevision = -1
 TimerSet = False
@@ -295,13 +298,26 @@ def ReadyPress ():
 	GemRB.NetSetReady (ready)
 
 def StartPress ():
+	if BeforeStart:
+		lobby = GemRB.NetGetLobby ()
+		if not lobby or not lobby["CanStart"]:
+			_Log ("Start pressed, but not everyone is ready")
+			return
+		_Log ("Start pressed: the game type's step before the game")
+		CloseLobby ()
+		BeforeStart (_StartNow)
+		return
+	_StartNow ()
+
+def _StartNow ():
 	if not GemRB.NetStartGame ():
 		_Log ("Start pressed, but not everyone is ready")
-		return
+		return False
 	_Log ("Start pressed: starting the game")
 	CloseLobby ()
 	if StartGame:
 		StartGame ()
+	return True
 
 def LeavePress ():
 	_Log ("Leave pressed")
@@ -388,7 +404,8 @@ def ClosePermissions ():
 # NetTestLobby=T:step;T:step... drives these windows the way a player would (T in seconds
 # since the test started): it types into the fields and calls the buttons' own handlers.
 # Steps: host NAME PORT | join NAME HOST PORT | ready 0|1 | assign PC PLAYER |
-# perm PLAYER NAME 0|1 (NAME with _ for spaces) | chat TEXT | start | leave | dump
+# perm PLAYER NAME 0|1 (NAME with _ for spaces) | chat TEXT | start | leave | dump |
+# py CODE (GUI script code, eg. a game type's screen between Start and the game; | for line breaks)
 
 TestSteps = []
 TestClock = 0
@@ -457,6 +474,8 @@ def _TestStep (words):
 		StartPress ()
 	elif verb == "leave":
 		LeavePress ()
+	elif verb == "py":
+		exec (" ".join (words[1:]).replace ("|", "\n"), globals ())
 	elif verb == "dump":
 		if not lobby:
 			_Log ("no session")
@@ -466,7 +485,8 @@ def _TestStep (words):
 			perms = " ".join (("+" if allowed else "-") + name.replace (" ", "_") for name, allowed in sorted (player["Permissions"].items ()))
 			_Log ("  player %d '%s' connected %s ready %s ping %d: %s" % (player["Slot"], player["Name"], player["Connected"], player["Ready"], player["Ping"], perms))
 		for slot in lobby["Party"]:
-			_Log ("  PC %d '%s' owner %d controller %d" % (slot["Slot"], slot["Name"], slot["Owner"], slot["Controller"]))
+			card = slot["Card"].split ("\n")[0] if slot["Card"] else ""
+			_Log ("  PC %d '%s' owner %d controller %d%s" % (slot["Slot"], slot["Name"], slot["Owner"], slot["Controller"], " card '%s'" % card if card else ""))
 		_Log ("  chat: %s" % " | ".join (lobby["Chat"]))
 		if LobbyWindow:
 			_Log ("  window shows: %s" % " | ".join ("%s: %s" % item for item in sorted (Shown.items ())))

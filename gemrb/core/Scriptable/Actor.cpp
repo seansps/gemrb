@@ -5676,7 +5676,7 @@ void Actor::Die(Scriptable* killer, bool grantXP)
 		return; //can die only once
 	}
 	if (core->HasFeature(GFFlags::RULES_DCC)) {
-		DCCOnDeath();
+		DCCOnDeath(killer);
 	}
 
 	//Can't simply set Selected to false, game has its own little list

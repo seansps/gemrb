@@ -144,6 +144,10 @@ public:
 
 	Holder<Sprite2D> GetScreenshot(Window* win, unsigned int scaleDownRatio = 0);
 	Holder<Sprite2D> GetScreenshotPreview();
+	/** ethren tests (M3.1): the whole screen, every visible window over the game window, each drawn
+	 * into its own buffer and copied in (no alpha), since reading the screen back after a present
+	 * gives a stale frame on some renderers */
+	Holder<Sprite2D> GetScreenComposite();
 	Window* GetGameWindow() const { return gameWin; }
 	Window* GetFocusWindow() const;
 

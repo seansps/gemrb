@@ -2047,14 +2047,15 @@ void Interface::UpdateUndrawnFrame() const
 	}
 }
 
-bool Interface::WriteScreenshot(const path_t& path, const Actor* center) const
+bool Interface::WriteScreenshot(const path_t& path, const Actor* center, bool screen) const
 {
 	Window* gameWin = winmgr ? winmgr->GetGameWindow() : nullptr;
-	if (!gameWin) return false;
+	if (!winmgr || (!gameWin && !screen)) return false;
 	if (center && gamectrl) {
 		gamectrl->MoveViewportTo(center->Pos, true);
 	}
-	Holder<Sprite2D> shot = winmgr->GetScreenshot(gameWin);
+	// the whole screen (M3.1: the funnel's own screens, the roster): every window drawn now
+	Holder<Sprite2D> shot = screen ? winmgr->GetScreenComposite() : winmgr->GetScreenshot(gameWin);
 	PluginHolder<ImageWriter> writer = MakePluginHolder<ImageWriter>(PLUGIN_IMAGE_WRITER_BMP);
 	FileStream out;
 	if (!shot || !writer || !out.Create(path)) return false;

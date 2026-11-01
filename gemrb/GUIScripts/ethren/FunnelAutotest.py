@@ -31,6 +31,13 @@
 #      over the cap (can't move); the record sheet's line
 #   c. travel with 16 strung out in a single file (wider than MAX_TRAVELING_DISTANCE): one click
 #      takes everyone to the cave; back with only one selected
+# M3.1/M3.2 (Phase 3):
+#   d. the roster (roster): tiles, summary, hover line, groups, select mine, the formation buttons; a fight
+#      with deaths (a marauder kills two, a level-1 wizard bleeds out): the dying, the dead greyed, the
+#      graveyard with each cause and place; screenshots
+#   e. rolling the sixteen (rolling, after everything else): a new game through the rolling screen (the
+#      cards, renaming, reroll all, the house rules, accept) and the sixteen it makes: abilities, Luck and
+#      augur, HP, species, OCCU/FUNL, items, body weight, looks, the purse; screenshots
 # Every check logs "[FNT] ok ..." or "[FNT] FAIL ...", the end "[FNT] autotest done: N checks,
 # F failed"; FNT_AT_DONE becomes 1 if all passed, 2 if not.
 
@@ -151,7 +158,7 @@ def _Party ():
 	import Roster
 	Roster.UpdateRoster ()
 	_Check ("roster shows 16", len (Roster.Shown), 16)
-	_Check ("roster names", Roster.Shown.get (16, "").split (" ")[0], "Pip")
+	_Check ("roster names", Roster.Shown.get (16, "").split ("\n")[0], "Pip")
 	Roster.SelectOnly (5)
 	yield
 	_Check ("select one", _Selected (), [5])
@@ -763,6 +770,121 @@ def _Travel ():
 	_Check ("travel: Player16 there (the area script saw it)", GemRB.GetGameVar ("FNT_CAVE"), 1)
 	_Log ("arrival: " + " ".join ("%d,%d" % (p["X"], p["Y"]) for p in where))
 
+# --- M3.2: the roster ----------------------------------------------------------------------------
+
+def _ShotScreen (name, center = 0):
+	"""the whole screen (the GUI too), next to the autotest's saves"""
+	path = GemRB.GetSystemVariable (SV_SAVEPATH) + "/%s.bmp" % name
+	_Check ("screenshot %s" % name, GemRB.SaveScreenshot (path, center, 1), True)
+	_Log ("screenshot: " + path)
+
+def _ExpectedSummary ():
+	dead = sum (1 for pc in range (1, 17) if _Dead (pc))
+	dying = sum (1 for pc in range (1, 17) if not _Dead (pc) and GemRB.GetPlayerStat (pc, IE_DCC_BLEED) > 0)
+	text = "Alive %d of 16" % (16 - dead - dying)
+	return text + (", %d dying" % dying if dying else "") + (", %d dead" % dead if dead else "")
+
+def _Kill (attacker, victim):
+	"""the marauder hits a peasant (a natural 20: the weak marauder needs it) until it is down"""
+	for i in range (4):
+		if _Dead (victim) or GemRB.GetPlayerStat (victim, IE_HITPOINTS) < 1:
+			break
+		GemRB.DCCForceDice (attacker, [20, 4, 1, 1, 1])
+		GemRB.DCCAttack (attacker, victim)
+		GemRB.DCCForceDice (attacker, [])
+		yield
+
+def _Roster ():
+	"""d: the real roster (M3.2) with a fight, deaths and the graveyard"""
+	import Roster
+	essa, mags, mira, jora = _Slot ("fntessa"), _Slot ("fntmags"), _Slot ("fntmira"), _Slot ("protagon")
+	area = GemRB.GetActorPosition (jora)["Area"].lower ()
+	placeName = {"fnt01": "the glade", "fnt02": "the cave"}.get (area, area)
+	Roster.UpdateRoster ()
+	_Check ("roster: 16 tiles", len (Roster.Tiles), 16)
+	_Check ("roster: name and occupation", Roster.Shown.get (jora, "").split ("\n"), [GemRB.GetPlayerName (jora, 0), "farmer"])
+	tip = Roster.Tiles[jora]["Tooltip"]
+	_Log ("roster: Jora's hover line: " + tip)
+	held = GemRB.GetSlotItem (jora, GemRB.GetEquippedQuickSlot (jora))
+	weapon = "pitchfork" if held and held["ItemResRef"].lower () == "fntpfork" else "bare hands"
+	_Check ("roster: the hover line (occupation, HP, Luck, weapon in hand)", [w in tip for w in ("farmer (wheat)", "HP ", "Luck 11", weapon)], [True] * 4)
+	_Check ("roster: the summary", Roster.Header["Summary"], _ExpectedSummary ())
+	_Check ("roster: no owner colours in single player", Roster.Tiles[jora]["Owner"], None)
+	_Check ("roster: select mine is everyone living in single player", len (Roster.SelectMine ()), sum (1 for pc in range (1, 17) if not _Dead (pc)))
+
+	# saved groups: Ctrl+N (here its button) saves the selection, a click on N selects it again
+	Roster.SelectOnly (jora)
+	Roster.ToggleSelect (_Slot ("fntbrin"))
+	Roster.SaveGroup (2)
+	Roster.SelectAll ()
+	_Check ("groups: 2 saved", Roster.Groups.get (2), [jora, _Slot ("fntbrin")])
+	_Check ("groups: 2 selected again", [Roster.SelectGroup (2), _Selected ()], [True, [jora, _Slot ("fntbrin")]])
+	_Check ("groups: an empty one selects nothing", Roster.SelectGroup (7), False)
+
+	# the formation buttons act on the selection: the column, lined up where the first one stands
+	living = [pc for pc in range (1, 17) if not _Dead (pc)]
+	GemRB.GameSelectPC (0, 0)
+	for pc in living[:6]:
+		GemRB.GameSelectPC (pc, 1)
+	lead = GemRB.GetActorPosition (living[0])
+	Roster.Formation (1)
+	yield
+	_Check ("formation button: the column", Roster.CurrentFormation (), 1)
+	_Check ("formation button: the selection sets off", any (p["Moving"] for p in _Positions (living[:6])), True)
+	yield from _Wait (lambda: not any (p["Moving"] for p in _Positions (living[:6])), 30)
+	where = _Positions (living[:6])
+	_Log ("formation button: the column at %d,%d: %s" % (lead["X"], lead["Y"], " ".join ("%d,%d" % (p["X"], p["Y"]) for p in where)))
+	_Check ("formation button: the six lined up where the first stood", [p for p in where if abs (p["X"] - lead["X"]) + abs (p["Y"] - lead["Y"]) > 220], [])
+	Roster.Formation (0)
+	_Check ("formation button: the block", Roster.CurrentFormation (), 0)
+	GemRB.GameSelectPC (0, 1)
+
+	# a fight: a marauder kills Essa and Mags; Mira (a level-1 wizard since the class picks) drops and bleeds
+	jx, jy = GemRB.GetActorPosition (essa)["X"], GemRB.GetActorPosition (essa)["Y"]
+	gob = GemRB.CreateCreature (1, "FNTGOB", jx + 40, jy)
+	_Put (gob, jx + 40, jy)
+	yield
+	yield from _Kill (gob, essa)
+	yield from _Kill (gob, mags)
+	# Mira drops to 0 from a blow nobody struck (5 damage): she bleeds out alone
+	GemRB.ApplyEffect (mira, "Damage", GemRB.GetPlayerStat (mira, IE_HITPOINTS) + 1, 0)
+	yield
+	Roster.UpdateRoster ()
+	_Check ("fight: Essa and Mags dead", [_Dead (essa), _Dead (mags)], [True, True])
+	_Check ("fight: Mira dying (bleeding out)", [_Dead (mira), Roster.Tiles[mira]["Status"], Roster.Tiles[mira]["Dying"]], [False, "dying", True])
+	_Check ("roster: the dead greyed and marked, kept in the list", [Roster.Tiles[essa]["Dead"], Roster.Shown[essa].startswith ("Essa  " + Roster.DEAD_MARK)], [True, True])
+	_Check ("roster: the summary mid-fight", Roster.Header["Summary"], _ExpectedSummary ())
+	_Log ("roster mid-fight: " + Roster.Header["Summary"])
+	_ShotScreen ("roster_fight", essa)
+	for name, pc in (("essa", essa), ("mags", mags)):
+		place = GemRB.GetDCCFunnel (pc)["Funnel"]
+		_Check ("the cause of %s's death" % name, [place["StatusName"], place["Killer"], place["Cause"], place["Place"]], ["dead", "Marauder", "cudgel", placeName])
+	Saved["essa"] = GemRB.GetDCCFunnel (essa)["Funnel"]
+
+	# Mira bleeds out (level 1: by the end of the next round)
+	GemRB.ExecuteString ("DestroySelf()", gob)
+	yield from _Wait (lambda: _Dead (mira), 40)
+	place = GemRB.GetDCCFunnel (mira)["Funnel"]
+	_Check ("mira bled out", [_Dead (mira), place["StatusName"], place["Killer"], place["Cause"], place["Place"]], [True, "dead", "", "bled out", placeName])
+
+	# the graveyard: each dead peasant, the cause and the place
+	Roster.OpenGraveyard ()
+	yield
+	lines = Roster.GraveLines
+	_Log ("graveyard: " + " | ".join (lines))
+	expected = ["Essa, scribe: cudgel (Marauder), %s" % placeName, "Mira, wizard's apprentice: bled out, %s" % placeName, "Mags, herbalist: cudgel (Marauder), %s" % placeName]
+	if _Dead (_Slot ("fntrolf")):
+		expected.insert (0, "Rolf, grave digger: Slay, the glade")
+	_Check ("graveyard lines", sorted (lines), sorted (expected))
+	_ShotScreen ("roster_graveyard", essa)
+	Roster.CloseGraveyard ()
+	_Check ("graveyard closed", Roster.GraveyardWindow, None)
+	Roster.UpdateRoster ()
+	_Check ("roster: the summary after", Roster.Header["Summary"], _ExpectedSummary ())
+	# the fight is over once the combat counter runs out (a save waits for it)
+	for i in range (30):
+		yield
+
 def _SaveGames ():
 	return [game for game in GemRB.GetSaveGames () if game.GetName () == SaveName]
 
@@ -807,10 +929,13 @@ def _StepLoaded ():
 	_Check ("loaded: in the cave", GemRB.GetActorPosition (1)["Area"].lower (), "fnt02")
 	_Check ("loaded: the protagonist's name as set (not the CRE's)", [GemRB.GetPlayerName (1, which) for which in (0, 1, 2)], Saved.get ("names"))
 	_Check ("loaded: brin's body weight", GemRB.GetDCCStats (_Slot ("fntbrin"))["BodyWeight"], 120)
+	if "essa" in Saved:
+		place = GemRB.GetDCCFunnel (_Slot ("fntessa"))["Funnel"]
+		_Check ("loaded: essa's cause of death", [place["Killer"], place["Cause"], place["Place"]], [Saved["essa"]["Killer"], Saved["essa"]["Cause"], Saved["essa"]["Place"]])
 	import Roster
 	Roster.UpdateRoster ()
 	_Check ("loaded: the roster", len (Roster.Shown), 16)
-	return "done"
+	return _After ("save")
 
 # Scenarios (scripts/run.sh funneltest-auto --scenario NAMES, default all): the engine sets AT_ONLY
 # and AT_<NAME> for the ones picked. Each runs with the ones it needs before it.
@@ -824,9 +949,12 @@ SCENARIOS = (
 	("classpicks", _ClassPicks), # 5
 	("prompts", _Prompts), # 6
 	("travel", _Travel), # 7
+	("roster", _Roster), # d (M3.2): the roster, a fight with deaths, the graveyard
 	("save", None), # 8
+	("rolling", None), # e (M3.1): a new game through the rolling screen, last
 )
 NEEDS = {
+	"roster": ["classpicks"], # a level-1 character to bleed out
 	"prompts": ["classpicks"], # the party settings panel's spellburn lines need the wizards
 	# the load checks what these left: the spells, Rolf's death, the party in the cave
 	"save": ["classpicks", "prompts", "travel"],
@@ -866,17 +994,176 @@ def _StepRun ():
 		next (Steps)
 		return "run"
 	except StopIteration:
-		return "save" if _Wanted ("save") else "done"
+		return "save" if _Wanted ("save") else _After ("save")
+
+def _After (step):
+	"""what comes after the save (or instead of it): the rolling screen's new game, or the end"""
+	return "rolling" if _Wanted ("rolling") else "done"
+
+# --- M3.1: rolling the sixteen ---------------------------------------------------------------------
+
+RollSteps = None
+
+def _StepRolling ():
+	"""e: back to the start: the game goes, the rolling screen opens on the next tick"""
+	_Log ("a new game through the rolling screen")
+	GemRB.QuitGame ()
+	return "rollopen"
+
+def _CardChecks (cards, what):
+	import FunnelRoll
+	tables = FunnelRoll.LoadTables ()
+	bad = []
+	for card in cards:
+		mods = [FunnelRoll.AbilityMod (tables, score) for score in card["Scores"]]
+		ok = all (3 <= score <= 18 for score in card["Scores"]) and mods == card["Mods"] and card["HP"] >= 1
+		ok = ok and 5 <= card["Copper"] <= 60 and card["AugurMod"] == mods[FunnelRoll.LUCK] and 1 <= card["Augur"] <= 30
+		ok = ok and card["Race"] == tables["dccoccup"].Int (card["Occupation"], "RACE")
+		if not ok:
+			bad.append (FunnelRoll.Summary (card))
+	_Check ("%s: every card by the rules" % what, bad, [])
+	_Check ("%s: sixteen names, none twice" % what, len (set (card["Name"] for card in cards)), 16)
+
+def _Rolling ():
+	"""e: the rolling screen: the cards, renaming, reroll all, the house rules, accept"""
+	import RollScreen, Start, FunnelRoll
+	RollScreen.Accepted = None
+	RollScreen.Cards = None
+	RollScreen.Options = FunnelRoll.Options ()
+	_Check ("rolling: dccstart says the autotest starts without it", RollScreen.Rolling (), False)
+	RollScreen.Open (Start.StartGame, None)
+	yield
+	cards = RollScreen.Cards
+	_Check ("rolling: 16 cards shown", [len (cards), len ([k for k in RollScreen.Shown if isinstance (k, int)])], [16, 16])
+	_Check ("rolling: a card's lines (name, abilities, occupation, gear, HP and copper, augur)", len (RollScreen.Shown[1]), 7)
+	_Log ("rolling: card 1: " + " | ".join (RollScreen.Shown[1]))
+	_CardChecks (cards, "rolling")
+	_Check ("rolling: the house rules are off", [RollScreen.Options.rerollOne, RollScreen.Options.fourDice, RollScreen._Control (0, 3).IsVisible ()], [False, False, False])
+	_Check ("rolling: no reroll one while it is off", RollScreen.RerollOne (2), None)
+	# renaming: through the call, and by typing into the card's name field
+	_Check ("rolling: rename", [RollScreen.Rename (0, "Gristlewick"), cards[0]["Name"], RollScreen.Shown[1][0]], [True, "Gristlewick", "Gristlewick"])
+	RollScreen._Control (1, 1).SetText ("Hobb")
+	yield
+	_Check ("rolling: a name typed on the card", RollScreen.Cards[1]["Name"], "Hobb")
+	_ShotScreen ("rolling_screen")
+	# reroll all: new peasants
+	before = [FunnelRoll.Summary (card) for card in cards]
+	RollScreen.RerollAll ()
+	yield
+	after = [FunnelRoll.Summary (card) for card in RollScreen.Cards]
+	_Check ("rolling: reroll all makes new peasants", sum (1 for a, b in zip (before, after) if a == b), 0)
+	_CardChecks (RollScreen.Cards, "reroll all")
+	# the house rules: reroll one card
+	RollScreen.SetOption ("rerollOne", True)
+	yield
+	_Check ("rolling: the reroll button with the house rule", RollScreen._Control (2, 3).IsVisible (), True)
+	others = [FunnelRoll.Summary (card) for i, card in enumerate (RollScreen.Cards) if i != 2]
+	third = FunnelRoll.Summary (RollScreen.Cards[2])
+	RollScreen.RerollOne (2)
+	_Check ("rolling: reroll one changes that card only", [FunnelRoll.Summary (RollScreen.Cards[2]) != third, [FunnelRoll.Summary (card) for i, card in enumerate (RollScreen.Cards) if i != 2]], [True, others])
+	# 4d6 drop the lowest: higher scores on the whole
+	RollScreen.SetOption ("fourDice", True)
+	RollScreen.RerollAll ()
+	scores = [score for card in RollScreen.Cards for score in card["Scores"]]
+	_Log ("rolling: 4d6 drop the lowest, mean %.2f" % (float (sum (scores)) / len (scores)))
+	_Check ("rolling: 4d6 drop the lowest (mean above 3d6's 10.5)", float (sum (scores)) / len (scores) > 11, True)
+	_CardChecks (RollScreen.Cards, "4d6")
+	RollScreen.SetOption ("rerollOne", False)
+	RollScreen.SetOption ("fourDice", False)
+	RollScreen.RerollAll ()
+	RollScreen.Rename (0, "Gristlewick")
+	yield
+	Saved["rolled"] = [dict (card) for card in RollScreen.Cards]
+	_Check ("rolling: accept", RollScreen.Accept (), True)
+	_Check ("rolling: the screen closes", RollScreen.Window, None)
+
+def _StepRollOpen ():
+	global RollSteps
+	if RollSteps is None:
+		RollSteps = _Rolling ()
+	try:
+		next (RollSteps)
+		return "rollopen"
+	except StopIteration:
+		return "rollwait" # the game starts (SetupGame, then OnGameStart)
+
+RolledSteps = None
+
+def _Rolled ():
+	"""e: the sixteen the rolling screen made"""
+	import Roster, FunnelRoll
+	from ie_slots import SLOT_WEAPON
+	cards = Saved.get ("rolled", [])
+	_Check ("rolled: a party of 16", GemRB.GetPartySize (), 16)
+	_Check ("rolled: the test's own fifteen are gone", [GemRB.DCCFindActor (name) for name in ("fntmira", "fntpip")], [0, 0])
+	ranges = {1: (115, 160), 2: (84, 120), 4: (124, 160), 5: (43, 70)}
+	bad = []
+	purse = 0
+	for card in cards:
+		pc = card["Order"]
+		stats = GemRB.GetDCCStats (pc)
+		record = GemRB.GetDCCFunnel (pc)
+		occ, place = record["Occupation"], record["Funnel"]
+		got = [GemRB.GetPlayerName (pc, 0), [GemRB.GetPlayerStat (pc, stat, 1) for stat in (IE_STR, IE_DEX, IE_CON, IE_CHR, IE_INT, IE_DCC_LUCK)],
+			stats["Augur"], stats["AugurMod"], GemRB.GetPlayerStat (pc, IE_MAXHITPOINTS, 1), GemRB.GetPlayerStat (pc, IE_RACE), GemRB.GetPlayerStat (pc, IE_SEX),
+			GemRB.GetPlayerStat (pc, IE_ALIGNMENT), [stats["Class"], stats["Level"]], occ["Id"], occ["Sub"], sorted (occ["Skills"]), place["StatusName"], place["Order"], place["Player"]]
+		want = [card["Name"], card["Scores"], card["Augur"], card["AugurMod"], card["HP"], card["Race"], card["Sex"],
+			FunnelRoll.ALIGNMENT_IE[card["Alignment"]], [8, 0], card["Occupation"], card["Sub"], sorted (card["Skills"]), "alive", pc, -1]
+		if got != want:
+			bad.append ((pc, got, want))
+		# the items funneltest has (dccoccit.2da), the weapon in a weapon slot; the others logged
+		weapons = [GemRB.GetSlotItem (pc, slot)["ItemResRef"].lower () for slot in GemRB.GetSlots (pc, SLOT_WEAPON, 1)]
+		equipped = GemRB.GetEquippedQuickSlot (pc)
+		held = GemRB.GetSlotItem (pc, equipped) if card["WeaponItem"] else None
+		if [occ["Weapon"], occ["TradeGood"]] != [card["WeaponItem"], card["GoodItem"] if not card["GoodCopper"] else ""] or (card["WeaponItem"] and card["WeaponItem"] not in weapons):
+			bad.append ((pc, "items", occ["Weapon"], occ["TradeGood"], weapons, card["WeaponItem"], card["GoodItem"]))
+		elif card["WeaponItem"] and (not held or held["ItemResRef"].lower () != card["WeaponItem"]):
+			bad.append ((pc, "not equipped", equipped, held and held["ItemResRef"]))
+		low, high = ranges[card["Race"]]
+		if not stats["BodyRolled"] or not low <= stats["BodyWeight"] <= high:
+			bad.append ((pc, "weight", stats["BodyWeight"]))
+		looks = card["Looks"]
+		colours = [GemRB.GetPlayerStat (pc, stat) & 0xff for stat in (IE_METAL_COLOR, IE_MINOR_COLOR, IE_MAJOR_COLOR, IE_SKIN_COLOR, IE_LEATHER_COLOR, IE_ARMOR_COLOR, IE_HAIR_COLOR)]
+		if [GemRB.GetPlayerStat (pc, IE_ANIMATION_ID), stats["Hair"], stats["Beard"], colours] != [looks["Animation"], looks["Hair"], looks["Beard"], looks["Colors"]]:
+			bad.append ((pc, "looks", GemRB.GetPlayerStat (pc, IE_ANIMATION_ID), stats["Hair"], stats["Beard"], colours, looks))
+		purse += card["Copper"] + card["GoodCopper"]
+	for entry in bad:
+		_Log ("rolled: differs: %s" % (entry,))
+	_Check ("rolled: every peasant as its card (abilities, Luck, augur, HP, species, sex, alignment, level 0, OCCU, FUNL, items, weight, looks)", len (bad), 0)
+	_Check ("rolled: the first card's new name", GemRB.GetPlayerName (1, 0), "Gristlewick")
+	import SetupGame
+	_Check ("rolled: the purse holds everyone's copper (in cp, on top of the game's own)", GemRB.GameGetPartyGold () - SetupGame.StartGold, purse)
+	_Check ("rolled: everyone has the party AI", sorted (set ((GemRB.GetPlayerScript (pc, 7) or "").lower () for pc in range (1, 17))), ["dccparty"])
+	Roster.UpdateRoster ()
+	_Check ("rolled: the roster", [Roster.Shown.get (1, "").split ("\n")[0], len (Roster.Tiles), Roster.Header["Summary"]], ["Gristlewick", 16, "Alive 16 of 16"])
+	yield
+	_Shot ("rolled_party", 1)
+	_ShotScreen ("rolled_roster")
+
+def _StepRolled ():
+	global RolledSteps
+	if RolledSteps is None:
+		if GemRB.GetGameVar ("FNT_AUTOTEST") != 1:
+			return "rolled" # the area script hasn't seen the sixteen yet
+		RolledSteps = _Rolled ()
+	try:
+		next (RolledSteps)
+		return "rolled"
+	except StopIteration:
+		return "done"
 
 StepTable = {
 	"run": _StepRun,
 	"save": _StepSave,
 	"loaded": _StepLoaded,
+	"rolling": _StepRolling,
+	"rollopen": _StepRollOpen,
+	"rolled": _StepRolled,
 }
 
 def _Tick (token):
 	global Step, Failures
-	if token != Token or Step in ("loading", "finished"):
+	if token != Token or Step in ("loading", "finished", "rollwait"):
 		return
 	try:
 		if Step == "wait":
@@ -905,5 +1192,7 @@ def OnGameStart ():
 	Token += 1
 	if Step == "loading":
 		Step = "loaded"
+	elif Step == "rollwait":
+		Step = "rolled"
 	token = Token
 	GemRB.SetTimer (lambda: _Tick (token), 500, -1)

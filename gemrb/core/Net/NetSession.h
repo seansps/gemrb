@@ -133,6 +133,9 @@ public:
 	void SetReady(bool ready);
 	// host only
 	bool Assign(uint8_t partySlot, uint8_t playerSlot);
+	/** the funnel's rolling screen (M3.1, v14): a card's text per party slot (1-based, the list's
+	 * order), shown to every player in the lobby until the game runs; an empty list takes them away */
+	bool SetLobbyCards(const std::vector<std::string>& cards);
 	bool SetPermission(uint8_t slot, NetPermission perm, bool allowed);
 	/** everyone is ready: from now on joins get the game, which the GUI starts next */
 	bool StartGame();

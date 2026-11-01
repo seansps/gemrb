@@ -754,6 +754,33 @@ Holder<Sprite2D> WindowManager::GetScreenshot(Window* win, unsigned int scaleDow
 	return screenshot;
 }
 
+Holder<Sprite2D> WindowManager::GetScreenComposite()
+{
+	Holder<Sprite2D> shot = video->GetScreenshot(screen, gameWin->DrawWithoutComposition());
+	if (!shot) return shot;
+	auto* dst = static_cast<uint8_t*>(shot->LockSprite());
+	const int bpp = shot->Format().Bpp;
+	for (WindowList::const_reverse_iterator rit = windows.rbegin(); rit != windows.rend(); ++rit) {
+		Window* win = *rit;
+		if (!win->IsVisible()) continue;
+		const Region& frame = win->Frame();
+		Holder<Sprite2D> part = video->GetScreenshot(Region(Point(), win->Dimensions()), win->DrawWithoutComposition());
+		if (!part || part->Format().Bpp != bpp) continue;
+		const auto* src = static_cast<const uint8_t*>(part->LockSprite());
+		for (int y = 0; y < frame.h; ++y) {
+			int sy = frame.y + y;
+			if (sy < 0 || sy >= screen.h) continue;
+			int x0 = std::max(0, -frame.x);
+			int x1 = std::min(frame.w, screen.w - frame.x);
+			if (x1 <= x0) continue;
+			std::copy(src + y * part->GetPitch() + x0 * bpp, src + y * part->GetPitch() + x1 * bpp, dst + sy * shot->GetPitch() + (frame.x + x0) * bpp);
+		}
+		part->UnlockSprite();
+	}
+	shot->UnlockSprite();
+	return shot;
+}
+
 // shorthand for generating gamewindow screenshots for saves
 Holder<Sprite2D> WindowManager::GetScreenshotPreview()
 {

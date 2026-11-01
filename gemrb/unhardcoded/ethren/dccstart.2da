@@ -1,0 +1,10 @@
+2DA V1.0
+*
+# ethren (M3.1): how a new game starts. ROLL 1: the funnel's rolling screen (GUIScripts/ethren/RollScreen.py)
+# rolls PARTY peasants, made from the CRE TEMPLATE (a level-0 human the screen fills in, EA PC); 0: the demo's
+# start, one protagonist from protagon.cre (testdata/funneltest's autotest, whose area script adds its own
+# fifteen).
+           VALUE
+ROLL       1
+PARTY      16
+TEMPLATE   DCCPEAS
