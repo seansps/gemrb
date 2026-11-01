@@ -1732,6 +1732,8 @@ def _FunnelHistory ():
 		yield from _Kill (gob, victim)
 		GemRB.ExecuteString ("DestroySelf()", gob)
 		yield
+	# STATE_DEAD is set once the die animation has played out (Actor::CheckOnDeath)
+	yield from _Wait (lambda: _Dead (15) and _Dead (16))
 	_Check ("history: 15 and 16 dead", [_Dead (15), _Dead (16)], [True, True])
 	# a kill: the giant rat (worn down to 3 hp first) dies to peasant 3's own weapon (the kill is
 	# credited by DCCOnDeath); lethal blows, not the fists' subdual ones (fixed after M3.3)
