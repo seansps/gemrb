@@ -5121,6 +5121,18 @@ void NetSession::PreTick()
 	}
 }
 
+bool NetSession::BeginCapture()
+{
+	bool previous = impl->capturing;
+	if (mode == Mode::Host) impl->capturing = true;
+	return previous;
+}
+
+void NetSession::EndCapture(bool previous)
+{
+	if (mode == Mode::Host) impl->capturing = previous;
+}
+
 void NetSession::PostTick()
 {
 	if (mode == Mode::Host) {
@@ -5456,6 +5468,11 @@ void NetSession::OnOverheadText(const Scriptable&, const String&, const Color&) 
 void NetSession::OnSound(StringView, const AudioPlaybackConfig&, bool) {}
 void NetSession::OnProjectile(const Map&, const Projectile&, uint32_t, bool) {}
 void NetSession::OnAreaVfx(const Map&, VEFObject&) {}
+bool NetSession::BeginCapture()
+{
+	return false;
+}
+void NetSession::EndCapture(bool) {}
 void NetSession::OnPause(bool, bool) {}
 void NetSession::OnDialogLine(const Scriptable*, const String&, bool) {}
 void NetSession::OnDialogState(const std::vector<std::pair<int, String>>&) {}

@@ -193,6 +193,10 @@ static void ReportSkillCheck(Actor* actor, const SkillCheckResult& result)
 	String line = SkillLine(actor, result);
 	Log(COMBAT, "DCC", "{}", fmt::WideToChar { line });
 	Actor::DCCRecordLine(line);
+	// co-op: a dialog's check is rolled at a reply's pick, outside the host's simulation window; what it
+	// shows still goes to everyone
+	NetSession* net = core->GetNetSession();
+	bool captured = net ? net->BeginCapture() : false;
 	if (core->HasFeedback(FT_MISC)) displaymsg->DisplayString(line);
 	if (actor->GetCurrentArea()) {
 		static const Color passed(0xa0, 0xff, 0xa0, 0xff);
@@ -200,6 +204,7 @@ static void ReportSkillCheck(Actor* actor, const SkillCheckResult& result)
 		actor->overHead.SetText(fmt::format(u"{} {}: {}", CheckLabel(result.tags), result.dc, result.success ? u"success" : u"failure"), true, true,
 					result.success ? passed : failed);
 	}
+	if (net) net->EndCapture(captured);
 }
 
 // a deadly check that failed: a party member who pauses on key rolls is asked how much Luck to burn
