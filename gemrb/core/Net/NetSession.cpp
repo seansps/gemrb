@@ -4185,15 +4185,25 @@ struct NetSession::Impl {
 	static bool EnforceStats(Actor* actor, const std::map<uint16_t, std::pair<ieDword, ieDword>>& known)
 	{
 		bool changed = false;
+		bool colors = false;
 		for (const auto& stat : known) {
+			bool color = stat.first >= IE_COLORS && stat.first < IE_COLORS + 7;
 			if (actor->GetBase(stat.first) != stat.second.first) {
 				actor->SetBaseNoPCF(stat.first, stat.second.first);
 				changed = true;
+				colors = colors || color;
 			}
 			if (actor->GetStat(stat.first) != stat.second.second) {
 				actor->SetStat(stat.first, stat.second.second, 0);
 				changed = true;
+				colors = colors || color;
 			}
+		}
+		// M2.11: the colours go to the animation's palettes (what the stat's post-change function
+		// does on the host: recolouring, an item's overlay colours)
+		CharAnimations* anims = actor->GetAnims();
+		if (colors && anims) {
+			anims->SetColors(&actor->Modified[IE_COLORS]);
 		}
 		return changed;
 	}
