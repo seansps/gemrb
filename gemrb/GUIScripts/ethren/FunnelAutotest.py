@@ -1107,10 +1107,11 @@ def _Skills ():
 	_Reply (GemRB.GetVar ("DialogOption")) # Continue: the passing branch
 	yield
 	yield
-	_Check ("the next line names the roller (<DCCSKILLER>)", "says Brin." in GemRB.GetView ("MSGWIN").GetControl (0).QueryText (), True)
 	_Reply (0) # Glad to help.
 	yield from _Wait (lambda: GemRB.GetGameVar ("FNT_DLG_LOCK") in (1, 2) and not _InDialog (), 20)
 	_Check ("the dialog's passing branch", GemRB.GetGameVar ("FNT_DLG_LOCK"), 1)
+	# the message window's history (its text while no replies are offered): the line after the check names the roller
+	_Check ("the next line names the roller (<DCCSKILLER>)", "says Brin. Wat grins." in GemRB.GetView ("MsgSys", 0).QueryText (), True)
 	# jora, untrained, fails it
 	GemRB.SetGlobal ("FNT_DLG_LOCK", "GLOBAL", 0)
 	where = GemRB.GetActorPosition (jora)
