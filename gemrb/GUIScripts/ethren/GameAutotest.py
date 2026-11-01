@@ -5,12 +5,13 @@
 # The real game's smoke test (game/, scripts/run.sh ethren-auto): nothing runs unless the table ethauto.2da
 # exists, which only the game's autotest variant ships (game/src/tables/autotest, a ModPath of the -auto run).
 # Then:
-#   1. the rolling screen opens as for a player, is screenshotted and accepted by itself (BeforeRoll);
+#   1. the rolling screen opens as for a player; the first card is made a dwarf, its looks stepped in the
+#      paper doll (M3.5); both are screenshotted and the cards accepted by themselves (BeforeRoll);
 #   2. the funnel starts in Delmord's town hall (DL0101) with sixteen peasants on walkable ground;
 #   3. the party walks every way Delmord has, through the doors and along the road, and back to the hall:
 #      hall -> western edge -> village east -> tavern -> east -> smithy -> east -> shrine -> east -> western
 #      edge -> hall, each arrival checked (all sixteen in the new area);
-#   4. screenshots in the save path: game_roll (the rolling screen), game_<area> (each area as drawn, the
+#   4. screenshots in the save path: game_looks (the paper doll), game_roll (the rolling screen), game_<area> (each area as drawn, the
 #      first visit), game_hall_screen (the hall with the GUI).
 # Every check logs "[ETH] ok ..." or "[ETH] FAIL ...", the end "[ETH] autotest done: N checks, F failed";
 # ETH_AT_DONE becomes 1 if all passed, 2 if not (run.sh's AutotestQuit).
@@ -19,6 +20,7 @@ import GemRB
 from GUIDefines import *
 from ie_stats import *
 
+Chosen = {} # what the rolling screen test chose for the first card (M3.5)
 Checks = 0
 Failures = 0
 Steps = None
@@ -68,12 +70,33 @@ def BeforeRoll ():
 	"""Start.NewGame, once the rolling screen is open: screenshot it, then accept the cards"""
 	if not Enabled ():
 		return
-	def accept ():
-		import RollScreen
+	import RollScreen
+	import FunnelRoll
+	def choose ():
+		"""M3.5: the first card a dwarf with a style stepped on, the paper doll open and turned"""
+		card = RollScreen.Cards[0]
+		occupations = dict ((race, occ["OccupationName"]) for race, occ in card["Occupations"].items ())
+		numbers = [list (card["Scores"]), card["HP"], card["Augur"], card["Copper"]]
+		if card["Race"] == 4:
+			RollScreen.SetSpecies (0, 1)
+		_Check ("roll: the card's species can be chosen", RollScreen.SetSpecies (0, 4), True)
+		_Check ("roll: a dwarf shows the dwarf occupation rolled with the card", card["OccupationName"], occupations[4])
+		_Check ("roll: the numbers stay as rolled", [list (card["Scores"]), card["HP"], card["Augur"], card["Copper"]], numbers)
+		if card["Sex"] != 1:
+			RollScreen.NextSex (0)
+		RollScreen.OpenLooks (0)
+		Chosen["Hair"] = RollScreen.StepLook (0, "Hair", 1)
+		Chosen["Beard"] = RollScreen.StepLook (0, "Beard", 1)
+		Chosen["Major"] = RollScreen.StepLook (0, "Tunic", 1)
+		RollScreen._Turn (-2)
+		GemRB.SetTimer (look, 800, 0)
+	def look ():
+		_Shot ("looks", 0, 1)
+		RollScreen.CloseLooks ()
 		_Shot ("roll", 0, 1)
 		_Log ("rolling screen: accept")
 		RollScreen.Accept ()
-	GemRB.SetTimer (accept, 1500, 0)
+	GemRB.SetTimer (choose, 1500, 0)
 
 def _Party ():
 	return list (range (1, GemRB.GetPartySize () + 1))
@@ -85,6 +108,11 @@ def _Run ():
 	party = _Party ()
 	_Check ("the funnel's sixteen", len (party), 16)
 	_Check ("they start in the town hall", _Areas (), ["DL0101"])
+	# M3.5: the first card came in as chosen: a dwarf with the looks stepped to
+	stats = GemRB.GetDCCStats (1)
+	_Check ("the first peasant is a dwarf", GemRB.GetPlayerStat (1, IE_RACE), 4)
+	_Check ("with the hair and beard chosen", [stats.get ("Hair"), stats.get ("Beard")], [Chosen.get ("Hair"), Chosen.get ("Beard")])
+	_Check ("and the tunic colour chosen", GemRB.GetPlayerStat (1, IE_MAJOR_COLOR) & 0xff, Chosen.get ("Major"))
 	for i in range (4):
 		yield
 	_Shot ("hall", 1)
@@ -101,6 +129,10 @@ def _Run ():
 			_Check ("%s: %s opens" % (area, door), GemRB.EvaluateString ("OpenState(\"%s\",1)" % door, True), True)
 		_Check ("%s: travel by %s" % (area, exit), GemRB.GameControlTravel (exit), True)
 		yield from _Wait (lambda: _Areas () == [to], 80)
+		if _Areas () != [to]:
+			# where everyone stands: who keeps the party from going
+			_Log ("stuck: " + "  ".join ("%d %s %d,%d%s" % (pc, GemRB.GetPlayerName (pc, 0), p["X"], p["Y"], " ->%d,%d" % (p["DestX"], p["DestY"]) if p["Moving"] else "")
+				for pc, p in ((pc, GemRB.GetActorPosition (pc)) for pc in _Party ())))
 		_Check ("%s -> %s: the whole party arrived" % (exit, to), _Areas (), [to])
 		for i in range (4):
 			yield

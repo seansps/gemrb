@@ -75,15 +75,20 @@ class FunnelRollTest (unittest.TestCase):
 			[-3, -2, -2, -1, -1, -1, 0, 0, 0, 0, 1, 1, 1, 2, 2, 3])
 
 	def test_one_card (self):
-		# sex (male), name, 3d6 x 6, d100 42 (a farmer), the crop d8 2 (wheat), the augur d30 25
+		# sex (male), 3d6 x 6, d100 42 (a farmer), the crop d8 2 (wheat), the augur d30 25
 		# (bountiful harvest), HP d4, 5d12 copper, alignment d3, looks: hair style, bald %, beard %,
 		# beard style, skin, hair colour, two dyes, leather, metal
-		names = [n for n in TABLES["dccnames"].order if TABLES["dccnames"].Int (n, "SEX") == 1]
+		names = [TABLES["dccnames"].Get (n, "NAME") for n in TABLES["dccnames"].order
+			if TABLES["dccnames"].Int (n, "SEX") == 1 and TABLES["dccnames"].Int (n, "RACE") == 1]
 		# beard style, skin, hair colour, two dyes, leather, metal; Table 3-4's item d24 14 (a lantern)
-		dice = Scripted (self, [1, 1,  6, 6, 6,  1, 1, 2,  5, 5, 4,  3, 3, 3,  1, 1, 1,  6, 6, 5,  42, 2,  25,  1,  12, 12, 1, 1, 1,  3,
-			1, 50, 20, 1, 3, 4, 1, 21, 2, 7,  14])
+		dice = Scripted (self, [1,  6, 6, 6,  1, 1, 2,  5, 5, 4,  3, 3, 3,  1, 1, 1,  6, 6, 5,  42, 2,  25,  1,  12, 12, 1, 1, 1,  3,
+			1, 50, 20, 1, 3, 4, 1, 21, 2, 7,  14,  1, 1, 1,  1, 1, 1, 1])
 		card = FunnelRoll.RollCard (dice, TABLES, 1)
 		self.assertEqual (dice.values, [])
+		# M3.5: an occupation for each species, the first of each one's rows on these 1s
+		self.assertEqual (sorted (card["Occupations"]), [1, 2, 4, 5])
+		self.assertEqual (card["Occupations"][1]["OccupationName"], "Farmer (wheat)")
+		self.assertEqual ([card["Occupations"][race]["Race"] for race in (2, 4, 5)], [2, 4, 5])
 		self.assertEqual (card["Name"], names[0].capitalize ())
 		self.assertEqual (card["Sex"], 1)
 		self.assertEqual (card["Scores"], [18, 4, 14, 9, 3, 17])
@@ -111,13 +116,72 @@ class FunnelRollTest (unittest.TestCase):
 	def test_hp_at_least_one (self):
 		# Sta 3 (-3) and a 1 on the d4
 		# looks: hair style d6 4 (the female styles 8-13: long), bald d100 50, beard d100 (none for women), colours
-		dice = Scripted (self, [2, 1,  3, 3, 3,  3, 3, 3,  1, 1, 1,  3, 3, 3,  3, 3, 3,  3, 3, 3,  1,  1,  1,  1, 1, 1, 1, 1,  2,
-			4, 50, 1, 1, 1, 1, 1, 1, 1,  24])
+		dice = Scripted (self, [2,  3, 3, 3,  3, 3, 3,  1, 1, 1,  3, 3, 3,  3, 3, 3,  3, 3, 3,  1,  1,  1,  1, 1, 1, 1, 1,  2,
+			4, 50, 1, 1, 1, 1, 1, 1,  1,  1, 1, 1,  1, 1, 1, 1])
 		card = FunnelRoll.RollCard (dice, TABLES, 2)
 		self.assertEqual ([card["Sex"], card["Scores"][2], card["Occupation"], card["HP"], card["Copper"]], [2, 3, 1, 1, 5])
 		# a woman: the bald female body (CPF2) with a hair layer of her rig, no beard
 		self.assertIn (6, dice.asked) # the hair style: one of six
 		self.assertEqual ([card["Looks"]["Animation"], card["Looks"]["Hair"], card["Looks"]["Beard"]], [0x6511, 11, 0])
+
+	def test_choices (self):
+		"""M3.5: species, sex and looks are the player's; the numbers and the occupations stay rolled"""
+		rng = random.Random (7)
+		die = lambda sides: rng.randint (1, sides)
+		card = FunnelRoll.RollCard (die, TABLES, 1)
+		scores, hp, augur, copper = list (card["Scores"]), card["HP"], card["Augur"], card["Copper"]
+		occupations = dict ((race, occ["OccupationName"]) for race, occ in card["Occupations"].items ())
+		for race, name in FunnelRoll.SPECIES:
+			FunnelRoll.SetSpecies (card, race, die, TABLES)
+			self.assertEqual ([card["Race"], card["OccupationName"]], [race, occupations[race]])
+			self.assertEqual ([card["Scores"], card["HP"], card["Augur"], card["Copper"]], [scores, hp, augur, copper])
+		# back and forth shows the same occupations: no new roll
+		FunnelRoll.SetSpecies (card, 4, die, TABLES)
+		FunnelRoll.SetSpecies (card, 1, die, TABLES)
+		self.assertEqual (card["OccupationName"], occupations[1])
+		# names follow the species: each species' own, rolled with the card
+		for race, label in FunnelRoll.SPECIES:
+			FunnelRoll.SetSpecies (card, race, die, TABLES)
+			self.assertEqual (card["Name"], card["Names"][race])
+		self.assertEqual (len (set (card["Names"].values ())), 4)
+		dwarves = set (TABLES["dccnames"].Get (r, "NAME").capitalize () for r in TABLES["dccnames"].order
+			if TABLES["dccnames"].Int (r, "RACE") == 4)
+		self.assertIn (card["Names"][4], dwarves)
+		# a name the player typed stays through species and sex
+		card["Name"], card["NameTyped"] = "Wat the Bold", True
+		FunnelRoll.SetSpecies (card, 5, die, TABLES)
+		FunnelRoll.SetSex (card, 2 if card["Sex"] == 1 else 1, die, TABLES)
+		self.assertEqual (card["Name"], "Wat the Bold")
+		card["NameTyped"] = False
+		FunnelRoll.SetSpecies (card, 1, die, TABLES)
+		# a woman's body and her rig's hair styles, no beard; a colour the player chose is kept
+		FunnelRoll.SetSex (card, 1, die, TABLES)
+		card["Looks"]["Colors"][2] = 9
+		FunnelRoll.SetSex (card, 2, die, TABLES)
+		self.assertEqual ([card["Sex"], card["Looks"]["Animation"], card["Looks"]["Beard"], card["Looks"]["Colors"][2]], [2, 0x6511, 0, 9])
+		self.assertTrue (card["Looks"]["Hair"] in FunnelRoll.LookOptions (TABLES, card["Race"], 2, "Hair"))
+		self.assertEqual (FunnelRoll.LookOptions (TABLES, 1, 2, "Beard"), [0])
+		# stepping a part goes round its options
+		hair = FunnelRoll.LookOptions (TABLES, 1, 2, "Hair")
+		self.assertEqual (hair, [0, 8, 9, 10, 11, 12, 13])
+		values = [FunnelRoll.StepLook (card, TABLES, "Hair", 1) for i in range (len (hair))]
+		self.assertEqual (sorted (values), hair)
+		self.assertEqual (FunnelRoll.LookOptions (TABLES, 1, 1, "Skin"), list (range (28, 36)))
+		FunnelRoll.SetSex (card, 1, die, TABLES)
+		self.assertEqual (FunnelRoll.LookOptions (TABLES, 4, 1, "Beard"), [0, 1, 2, 3])
+
+	def test_species_odds (self):
+		"""a species' occupation is drawn at Table 1-3's odds among that species' rows"""
+		occ = TABLES["dccoccup"]
+		for race in (1, 2, 4, 5):
+			rows = [r for r in occ.order if occ.Int (r, "RACE", 1) == race]
+			total = sum (occ.Int (r, "HIGH") - occ.Int (r, "LOW") + 1 for r in rows)
+			seen = set ()
+			for k in range (1, total + 1):
+				d100 = FunnelRoll.SpeciesRoll (lambda sides: k, TABLES, race)
+				self.assertEqual (occ.Int (FunnelRoll.FindOccupation (TABLES, d100), "RACE", 1), race)
+				seen.add (FunnelRoll.FindOccupation (TABLES, d100))
+			self.assertEqual (seen, set (rows))
 
 	def test_sub_rolls (self):
 		die = Seeded (3)

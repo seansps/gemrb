@@ -35,16 +35,24 @@ OffColor = {'r': 45, 'g': 40, 'b': 40, 'a': 255}
 EditColor = {'r': 30, 'g': 27, 'b': 24, 'a': 255}
 WINDOW_ID = 97
 OPTIONS_ID = 98
+LOOKS_ID = 96
 COLUMNS = 4
 GAP = 6
 TOP = 44
-CARD_BASE = 1000 # card i's controls: 1000 + 10 i + 0 backdrop, 1 name, 2 player, 3 reroll, 4 text, 5 alignment
+CARD_BASE = 1000 # card i's controls: 1000 + 10 i + 0 backdrop, 1 name, 2 player, 3 reroll, 4 text, 5 alignment,
+# 6 species, 7 sex, 8 looks (M3.5)
+DOLL_STANCE = 1 # IE_ANI_AWAKE: the paper doll stands as a peasant does out of a fight
+DOLL_SCALE = 3 # the paper doll at three times the game's size
+DOLL_DROP = 90 # pixels the doll's layers go down from the button's middle
 
 Cards = None # the current roll: FunnelRoll cards, in roster order
 Options = FunnelRoll.Options ()
 Tables = None
 Window = None
 OptionsWindow = None
+LooksWindow = None
+LooksIndex = None # the card the paper doll shows
+Doll = {"Face": 0, "Frame": 0, "Ticking": False}
 Mode = None # "single", "host" or "client"
 OnAccept = None # single: starts the game; host: NetLobby's start, False if it can't
 OnBack = None
@@ -118,6 +126,7 @@ def Rename (index, name):
 	if not Cards or not name or not 0 <= index < len (Cards):
 		return False
 	Cards[index]["Name"] = name[:32]
+	Cards[index]["NameTyped"] = True # M3.5: a new species or sex keeps it
 	NamesToShow.add (index)
 	_Changed ()
 	return True
@@ -141,6 +150,164 @@ def NextAlignment (index):
 	if not Cards or not 0 <= index < len (Cards):
 		return False
 	return SetAlignment (index, FunnelRoll.NextAlignment (Cards[index]["Alignment"]))
+
+###################################################
+# M3.5: species, sex and looks are the player's (the numbers stay rolled)
+
+def _Card (index):
+	if Mode == "client" or not Cards or not 0 <= index < len (Cards):
+		return None
+	return Cards[index]
+
+def SetSpecies (index, race):
+	card = _Card (index)
+	_ReadNames ()
+	if not card or not FunnelRoll.SetSpecies (card, race, FunnelRoll.EngineDie, _Tables ()):
+		return False
+	NamesToShow.add (index)
+	_Log ("card %d: %s" % (index + 1, FunnelRoll.Summary (card)))
+	_Changed ()
+	_ShowLooks ()
+	return True
+
+def NextSpecies (index):
+	card = _Card (index)
+	if not card:
+		return False
+	races = [race for race, name in FunnelRoll.SPECIES]
+	return SetSpecies (index, races[(races.index (card["Race"]) + 1) % len (races)] if card["Race"] in races else 1)
+
+def NextSex (index):
+	card = _Card (index)
+	_ReadNames ()
+	others = [c["Name"] for i, c in enumerate (Cards) if i != index]
+	if not card or not FunnelRoll.SetSex (card, 2 if card["Sex"] == 1 else 1, FunnelRoll.EngineDie, _Tables (), others):
+		return False
+	NamesToShow.add (index)
+	_Changed ()
+	_ShowLooks ()
+	return True
+
+def StepLook (index, part, step):
+	card = _Card (index)
+	if not card:
+		return None
+	value = FunnelRoll.StepLook (card, _Tables (), part, step)
+	_Changed ()
+	_ShowLooks ()
+	return value
+
+def _StyleNames ():
+	"""dcchair.2da's style ids -> names, for the paper doll's labels"""
+	names = {0: "none"}
+	table = GemRB.LoadTable ("dcchair", True)
+	if table:
+		for row in range (table.GetRowCount ()):
+			names[table.GetValue (row, 0)] = table.GetRowName (row).replace ("_", " ").capitalize ()
+	return names
+
+def OpenLooks (index):
+	"""the paper doll (M3.5): the card's peasant as the game draws it, turning, its looks to step through"""
+	global LooksWindow, LooksIndex
+	if not _Card (index):
+		return
+	CloseLooks ()
+	LooksIndex = index
+	screen = GemRB.GetSystemVariable (SV_WIDTH), GemRB.GetSystemVariable (SV_HEIGHT)
+	w, h = 660, 520
+	win = GemRB.CreateView (LOOKS_ID, 255, {'x': (screen[0] - w) // 2, 'y': (screen[1] - h) // 2, 'w': w, 'h': h})
+	win.SetBackground (WindowColor)
+	win.CreateLabel (0x10000000, 10, 6, w - 20, 26, Font, "", IE_FONT_ALIGN_CENTER | IE_FONT_ALIGN_MIDDLE)
+	_Button (win, 2, 20, 448, 136, 28, "< Turn", lambda: _Turn (1), "Turn the peasant round")
+	_Button (win, 3, 164, 448, 136, 28, "Turn >", lambda: _Turn (-1), "Turn the peasant round")
+	y = 44
+	for i, (part, slot, column, fallback) in enumerate (FunnelRoll.LOOK_PARTS):
+		win.CreateLabel (0x10000010 + i, 320, y, 120, 28, CardFont, part, IE_FONT_ALIGN_LEFT | IE_FONT_ALIGN_MIDDLE)
+		_Button (win, 10 + 2 * i, 440, y, 32, 28, "<", lambda part = part: StepLook (LooksIndex, part, -1), None, CardFont)
+		win.CreateLabel (0x10000020 + i, 476, y, 132, 28, CardFont, "", IE_FONT_ALIGN_CENTER | IE_FONT_ALIGN_MIDDLE)
+		_Button (win, 11 + 2 * i, 612, y, 32, 28, ">", lambda part = part: StepLook (LooksIndex, part, 1), None, CardFont)
+		y += 40
+	_Button (win, 30, 320, y + 6, 160, 28, "", lambda: NextSpecies (LooksIndex), FunnelRoll.SPECIES_NOTE, CardFont)
+	_Button (win, 31, 488, y + 6, 156, 28, "", lambda: NextSex (LooksIndex), None, CardFont)
+	win.CreateLabel (0x10000030, 320, y + 40, 324, 60, CardFont, "", IE_FONT_ALIGN_LEFT | IE_FONT_ALIGN_TOP)
+	done = _Button (win, 4, w - 140, h - 40, 120, 30, "Done", CloseLooks)
+	done.MakeEscape ()
+	# the doll, made last so it lies behind the buttons; the layers dropped (DOLL_DROP) so the peasant,
+	# whose hotspot is at its feet, stands in the middle of the backdrop
+	doll = win.CreateButton (1, 20, 40, 280, 400)
+	doll.SetFlags (IE_GUI_BUTTON_NO_IMAGE, OP_OR)
+	doll.SetState (IE_GUI_BUTTON_LOCKED)
+	backdrop = win.CreateButton (5, 20, 40, 280, 400)
+	backdrop.SetFlags (IE_GUI_BUTTON_NO_IMAGE, OP_OR)
+	backdrop.SetBackground (EditColor)
+	backdrop.SetState (IE_GUI_BUTTON_LOCKED)
+	LooksWindow = win
+	Doll["Frame"] = 0
+	_ShowLooks ()
+	win.Focus ()
+	if not Doll["Ticking"]:
+		Doll["Ticking"] = True
+		GemRB.SetTimer (_DollTick, 120, -1)
+
+def _Turn (step):
+	Doll["Face"] = (Doll["Face"] + step) % 16
+	_DrawDoll ()
+
+def _DollTick ():
+	if LooksWindow:
+		Doll["Frame"] += 1
+		_DrawDoll ()
+
+def _DrawDoll ():
+	card = _Card (LooksIndex) if LooksIndex is not None else None
+	if not LooksWindow or not card:
+		return
+	looks = card["Looks"]
+	got = GemRB.DCCAvatarFrame (looks["Animation"], looks["Colors"], looks["Hair"], looks["Beard"], DOLL_STANCE,
+		Doll["Face"], Doll["Frame"], DOLL_SCALE, DOLL_DROP)
+	try:
+		doll = LooksWindow.GetControl (1)
+	except RuntimeError:
+		return
+	if got:
+		doll.SetPictures (got[0])
+
+def _ShowLooks ():
+	"""the paper doll window's labels, after any change"""
+	card = _Card (LooksIndex) if LooksIndex is not None else None
+	if not LooksWindow or not card:
+		return
+	styles = _StyleNames ()
+	LooksWindow.GetControl (0x10000000).SetText ("%s: %s" % (card["Name"], FunnelRoll.OccupationLine (card)))
+	for i, (part, slot, column, fallback) in enumerate (FunnelRoll.LOOK_PARTS):
+		options = FunnelRoll.LookOptions (_Tables (), card["Race"], card["Sex"], part)
+		value = FunnelRoll.LookValue (card, part)
+		if slot is None:
+			text = styles.get (value, str (value)) if len (options) > 1 else "none"
+		else:
+			text = "%d of %d" % (options.index (value) + 1 if value in options else 0, len (options))
+		LooksWindow.GetControl (0x10000020 + i).SetText (text)
+		# a woman's rig has no beards: nothing to step through
+		for id in (10 + 2 * i, 11 + 2 * i):
+			LooksWindow.GetControl (id).SetState (IE_GUI_BUTTON_ENABLED if len (options) > 1 else IE_GUI_BUTTON_LOCKED)
+	LooksWindow.GetControl (30).SetText ("Species: " + FunnelRoll.SpeciesName (card["Race"]))
+	LooksWindow.GetControl (31).SetText ("Female" if card["Sex"] == 2 else "Male")
+	note = "Looks are yours to choose; the numbers stay as rolled."
+	if card["Race"] != 1:
+		note += " " + FunnelRoll.SPECIES_NOTE
+	LooksWindow.GetControl (0x10000030).SetText (note)
+	_DrawDoll ()
+
+def CloseLooks ():
+	global LooksWindow
+	if LooksWindow:
+		try:
+			LooksWindow.Close ()
+		except RuntimeError:
+			pass
+		LooksWindow = None
+	if Window:
+		Window.Focus ()
 
 def _AlignmentOf (lines):
 	"""a card's alignment from its text (what a client has of it)"""
@@ -302,6 +469,10 @@ def _Build ():
 		else:
 			player.SetTooltip ("Who plays this peasant: press to deal it to the next player")
 		reroll = _Button (win, base + 3, x + w - 60, y + 4, 54, 24, "Reroll", lambda index = i: RerollOne (index), "Roll this card again (house rule)", CardFont)
+		# M3.5: the player's choices (the host's and single player's for now)
+		_Button (win, base + 6, x + 6, y + h - 28, 76, 24, "", lambda index = i: NextSpecies (index), FunnelRoll.SPECIES_NOTE, CardFont)
+		_Button (win, base + 7, x + 86, y + h - 28, 64, 24, "", lambda index = i: NextSex (index), "Male or female", CardFont)
+		_Button (win, base + 8, x + 154, y + h - 28, 70, 24, "Looks...", lambda index = i: OpenLooks (index), "The peasant as drawn: hair, beard and colours", CardFont)
 		reroll.SetVisible (False)
 		win.CreateLabel (base + 4, x + 8, y + 32, w - 14, h - 36, CardFont, "", IE_FONT_ALIGN_LEFT | IE_FONT_ALIGN_TOP)
 		# the card itself, made last: a new view goes behind the ones already there
@@ -365,6 +536,14 @@ def Refresh ():
 		elif index in NamesToShow:
 			name.SetText (lines[0])
 			NamesToShow.discard (index)
+		choices = [_Control (index, part) for part in (6, 7, 8)]
+		card = _Card (index)
+		for button in choices:
+			if button:
+				button.SetVisible (card is not None)
+		if card and choices[0]:
+			choices[0].SetText (FunnelRoll.SpeciesName (card["Race"]))
+			choices[1].SetText ("Female" if card["Sex"] == 2 else "Male")
 		align = _Control (index, 5)
 		if align:
 			align.SetText (FunnelRoll.ALIGNMENTS.get (_AlignmentOf (lines), "?"))
@@ -410,6 +589,7 @@ def _ReadNames ():
 		name = (edit.QueryText () or "").strip ()
 		if name and name != card["Name"]:
 			card["Name"] = name[:32]
+			card["NameTyped"] = True # M3.5: a new species or sex keeps it
 			changed = True
 	if changed:
 		_Publish ()
@@ -481,6 +661,7 @@ def _BackToLobby ():
 
 def Close ():
 	global Window
+	CloseLooks ()
 	if Window:
 		try:
 			Window.Close ()

@@ -137,11 +137,24 @@ def ItemName (tables, key, weapon = False):
 		name += " (as %s)" % items.Text (key, "AS")
 	return name
 
-def RollOccupation (die, tables, earlier, ammoCount = 0):
+def SpeciesRoll (die, tables, race):
+	"""a d100 result within one species' rows of Table 1-3, at the table's odds among them (M3.5)"""
+	occupations = tables["dccoccup"]
+	spans = [(occupations.Int (row, "LOW"), occupations.Int (row, "HIGH")) for row in occupations.order
+		if occupations.Int (row, "RACE", 1) == race]
+	roll = die (sum (high - low + 1 for low, high in spans))
+	for low, high in spans:
+		if roll <= high - low + 1:
+			return low + roll - 1
+		roll -= high - low + 1
+	raise ValueError ("Table 1-3 has no row for species %d" % race)
+
+def RollOccupation (die, tables, earlier, ammoCount = 0, race = None):
 	"""Table 1-3 with its sub-rolls. earlier: the occupation ids of the cards already rolled (a
-	duplicate farmer or herder gets another animal). Returns the card's occupation part."""
+	duplicate farmer or herder gets another animal); race: only that species' occupations (M3.5).
+	Returns the card's occupation part."""
 	occupations, items = tables["dccoccup"], tables["dccoccit"]
-	d100 = die (100)
+	d100 = die (100) if race is None else SpeciesRoll (die, tables, race)
 	row = FindOccupation (tables, d100)
 	ident = int (row)
 	sub = 0
@@ -189,12 +202,25 @@ def RollOccupation (die, tables, earlier, ammoCount = 0):
 		card["AmmoItem"] = (items.Get (ammo, "ITEM") or "").lower ()
 	return card
 
-def PickName (die, tables, sex, taken):
+def _NameOf (names, row):
+	return (names.Get (row, "NAME") or row).capitalize ()
+
+def PickName (die, tables, sex, taken, race = 1):
+	"""a name of dccnames.2da for this sex and species (humans' where a species has none), not one of taken
+	(upper case)"""
 	names = tables["dccnames"]
-	free = [row for row in names.order if names.Int (row, "SEX") == sex and row not in taken]
-	if not free:
-		free = [row for row in names.order if names.Int (row, "SEX") == sex] or names.order
-	return free[die (len (free)) - 1].capitalize ()
+	mine = [row for row in names.order if names.Int (row, "SEX") == sex and names.Int (row, "RACE", 1) == race]
+	if not mine:
+		mine = [row for row in names.order if names.Int (row, "SEX") == sex and names.Int (row, "RACE", 1) == 1]
+	free = [row for row in mine if _NameOf (names, row).upper () not in taken] or mine or names.order
+	return _NameOf (names, free[die (len (free)) - 1])
+
+def PickNames (die, tables, sex, taken, first):
+	"""a name for each species, first's first (M3.5)"""
+	out = {}
+	for race in [first] + [r for r, label in SPECIES if r != first]:
+		out[race] = PickName (die, tables, sex, taken | set (n.upper () for n in out.values ()), race)
+	return out
 
 def ParseRange (text, low, high):
 	if not text or "-" not in text:
@@ -266,10 +292,9 @@ def RollCard (die, tables, order, options = None, earlier = (), taken = ()):
 	animals); taken: names already given"""
 	options = options or Options ()
 	sex = 1 if die (2) == 1 else 2
-	name = PickName (die, tables, sex, set (n.upper () for n in taken))
 	scores = [RollAbility (die, options.fourDice) for ability in ABILITIES]
 	mods = [AbilityMod (tables, score) for score in scores]
-	card = {"Order": order, "Name": name, "Sex": sex, "Scores": scores, "Mods": mods}
+	card = {"Order": order, "Sex": sex, "Scores": scores, "Mods": mods}
 	card.update (RollOccupation (die, tables, earlier, options.ammo))
 	augurs = tables["dccaugur"]
 	augur = die (30)
@@ -286,7 +311,97 @@ def RollCard (die, tables, order, options = None, earlier = (), taken = ()):
 	card["Looks"] = RollLooks (die, tables, card["Race"], sex)
 	# M3.3: Table 3-4's item, last, so the earlier dice stay where M3.1 had them
 	card.update (RollEquipment (die, tables))
+	# M3.5: an occupation for each other species too, with everything else, so choosing a species shows
+	# one already rolled (never a new roll); after the rest, so the earlier dice stay where they were
+	card["Occupations"] = {card["Race"]: dict ((key, card[key]) for key in OCCUPATION_KEYS)}
+	for race, label in SPECIES:
+		if race not in card["Occupations"]:
+			card["Occupations"][race] = RollOccupation (die, tables, earlier, options.ammo, race)
+	# and a name of each species (dccnames.2da), the card's own shown
+	card["Names"] = PickNames (die, tables, sex, set (n.upper () for n in taken), card["Race"])
+	card["Name"] = card["Names"][card["Race"]]
 	return card
+
+###################################################
+# M3.5: the player's choices on a card: species, sex and looks (the numbers stay rolled)
+
+SPECIES = ((1, "Human"), (4, "Dwarf"), (2, "Elf"), (5, "Halfling"))
+SPECIES_NOTE = "Dwarves, elves and halflings don't pick a class at level 1: their species is their class."
+OCCUPATION_KEYS = ("D100", "Occupation", "OccupationName", "Race", "Sub", "Weapon", "WeaponName", "WeaponItem", "Good",
+	"GoodName", "GoodItem", "GoodCopper", "Skills", "Ammo", "AmmoName", "AmmoItem")
+# the looks a player steps through: (name, colour slot or None, dcclooks.2da column, the column's fallback)
+LOOK_PARTS = (("Hair", None, "HAIR", None), ("Beard", None, "BEARDS", None), ("Hair colour", 6, "HAIRCOL", (36, 45)),
+	("Skin", 3, "SKIN", (28, 35)), ("Tunic", 2, "DYES", (7, 27)), ("Trousers", 1, "DYES", (7, 27)),
+	("Leather", 4, "LEATHER", (46, 51)))
+
+def SpeciesName (race):
+	return dict (SPECIES).get (race, "Human")
+
+def _LookRow (tables, race, sex):
+	looks = tables["dcclooks"]
+	row = "%s_%s" % (LOOK_ROWS.get (race, "HUMAN"), "F" if sex == 2 else "M")
+	return looks, row if row in looks.rows else ("HUMAN_F" if sex == 2 else "HUMAN_M")
+
+def LookOptions (tables, race, sex, part):
+	"""what a look part may be on this species and sex: style ids (0 none) or pal16 rows"""
+	looks, row = _LookRow (tables, race, sex)
+	name, slot, column, fallback = [p for p in LOOK_PARTS if p[0] == part][0]
+	if slot is None:
+		styles = [int (s) for s in (looks.Get (row, column) or "0").split ("|") if s]
+		return [0] + sorted (set (s for s in styles if s))
+	low, high = ParseRange (looks.Get (row, column), *fallback)
+	return list (range (low, high + 1))
+
+def LookValue (card, part):
+	slot = [p for p in LOOK_PARTS if p[0] == part][0][1]
+	return card["Looks"][part] if slot is None else card["Looks"]["Colors"][slot]
+
+def StepLook (card, tables, part, step):
+	"""the next (step 1) or previous (-1) choice of a look part; the metal and armor colours follow none"""
+	options = LookOptions (tables, card["Race"], card["Sex"], part)
+	current = LookValue (card, part)
+	index = options.index (current) if current in options else -1
+	value = options[(index + step) % len (options)]
+	slot = [p for p in LOOK_PARTS if p[0] == part][0][1]
+	if slot is None:
+		card["Looks"][part] = value
+	else:
+		card["Looks"]["Colors"][slot] = value
+	return value
+
+def _FitLooks (card, tables, fresh):
+	"""new looks for another species or sex: the body and the styles its rig has, keeping the colours
+	the player chose where the new row allows them"""
+	looks = dict (fresh, Colors = list (fresh["Colors"]))
+	old = card.get ("Looks")
+	if old:
+		for name, slot, column, fallback in LOOK_PARTS:
+			if slot is not None and old["Colors"][slot] in LookOptions (tables, card["Race"], card["Sex"], name):
+				looks["Colors"][slot] = old["Colors"][slot]
+	card["Looks"] = looks
+
+def SetSpecies (card, race, die, tables):
+	"""the card's species (M3.5): its occupation and name for that species, rolled with the card (a name
+	the player typed stays)"""
+	if race == card["Race"] or race not in card.get ("Occupations", {}):
+		return False
+	card.update (card["Occupations"][race])
+	if not card.get ("NameTyped") and race in card.get ("Names", {}):
+		card["Name"] = card["Names"][race]
+	_FitLooks (card, tables, RollLooks (die, tables, race, card["Sex"]))
+	return True
+
+def SetSex (card, sex, die, tables, taken = ()):
+	"""the card's sex: a body and styles of the new rig, and names from the new sex's lists (a name the
+	player typed stays); taken: the other cards' names"""
+	if sex == card["Sex"]:
+		return False
+	card["Sex"] = sex
+	card["Names"] = PickNames (die, tables, sex, set (n.upper () for n in taken), card["Race"])
+	if not card.get ("NameTyped"):
+		card["Name"] = card["Names"][card["Race"]]
+	_FitLooks (card, tables, RollLooks (die, tables, card["Race"], sex))
+	return True
 
 def RollAll (die, tables, count = 16, options = None):
 	cards = []

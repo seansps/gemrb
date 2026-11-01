@@ -1,97 +1,545 @@
 2DA V1.0
-0
-# ethren (M3.1): the names the funnel's rolling screen gives new peasants (renamed on the card at will). SEX
-# is 1 male, 2 female (IE_SEX); a name isn't given twice in one roll.
-           SEX
-Gristle    1
-Hob        1
-Wat        1
-Ankel      1
-Bram       1
-Cobb       1
-Dunstan    1
-Edric      1
-Fenn       1
-Garth      1
-Hamm       1
-Ivo        1
-Jory       1
-Kellen     1
-Lob        1
-Mott       1
-Nabb       1
-Osric      1
-Pike       1
-Quill      1
-Rook       1
-Sim        1
-Tam        1
-Udo        1
-Varn       1
-Wick       1
-Ancel      1
-Brock      1
-Colm       1
-Dodd       1
-Egbert     1
-Fulk       1
-Gil        1
-Hask       1
-Jeb        1
-Lurk       1
-Merrick    1
-Norb       1
-Oswin      1
-Pell       1
-Ralf       1
-Stubb      1
-Tolly      1
-Ulf        1
-Wendel     1
-Yarrow     1
-Agnes      2
-Bess       2
-Cille      2
-Dora       2
-Ebba       2
-Flick      2
-Greet      2
-Hild       2
-Isolde     2
-Joan       2
-Kat        2
-Lettice    2
-Mab        2
-Nell       2
-Odile      2
-Pru        2
-Rose       2
-Sib        2
-Tib        2
-Una        2
-Wenna      2
-Alys       2
-Bridget    2
-Clemence   2
-Dulcie     2
-Elsa       2
-Fen        2
-Gilly      2
-Hawise     2
-Ide        2
-Jennet     2
-Kip        2
-Lark       2
-Maud       2
-Nan        2
-Orla       2
-Petra      2
-Rohese     2
-Saffy      2
-Tamsin     2
-Ursel      2
-Wynn       2
-Yolanda    2
-Avice      2
-Brune      2
-Cress      2
+*
+# ethren (M3.1, M3.5): the names the funnel's rolling screen gives new peasants (renamed on the card at will), by
+# species and sex: SEX is 1 male, 2 female (IE_SEX); RACE is race.ids (1 human, 2 elf, 4 dwarf, 5 halfling). Each
+# card is given a name of every species with its other rolls, and shows the one of its species; a name isn't given
+# twice in one roll. Our own lists: common medieval names for humans, and a sound of their own for the others.
+      NAME          SEX  RACE
+1     Gristle       1    1
+2     Hob           1    1
+3     Wat           1    1
+4     Ankel         1    1
+5     Bram          1    1
+6     Cobb          1    1
+7     Dunstan       1    1
+8     Edric         1    1
+9     Fenn          1    1
+10    Garth         1    1
+11    Hamm          1    1
+12    Ivo           1    1
+13    Jory          1    1
+14    Kellen        1    1
+15    Lob           1    1
+16    Mott          1    1
+17    Nabb          1    1
+18    Osric         1    1
+19    Pike          1    1
+20    Quill         1    1
+21    Rook          1    1
+22    Sim           1    1
+23    Tam           1    1
+24    Udo           1    1
+25    Varn          1    1
+26    Wick          1    1
+27    Ancel         1    1
+28    Brock         1    1
+29    Colm          1    1
+30    Dodd          1    1
+31    Egbert        1    1
+32    Fulk          1    1
+33    Gil           1    1
+34    Hask          1    1
+35    Jeb           1    1
+36    Lurk          1    1
+37    Merrick       1    1
+38    Norb          1    1
+39    Oswin         1    1
+40    Pell          1    1
+41    Ralf          1    1
+42    Stubb         1    1
+43    Tolly         1    1
+44    Ulf           1    1
+45    Wendel        1    1
+46    Yarrow        1    1
+47    Aldo          1    1
+48    Alric         1    1
+49    Ambrose       1    1
+50    Anselm        1    1
+51    Arnulf        1    1
+52    Baldric       1    1
+53    Bennet        1    1
+54    Berold        1    1
+55    Bertram       1    1
+56    Brand         1    1
+57    Brom          1    1
+58    Cedric        1    1
+59    Cuthbert      1    1
+60    Dudley        1    1
+61    Eadric        1    1
+62    Edmund        1    1
+63    Elbert        1    1
+64    Ernald        1    1
+65    Everard       1    1
+66    Gamel         1    1
+67    Gervase       1    1
+68    Gilbert       1    1
+69    Godric        1    1
+70    Godwin        1    1
+71    Hamon         1    1
+72    Harold        1    1
+73    Herbert       1    1
+74    Hubert        1    1
+75    Hugh          1    1
+76    Humbert       1    1
+77    Jasper        1    1
+78    Josse         1    1
+79    Lambert       1    1
+80    Leofric       1    1
+81    Martin        1    1
+82    Milo          1    1
+83    Nigel         1    1
+84    Norris        1    1
+85    Orrin         1    1
+86    Osbert        1    1
+87    Piers         1    1
+88    Ranulf        1    1
+89    Reynard       1    1
+90    Robin         1    1
+91    Roger         1    1
+92    Rowan         1    1
+93    Seward        1    1
+94    Silas         1    1
+95    Simkin        1    1
+96    Thurstan      1    1
+97    Tobin         1    1
+98    Turold        1    1
+99    Wace          1    1
+100   Walter        1    1
+101   Warin         1    1
+102   Wilfred       1    1
+103   Wolstan       1    1
+104   Wystan        1    1
+105   Abel          1    1
+106   Barnaby       1    1
+107   Cole          1    1
+108   Denholm       1    1
+109   Emmet         1    1
+110   Fitch         1    1
+111   Goddard       1    1
+112   Hale          1    1
+113   Ingram        1    1
+114   Jolyon        1    1
+115   Kester        1    1
+116   Lew           1    1
+117   Mattock       1    1
+118   Ned           1    1
+119   Alard         1    1
+120   Bartle        1    1
+121   Crispin       1    1
+122   Drogo         1    1
+123   Agnes         2    1
+124   Bess          2    1
+125   Cille         2    1
+126   Dora          2    1
+127   Ebba          2    1
+128   Flick         2    1
+129   Greet         2    1
+130   Hild          2    1
+131   Isolde        2    1
+132   Joan          2    1
+133   Kat           2    1
+134   Lettice       2    1
+135   Mab           2    1
+136   Nell          2    1
+137   Odile         2    1
+138   Pru           2    1
+139   Rose          2    1
+140   Sib           2    1
+141   Tib           2    1
+142   Una           2    1
+143   Wenna         2    1
+144   Alys          2    1
+145   Bridget       2    1
+146   Clemence      2    1
+147   Dulcie        2    1
+148   Elsa          2    1
+149   Fen           2    1
+150   Gilly         2    1
+151   Hawise        2    1
+152   Ide           2    1
+153   Jennet        2    1
+154   Kip           2    1
+155   Lark          2    1
+156   Maud          2    1
+157   Nan           2    1
+158   Orla          2    1
+159   Petra         2    1
+160   Rohese        2    1
+161   Saffy         2    1
+162   Tamsin        2    1
+163   Ursel         2    1
+164   Wynn          2    1
+165   Yolanda       2    1
+166   Avice         2    1
+167   Brune         2    1
+168   Cress         2    1
+169   Ada           2    1
+170   Aldith        2    1
+171   Amice         2    1
+172   Annis         2    1
+173   Beatrix       2    1
+174   Berta         2    1
+175   Cecily        2    1
+176   Constance     2    1
+177   Dionis        2    1
+178   Eda           2    1
+179   Edith         2    1
+180   Elena         2    1
+181   Emmot         2    1
+182   Esme          2    1
+183   Eva           2    1
+184   Felice        2    1
+185   Galiena       2    1
+186   Goda          2    1
+187   Gunilda       2    1
+188   Helewise      2    1
+189   Isabel        2    1
+190   Jacoba        2    1
+191   Juliana       2    1
+192   Katelin       2    1
+193   Lucia         2    1
+194   Mabel         2    1
+195   Magge         2    1
+196   Margery       2    1
+197   Marion        2    1
+198   Matilda       2    1
+199   Millicent     2    1
+200   Muriel        2    1
+201   Nesta         2    1
+202   Olive         2    1
+203   Parnel        2    1
+204   Philippa      2    1
+205   Rosamund      2    1
+206   Sabine        2    1
+207   Sarra         2    1
+208   Sybil         2    1
+209   Thea          2    1
+210   Theda         2    1
+211   Wilmot        2    1
+212   Winifred      2    1
+213   Agatha        2    1
+214   Alice         2    1
+215   Avelina       2    1
+216   Benedicta     2    1
+217   Cassia        2    1
+218   Dowsabel      2    1
+219   Ellyn         2    1
+220   Femmy         2    1
+221   Gwen          2    1
+222   Hester        2    1
+223   Idony         2    1
+224   Jonet         2    1
+225   Lora          2    1
+226   Malkin        2    1
+227   Moll          2    1
+228   Orabel        2    1
+229   Rosie         2    1
+230   Sela          2    1
+231   Tilda         2    1
+232   Willa         2    1
+233   Ysmay         2    1
+234   Alda          2    1
+235   Bryony        2    1
+236   Christabel    2    1
+237   Elfreda       2    1
+238   Joyce         2    1
+239   Aldrek        1    4
+240   Balgrim       1    4
+241   Bardin        1    4
+242   Bolrik        1    4
+243   Brakki        1    4
+244   Bromdur       1    4
+245   Dalgrim       1    4
+246   Dorrik        1    4
+247   Drumli        1    4
+248   Durgan        1    4
+249   Dwalgar       1    4
+250   Fargrim       1    4
+251   Gandrik       1    4
+252   Garmund       1    4
+253   Gimrek        1    4
+254   Gorm          1    4
+255   Grimbold      1    4
+256   Grundi        1    4
+257   Hadrik        1    4
+258   Haldor        1    4
+259   Hrolgar       1    4
+260   Jorund        1    4
+261   Kaldrin       1    4
+262   Karrig        1    4
+263   Kolbjorn      1    4
+264   Korvin        1    4
+265   Lodrak        1    4
+266   Magni         1    4
+267   Morgrim       1    4
+268   Murdo         1    4
+269   Nalgar        1    4
+270   Norrik        1    4
+271   Olgrim        1    4
+272   Orsik         1    4
+273   Rangvald      1    4
+274   Rorik         1    4
+275   Skaldi        1    4
+276   Stonar        1    4
+277   Sveinn        1    4
+278   Thorgrim      1    4
+279   Thrandur      1    4
+280   Torvald       1    4
+281   Ulfgar        1    4
+282   Vondal        1    4
+283   Yngvar        1    4
+284   Duri          1    4
+285   Brokk         1    4
+286   Hagan         1    4
+287   Ketil         1    4
+288   Ragnir        1    4
+289   Amra          2    4
+290   Astrid        2    4
+291   Bera          2    4
+292   Brenna        2    4
+293   Brynhild      2    4
+294   Dagny         2    4
+295   Disa          2    4
+296   Edda          2    4
+297   Eydis         2    4
+298   Freyda        2    4
+299   Gerd          2    4
+300   Gudrun        2    4
+301   Gunnvor       2    4
+302   Hakka         2    4
+303   Halla         2    4
+304   Helga         2    4
+305   Hildur        2    4
+306   Ingrid        2    4
+307   Jorunn        2    4
+308   Kara          2    4
+309   Ketta         2    4
+310   Kolla         2    4
+311   Liv           2    4
+312   Magna         2    4
+313   Marta         2    4
+314   Nanna         2    4
+315   Oda           2    4
+316   Ragna         2    4
+317   Ranka         2    4
+318   Runa          2    4
+319   Sigrid        2    4
+320   Sola          2    4
+321   Steina        2    4
+322   Svala         2    4
+323   Thora         2    4
+324   Tova          2    4
+325   Ulla          2    4
+326   Unna          2    4
+327   Vigdis        2    4
+328   Yrsa          2    4
+329   Bolda         2    4
+330   Dorna         2    4
+331   Grenna        2    4
+332   Hilde         2    4
+333   Ingunn        2    4
+334   Malka         2    4
+335   Ronna         2    4
+336   Valda         2    4
+337   Sif           2    4
+338   Asta          2    4
+339   Aeren         1    2
+340   Ailin         1    2
+341   Caelith       1    2
+342   Calen         1    2
+343   Elandor       1    2
+344   Elion         1    2
+345   Emrys         1    2
+346   Faelan        1    2
+347   Fenwyr        1    2
+348   Galen         1    2
+349   Ilthar        1    2
+350   Kaelan        1    2
+351   Lethas        1    2
+352   Lirien        1    2
+353   Loren         1    2
+354   Maelis        1    2
+355   Mirreth       1    2
+356   Naerion       1    2
+357   Nimral        1    2
+358   Quillon       1    2
+359   Selwyn        1    2
+360   Sylvar        1    2
+361   Taerin        1    2
+362   Vaelis        1    2
+363   Varen         1    2
+364   Yselin        1    2
+365   Ithel         1    2
+366   Cadell        1    2
+367   Elwin         1    2
+368   Ferrow        1    2
+369   Halien        1    2
+370   Ilvar         1    2
+371   Lorcan        1    2
+372   Meren         1    2
+373   Nyrell        1    2
+374   Oriel         1    2
+375   Peleth        1    2
+376   Rhovan        1    2
+377   Saelor        1    2
+378   Tirel         1    2
+379   Ulrien        1    2
+380   Wyrrin        1    2
+381   Aldren        1    2
+382   Caerwyn       1    2
+383   Evran         1    2
+384   Feyrin        1    2
+385   Iolo          1    2
+386   Lisandar      1    2
+387   Merion        1    2
+388   Thalen        1    2
+389   Aelith        2    2
+390   Aerin         2    2
+391   Ailsa         2    2
+392   Alinne        2    2
+393   Arwyth        2    2
+394   Briallen      2    2
+395   Celenwe       2    2
+396   Elwen         2    2
+397   Eirwen        2    2
+398   Faelin        2    2
+399   Fiora         2    2
+400   Ilara         2    2
+401   Ilsabet       2    2
+402   Laerel        2    2
+403   Lorwen        2    2
+404   Maeve         2    2
+405   Melisande     2    2
+406   Mirela        2    2
+407   Naela         2    2
+408   Niamh         2    2
+409   Nimue         2    2
+410   Oriane        2    2
+411   Rhiannon      2    2
+412   Saelis        2    2
+413   Seren         2    2
+414   Sylwen        2    2
+415   Taeris        2    2
+416   Thalia        2    2
+417   Vaela         2    2
+418   Aelwen        2    2
+419   Calla         2    2
+420   Delyth        2    2
+421   Elora         2    2
+422   Enid          2    2
+423   Gwyneira      2    2
+424   Iona          2    2
+425   Lysara        2    2
+426   Miravel       2    2
+427   Neris         2    2
+428   Olwen         2    2
+429   Riel          2    2
+430   Sorcha        2    2
+431   Yllin         2    2
+432   Aeryn         2    2
+433   Caoimhe       2    2
+434   Eluned        2    2
+435   Ffion         2    2
+436   Ione          2    2
+437   Linnea        2    2
+438   Tegwen        2    2
+439   Alby          1    5
+440   Barney        1    5
+441   Bertie        1    5
+442   Buckle        1    5
+443   Cob           1    5
+444   Dandy         1    5
+445   Digby         1    5
+446   Ellis         1    5
+447   Fenton        1    5
+448   Filbert       1    5
+449   Hal           1    5
+450   Harlow        1    5
+451   Jem           1    5
+452   Lumpkin       1    5
+453   Midge         1    5
+454   Nib           1    5
+455   Ollie         1    5
+456   Pip           1    5
+457   Podge         1    5
+458   Quint         1    5
+459   Rafe          1    5
+460   Rollo         1    5
+461   Sprat         1    5
+462   Tad           1    5
+463   Tiddle        1    5
+464   Tobias        1    5
+465   Tuck          1    5
+466   Waldo         1    5
+467   Wilby         1    5
+468   Barley        1    5
+469   Bramble       1    5
+470   Dob           1    5
+471   Fennick       1    5
+472   Gubbs         1    5
+473   Jolly         1    5
+474   Mossy         1    5
+475   Nubby         1    5
+476   Pudding       1    5
+477   Rumble        1    5
+478   Scutch        1    5
+479   Will          1    5
+480   Bartle        1    5
+481   Corky         1    5
+482   Dabney        1    5
+483   Fidget        1    5
+484   Hobnob        1    5
+485   Muddle        1    5
+486   Perkin        1    5
+487   Tumble        1    5
+488   Wiggin        1    5
+489   Amaryllis     2    5
+490   Bluebell      2    5
+491   Buttercup     2    5
+492   Camellia      2    5
+493   Clover        2    5
+494   Daisy         2    5
+495   Elder         2    5
+496   Fern          2    5
+497   Hazel         2    5
+498   Heather       2    5
+499   Holly         2    5
+500   Ivy           2    5
+501   Juniper       2    5
+502   Lavender      2    5
+503   Lily          2    5
+504   Marigold      2    5
+505   Mint          2    5
+506   Myrtle        2    5
+507   Nettle        2    5
+508   Pansy         2    5
+509   Pearl         2    5
+510   Peony         2    5
+511   Poppy         2    5
+512   Primrose      2    5
+513   Rue           2    5
+514   Saffron       2    5
+515   Sage          2    5
+516   Sorrel        2    5
+517   Tansy         2    5
+518   Thistle       2    5
+519   Tilly         2    5
+520   Violet        2    5
+521   Wren          2    5
+522   Willow        2    5
+523   Berry         2    5
+524   Clementine    2    5
+525   Dimple        2    5
+526   Fig           2    5
+527   Ginger        2    5
+528   Honey         2    5
+529   Jess          2    5
+530   Kettle        2    5
+531   Pippa         2    5
+532   Posy          2    5
+533   Sunny         2    5
+534   Tuppence      2    5
+535   Acorna        2    5
+536   Blossom       2    5
+537   Dottie        2    5
+538   Merriel       2    5
