@@ -1140,6 +1140,19 @@ TEST(DCC_Tables, Looks)
 	ASSERT_NE(beard, nullptr);
 	EXPECT_EQ(HairOverlay(beard, true), "BD"); // a beard shows under a helmet
 	EXPECT_EQ(hair.Find(0, false), nullptr);
+	// S4: thirteen hair styles and three beards; the long ones keep a cropped copy under a helmet
+	for (int id = 1; id <= 13; ++id) {
+		EXPECT_NE(hair.Find(id, false), nullptr) << id;
+	}
+	EXPECT_EQ(hair.Find(14, false), nullptr);
+	for (int id = 1; id <= 3; ++id) {
+		ASSERT_NE(hair.Find(id, true), nullptr) << id;
+		EXPECT_EQ(HairOverlay(hair.Find(id, true), true), HairOverlay(hair.Find(id, true), false)) << id;
+	}
+	EXPECT_EQ(HairOverlay(hair.Find(6, false), true), "XT"); // the ponytail hangs below a helmet
+	EXPECT_EQ(HairOverlay(hair.Find(12, false), false), "HR");
+	EXPECT_EQ(HairOverlay(hair.Find(12, false), true), "XR");
+	EXPECT_EQ(HairOverlay(hair.Find(10, false), true), ""); // buzzed: nothing under a helmet
 
 	auto rates = Open2DA("moverate");
 	ASSERT_TRUE(rates);
@@ -1155,7 +1168,43 @@ TEST(DCC_Tables, Looks)
 		EXPECT_NE(avatars->QueryField(row, 7), "*"); // a SIZE letter: overlays on
 	}
 	EXPECT_EQ(avatars->QueryField(avatars->GetRowIndex("0x6510"), 7), "F"); // the female rig's own overlays
-	EXPECT_EQ(ids, (std::set<std::string> { "0x6500", "0x6501", "0x6510" }));
+	EXPECT_EQ(avatars->QueryField(avatars->GetRowIndex("0x6511"), 7), "F"); // the bald female body: her rig's hair
+	EXPECT_EQ(avatars->QueryField(avatars->GetRowIndex("0x6511"), 0), "CPF2");
+	EXPECT_EQ(ids, (std::set<std::string> { "0x6500", "0x6501", "0x6510", "0x6511" }));
+
+	// the looks roll (dcclooks.2da) only gives a body the styles rendered on its rig: hair 1-7 and the
+	// beards on the male (CPM2, L), hair 8-13 on the female (CPF2, F)
+	auto looks = Open2DA("dcclooks");
+	ASSERT_TRUE(looks);
+	auto styles = [&](TableMgr::index_t row, const std::string& column) {
+		std::set<int> ids;
+		std::string list = looks->QueryField(row, looks->GetColumnIndex(column));
+		size_t start = 0;
+		while (start <= list.size()) {
+			size_t bar = list.find('|', start);
+			ids.insert(atoi(list.substr(start, bar == std::string::npos ? std::string::npos : bar - start).c_str()));
+			if (bar == std::string::npos) break;
+			start = bar + 1;
+		}
+		ids.erase(0);
+		return ids;
+	};
+	for (TableMgr::index_t row = 0; row < looks->GetRowCount(); ++row) {
+		const std::string& name = looks->GetRowName(row);
+		bool female = name.back() == 'F';
+		int anim = atoi(looks->QueryField(row, looks->GetColumnIndex("ANIM")).c_str());
+		EXPECT_EQ(anim, female ? 0x6511 : 0x6501) << name;
+		std::set<int> hairs = styles(row, "HAIR");
+		EXPECT_FALSE(hairs.empty()) << name;
+		for (int id : hairs) {
+			EXPECT_NE(hair.Find(id, false), nullptr) << name << " " << id;
+			EXPECT_TRUE(female ? id >= 8 && id <= 13 : id >= 1 && id <= 7) << name << " " << id;
+		}
+		for (int id : styles(row, "BEARDS")) {
+			EXPECT_FALSE(female) << name;
+			EXPECT_NE(hair.Find(id, true), nullptr) << name << " " << id;
+		}
+	}
 }
 
 // Phase 3: the formations for parties of 16 (formatio.2da): 20 places each, none shared

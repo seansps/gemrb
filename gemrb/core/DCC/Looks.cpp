@@ -85,6 +85,32 @@ unsigned int OverlayColourByte(unsigned int paletteType)
 	return paletteType - PALETTE_WEAPON + 1;
 }
 
+// the stock type 0 order (weapon 1, off hand 2, helmet 3) with the hair (4) and beard (5) right over the
+// body and under the helmet, and the weapon never under the body (see Looks.h)
+static const int partOrder[16][PART_COUNT] = {
+	{ 0, 4, 5, 3, 2, 1 },
+	{ 0, 4, 5, 3, 2, 1 },
+	{ 0, 4, 5, 3, 1, 2 },
+	{ 0, 4, 5, 3, 1, 2 },
+	{ 0, 1, 4, 5, 3, 2 },
+	{ 0, 1, 4, 5, 3, 2 },
+	{ 0, 1, 4, 5, 3, 2 },
+	{ 0, 1, 4, 5, 3, 2 },
+	{ 0, 1, 4, 5, 3, 2 },
+	{ 0, 1, 4, 5, 3, 2 },
+	{ 0, 1, 4, 5, 3, 2 },
+	{ 0, 1, 4, 5, 3, 2 },
+	{ 0, 1, 4, 5, 3, 2 },
+	{ 0, 4, 5, 3, 1, 2 },
+	{ 0, 4, 5, 3, 1, 2 },
+	{ 0, 4, 5, 3, 2, 1 }
+};
+
+const int* PartOrder(unsigned char orient)
+{
+	return partOrder[orient & 15];
+}
+
 bool CombatStance(bool engaged, bool partyFight)
 {
 	return engaged || partyFight;

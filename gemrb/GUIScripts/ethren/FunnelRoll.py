@@ -207,7 +207,10 @@ def RollInRange (die, text, low, high):
 
 def RollLooks (die, tables, race, sex):
 	"""M2.11's looks by species and sex: animation, hair and beard overlays, the seven colours
-	(metal, minor, major, skin, leather, armor, hair as rows of pal16)"""
+	(metal, minor, major, skin, leather, armor, hair as rows of pal16). dcclooks.2da's row gives the
+	bald body (ANIM) and the styles that are rendered on its rig (S4: hair 1-7 and the beards on the
+	male, 8-13 on the female), so a style never lands on a body it wasn't drawn for. The dice: the style,
+	d100 for no hair (BALD), d100 for a beard (BEARD) and its style, then the colours"""
 	looks = tables["dcclooks"]
 	row = "%s_%s" % (LOOK_ROWS.get (race, "HUMAN"), "F" if sex == 2 else "M")
 	if row not in looks.rows:

@@ -8,7 +8,9 @@
 #include "../../../core/DCC/Combat.h"
 #include "../../../core/DCC/Looks.h"
 
+#include <algorithm>
 #include <gtest/gtest.h>
+#include <vector>
 
 namespace GemRB {
 namespace DCC {
@@ -57,6 +59,37 @@ TEST(DCC_Looks, Stances)
 	EXPECT_TRUE(CombatStance(true, false)); // ready while engaged
 	EXPECT_TRUE(CombatStance(false, true)); // and while the party fights
 	EXPECT_TRUE(CombatStance(true, true));
+}
+
+// S3/S4: the parts' drawing order. Every overlay is rendered with its body as a holdout, so the body is
+// drawn first in every facing (the weapon went under it facing away, hiding a backswing), the hair and
+// beard under the helmet, and each part once
+TEST(DCC_Looks, PartOrder)
+{
+	for (unsigned char orient = 0; orient < 16; ++orient) {
+		const int* order = PartOrder(orient);
+		ASSERT_NE(order, nullptr);
+		std::vector<int> parts(order, order + PART_COUNT);
+		std::vector<int> sorted = parts;
+		std::sort(sorted.begin(), sorted.end());
+		EXPECT_EQ(sorted, (std::vector<int> { 0, 1, 2, 3, 4, 5 })) << int(orient);
+		auto at = [&](int part) { return std::find(parts.begin(), parts.end(), part) - parts.begin(); };
+		EXPECT_EQ(at(0), 0) << int(orient); // the body at the bottom
+		EXPECT_LT(at(4), at(3)) << int(orient); // hair under the helmet
+		EXPECT_LT(at(5), at(3)) << int(orient); // the beard too
+		EXPECT_LT(at(4), at(5)) << int(orient); // the beard over the hair
+	}
+	// facing away the weapon goes right over the body, under hair, helmet and off hand
+	EXPECT_EQ(PartOrder(8)[1], 1);
+	EXPECT_EQ(PartOrder(4)[1], 1);
+	EXPECT_EQ(PartOrder(12)[1], 1);
+	// facing the viewer it is over everything (south) or under the off hand only (south-west)
+	EXPECT_EQ(PartOrder(0)[5], 1);
+	EXPECT_EQ(PartOrder(2)[4], 1);
+	// the mirrored facings (9-15) are as their mirror images (7-1)
+	for (unsigned char orient = 9; orient < 16; ++orient) {
+		EXPECT_EQ(std::vector<int>(PartOrder(orient), PartOrder(orient) + PART_COUNT), std::vector<int>(PartOrder(16 - orient), PartOrder(16 - orient) + PART_COUNT)) << int(orient);
+	}
 }
 
 // the "held two-handed" switch: the staff, spear, pitchfork, shovel and pole are one-handed in DCC

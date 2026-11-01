@@ -52,6 +52,12 @@
 #      their log lines, Luck burned by the policy, the party's best placed; the world (the area script's
 #      action: the weather; its trigger: a snare), a dialog (Old Wat's lock: the one talking, then the party),
 #      a deadly check's Luck prompt, an acquired tag, the record sheet; screenshots
+# S3/S4 (sprite layers):
+#   i. looks2: mannequins (FNTLOOKM/F, the bald bodies) with every funnel weapon class on both rigs, ready, attacking
+#      from four facings (the spear's thrust A6, A5 behind a shield; bows, crossbow and sling shooting) and lying dead;
+#      the spear from the five drawn facings; every hair style and beard on its rig; each helmet over long and short
+#      hair; the ten hair colours; the items' own colours on their overlays; the stance files and colour bytes
+#      checked, screenshots looks2_*.bmp
 # Every check logs "[FNT] ok ..." or "[FNT] FAIL ...", the end "[FNT] autotest done: N checks,
 # F failed"; FNT_AT_DONE becomes 1 if all passed, 2 if not.
 
@@ -608,6 +614,246 @@ def _Sprites ():
 	_Block (pcs)
 	yield
 
+# --- S3/S4: the overlay layers on both rigs (looks2) ------------------------------------------------
+
+LOOKS_AT = (180, 1000) # the mannequins' first row: open ground at the glade's south edge, in front of the pillars
+# and west of the shade of the one at x 790-920 (the area's lightmap tints actors)
+LOOKS_DX, LOOKS_DY = 60, 110
+QUIVER_CODE = -24 # the first quiver slot (core slot 11) less the first weapon slot (35): demo's slottype.2da
+SLOT_KINDS = {"weapon": 256, "quiver": 512, "shield": 4, "helmet": 1} # ie_slots: SLOT_WEAPON, QUIVER, SHIELD, HELM
+# one per weapon class of the funnel: name, items, expected (weapon animation type, ready file, ready overlay
+# suffix, the jab's body suffix); bows, the crossbow and the sling shoot with the one-handed ready stance
+LOADOUTS = [
+	("club", [("weapon", "FNTCLUB")], (0, "G1", "G1", "A5")),
+	("staff", [("weapon", "FNTSTAF")], (1, "G13", "G1", "A6")),
+	("staff+shield", [("weapon", "FNTSTAF"), ("shield", "FNTSHLD")], (0, "G1", "G1", "A5")),
+	("spear", [("weapon", "FNTSPEAR")], (1, "G13", "G1", "A6")),
+	("spear+shield", [("weapon", "FNTSPEAR"), ("shield", "FNTSHLD")], (0, "G1", "G1", "A5")),
+	("pitchfork", [("weapon", "FNTPFORK")], (1, "G13", "G1", "A6")),
+	("2h sword", [("weapon", "FNTSWD2")], (1, "G13", "G1", "A6")),
+	("bow", [("weapon", "FNTBOW"), ("quiver", "FNTARRW")], (0, "G1", "G1", None)),
+	("crossbow", [("weapon", "FNTXBOW"), ("quiver", "FNTBOLT")], (0, "G1", "G1", None)),
+	("sling", [("weapon", "FNTSLGS"), ("quiver", "FNTBULL")], (0, "G1", "G1", None)),
+]
+RANGED = ("bow", "crossbow", "sling")
+SEQ_ATTACK, SEQ_DIE, SEQ_SHOOT, SEQ_JAB = 0, 5, 8, 13 # stances (IE_ANI_ATTACK: picked by the weapon's weights)
+Mannequins = []
+
+def _Mannequin (female, column, row, hair = 0, beard = 0, items = (), face = 0, hairColour = None):
+	"""a dressed-up mannequin (FNTLOOKM: the bald male body CPM2, FNTLOOKF: the bald female CPF2)"""
+	x, y = LOOKS_AT[0] + column * LOOKS_DX, LOOKS_AT[1] + row * LOOKS_DY
+	gid = GemRB.CreateCreature (1, "FNTLOOKF" if female else "FNTLOOKM", x, y)
+	_Put (gid, x, y)
+	GemRB.DCCSetLooks (gid, hair, beard)
+	if hairColour is not None:
+		GemRB.SetPlayerStat (gid, IE_HAIR_COLOR, hairColour)
+	offHand = GemRB.GetSlots (gid, SLOT_KINDS["shield"], 0) # it takes weapons too (two weapons)
+	for kind, ref in items:
+		free = [slot for slot in GemRB.GetSlots (gid, SLOT_KINDS[kind], -1) if kind == "shield" or slot not in offHand]
+		if kind == "quiver":
+			GemRB.CreateItem (gid, ref, free[0], 40, 0, 0)
+		else:
+			GemRB.CreateItem (gid, ref, free[0])
+	kinds = [kind for kind, ref in items]
+	if "quiver" in kinds:
+		GemRB.SetEquippedQuickSlot (gid, QUIVER_CODE)
+	elif "weapon" in kinds:
+		GemRB.SetEquippedQuickSlot (gid, 0)
+	GemRB.DCCPose (gid, -1, face)
+	Mannequins.append (gid)
+	return gid
+
+def _Clear ():
+	global Mannequins
+	for gid in Mannequins:
+		GemRB.ExecuteString ("DestroySelf()", gid)
+	Mannequins = []
+
+def _Face (gids, face):
+	for gid in gids:
+		GemRB.DCCPose (gid, -1, face)
+
+def _Play (gids, seq):
+	"""a stance at once, as an action would play it (DCCPose: no action queue in the way). The ready stance
+	is held with an action to do (a wait of a second, past the next step's screenshot): a DCC character with
+	nothing to do and no fight on relaxes at the start of its next loop"""
+	for gid in gids:
+		GemRB.DCCPose (gid, seq)
+		if seq == IE_ANI_READY:
+			GemRB.ExecuteString ("Wait(1)", gid)
+
+def _LooksShot (name, center):
+	"""the game window centred on a mannequin, next to the autotest's saves (looks2_*.bmp)"""
+	path = GemRB.GetSystemVariable (SV_SAVEPATH) + "/looks2_%s.bmp" % name
+	_Check ("screenshot looks2 %s" % name, GemRB.SaveScreenshot (path, center), True)
+
+def _Ticks ():
+	return GemRB.GetDCCStats (1)["GameTicks"]
+
+def _Gallery (pcs):
+	"""the party in a line behind the mannequins' rows, so they see them (the fog of war) out of the way"""
+	for i, pc in enumerate (pcs):
+		_Put (pc, LOOKS_AT[0] - 120 + i * 56, LOOKS_AT[1] - 130)
+
+def _Looks2 ():
+	"""S3/S4: the weapon, shield, helmet, hair and beard overlays on both rigs, as GemRB draws them: the
+	funnel's weapon classes ready, attacking (the spear's thrust, A5 behind a shield) and lying dead; every
+	hair style and beard on its rig; each helmet over hair; hair colours and the items' own colours.
+	Mannequins (FNTLOOKM/F) in two rows on open ground at the glade's south edge, the party in a line behind
+	them; the stances and facings set with GemRB.DCCPose; screenshots looks2_*.bmp in the save path"""
+	pcs = list (range (1, 17))
+	wasOn = GemRB.GetGUIFlags () & GS_PARTYAI
+	GemRB.GameSetScreenFlags (GS_PARTYAI, OP_NAND)
+	_Gallery (pcs)
+	yield
+
+	# 1. the weapon classes: a male row and a female row, a loadout a column
+	rows = {}
+	for row, female in enumerate ((False, True)):
+		for column, (name, items, expect) in enumerate (LOADOUTS):
+			rows[(female, name)] = _Mannequin (female, column, row, 6 if not female else 11, 0, items)
+	yield
+	yield
+	middle = rows[(False, "spear")]
+	for (female, name), gid in sorted (rows.items ()):
+		expect = dict ((n, e) for n, i, e in LOADOUTS)[name]
+		stats = GemRB.GetDCCStats (gid)
+		files = stats["StanceFiles"]
+		got = (stats["WeaponAnim"], files["Ready"][0][4:].upper (), files["Ready"][1].upper (), files["Thrust"][0][4:].upper () if expect[3] else None)
+		_Check ("looks2: %s %s: weapon animation, ready file and overlay, jab file" % ("female" if female else "male", name), got, expect)
+	_Check ("looks2: the spear's weights (all thrust)", GemRB.GetDCCStats (rows[(False, "spear")])["AttackWeights"], [0, 0, 100])
+	codes = dict ((ref, GemRB.GetItem (ref)["AnimationType"].upper ()) for ref in ("FNTCLUB", "FNTDAGR", "FNTSTAF", "FNTHAXE", "FNTSPEAR", "FNTLSWD", "FNTSLING", "FNTPFORK", "FNTSWD2", "FNTBOW", "FNTXBOW", "FNTSLGS", "FNTSHLD", "FNTKHAT", "FNTNHLM", "FNTCAP", "FNTFHLM"))
+	_Check ("looks2: the items' animation codes (art/sprites engine_rows.md)", codes, {"FNTCLUB": "CL", "FNTDAGR": "KN", "FNTSTAF": "QS", "FNTHAXE": "AX", "FNTSPEAR": "SP", "FNTLSWD": "S1", "FNTSLING": "SL", "FNTPFORK": "PF",
+		"FNTSWD2": "S2", "FNTBOW": "BW", "FNTXBOW": "CB", "FNTSLGS": "SL", "FNTSHLD": "SH", "FNTKHAT": "KH", "FNTNHLM": "NH", "FNTCAP": "LC", "FNTFHLM": "FH"})
+	# the items' own colours on their overlays: colour byte 1 (weapon), 2 (off hand)
+	sword = rows[(False, "2h sword")]
+	_Check ("looks2: the two-handed sword's colours (metal steel 1, leather wood 51)", [(GemRB.GetPlayerStat (sword, stat) >> 8) & 0xff for stat in (IE_METAL_COLOR, IE_LEATHER_COLOR)], [1, 51])
+	shielded = rows[(True, "staff+shield")]
+	_Check ("looks2: the shield's colours (off hand: metal iron 0, leather wood 51)", [(GemRB.GetPlayerStat (shielded, stat) >> 16) & 0xff for stat in (IE_METAL_COLOR, IE_LEATHER_COLOR)], [0, 51])
+	gids = list (rows.values ())
+	_Play (gids, IE_ANI_READY)
+	yield
+	_LooksShot ("weapons_ready", middle)
+	for face, label in ((0, "s"), (4, "w"), (8, "n"), (12, "e")):
+		_Face (gids, face)
+		yield
+		for (female, name), gid in rows.items ():
+			_Play ([gid], SEQ_SHOOT if name in RANGED else SEQ_ATTACK)
+		t0 = _Ticks ()
+		yield
+		if face == 0:
+			stances = dict ((name, GemRB.GetDCCStats (gid)["Stance"]) for (female, name), gid in rows.items () if not female)
+			_Log ("looks2: a step is %d ticks; the men's stances %s" % (_Ticks () - t0, stances))
+		_LooksShot ("weapons_attack_%s" % label, middle)
+		yield
+		yield
+	_Check ("looks2: the spear and pitchfork thrust (jab), behind a shield too; bow, crossbow and sling shoot", [stances[n] for n in ("spear", "spear+shield", "pitchfork", "bow", "crossbow", "sling")], [SEQ_JAB] * 3 + [SEQ_SHOOT] * 3)
+	_Face (gids, 2)
+	yield
+	_Play (gids, SEQ_DIE)
+	yield from _Wait (lambda: all (GemRB.GetDCCStats (gid)["Stance"] == IE_ANI_TWITCH for gid in gids), 20)
+	_Check ("looks2: everyone lying (die, then twitch)", sorted (set (GemRB.GetDCCStats (gid)["Stance"] for gid in gids)), [IE_ANI_TWITCH])
+	_LooksShot ("weapons_dead", middle)
+	_Clear ()
+	yield
+
+	# 2. the spear's thrust from the five drawn facings (S to N; the rest are mirrored), the free off hand (A6) and
+	# behind a shield (A5), two columns apart; a capture per rig
+	spear = [("weapon", "FNTSPEAR")]
+	guarded = spear + [("shield", "FNTSHLD")]
+	for rig, female in (("m", False), ("f", True)):
+		gids = []
+		for row, items in enumerate ((spear, guarded)):
+			for column, face in enumerate ((0, 2, 4, 6, 8)): # the other facings are their mirror images
+				gids.append (_Mannequin (female, 2 * column, row, 3 if not female else 9, 0, items, face))
+		yield
+		yield
+		_Play (gids, IE_ANI_READY)
+		yield
+		_LooksShot ("spear_%s_ready" % rig, gids[2])
+		_Play (gids, SEQ_ATTACK)
+		yield
+		_Check ("looks2: the %s thrusts (jab) on every facing" % ("women" if female else "men"), sorted (set (GemRB.GetDCCStats (gid)["Stance"] for gid in gids)), [SEQ_JAB])
+		_LooksShot ("spear_%s_thrust" % rig, gids[2])
+		_Clear ()
+		yield
+
+	# 3. every hair style and beard on its own rig: male hair 1-7 and the beards alone; hair with a beard and
+	# the female styles 8-13
+	looks = [(False, h, 0) for h in range (1, 8)] + [(False, 0, b) for b in (1, 2, 3)]
+	looks += [(False, 4, 1), (False, 6, 2), (False, 7, 3), (False, 2, 1)] + [(True, h, 0) for h in range (8, 14)]
+	gids = [_Mannequin (female, i % 10, i // 10, hair, beard, hairColour = 41 if not female else 42) for i, (female, hair, beard) in enumerate (looks)]
+	yield
+	yield
+	expected = [("HP", ""), ("HA", ""), ("HZ", ""), ("HD", ""), ("HM", ""), ("HT", ""), ("HS", ""), ("", "BD"), ("", "BM"), ("", "BC"),
+		("HD", "BD"), ("HT", "BM"), ("HS", "BC"), ("HA", "BD"), ("HO", ""), ("HN", ""), ("HY", ""), ("HL", ""), ("HR", ""), ("HQ", "")]
+	_Check ("looks2: the hair and beard overlays", [(GemRB.GetDCCStats (gid)["HairOverlay"], GemRB.GetDCCStats (gid)["BeardOverlay"]) for gid in gids], expected)
+	for face, label in ((0, "s"), (4, "w"), (8, "n"), (14, "se")):
+		_Face (gids, face)
+		yield
+		_LooksShot ("hair_%s" % label, gids[4])
+	_Clear ()
+	yield
+
+	# 4. each helmet over hair: the long styles show their cropped copy under it, the short ones nothing, a beard
+	# stays; two helmets a capture
+	wearers = [(False, 6, 1), (False, 4, 0), (False, 3, 3), (True, 11, 0), (True, 12, 0), (True, 13, 0), (True, 8, 0), (True, 9, 0)]
+	for pair in (("FNTKHAT", "FNTNHLM"), ("FNTCAP", "FNTFHLM")):
+		gids = []
+		for row, helmet in enumerate (pair):
+			for column, (female, hair, beard) in enumerate (wearers):
+				gids.append (_Mannequin (female, column, row, hair, beard, [("helmet", helmet)], hairColour = 41 if not female else 42))
+		yield
+		yield
+		under = [(GemRB.GetDCCStats (gid)["HairOverlay"], GemRB.GetDCCStats (gid)["BeardOverlay"]) for gid in gids[:len (wearers)]]
+		_Check ("looks2: under a helmet (the cropped styles, beards kept)", under, [("XT", "BD"), ("XD", ""), ("", "BC"), ("XL", ""), ("XR", ""), ("XQ", ""), ("XO", ""), ("", "")])
+		if pair[0] == "FNTKHAT":
+			_Check ("looks2: the helmets' colours (byte 3: kettle hat dark iron 2, nasal helm steel 1)", [(GemRB.GetPlayerStat (gids[i * len (wearers)], IE_METAL_COLOR) >> 24) & 0xff for i in (0, 1)], [2, 1])
+		else:
+			_Check ("looks2: the helmets' colours (byte 3: the cap brown leather 47; the full helm steel 1, dark leather 48)", [(GemRB.GetPlayerStat (gids[0], IE_LEATHER_COLOR) >> 24) & 0xff, (GemRB.GetPlayerStat (gids[len (wearers)], IE_METAL_COLOR) >> 24) & 0xff, (GemRB.GetPlayerStat (gids[len (wearers)], IE_LEATHER_COLOR) >> 24) & 0xff], [47, 1, 48])
+		tag = "kh_nh" if pair[0] == "FNTKHAT" else "lc_fh"
+		for face, label in ((0, "s"), (4, "w"), (8, "n")):
+			_Face (gids, face)
+			yield
+			_LooksShot ("helmets_%s_%s" % (tag, label), gids[3])
+		_Clear ()
+		yield
+
+	# 5. colours: the ten hair rows on a man (mohawk, full beard) and a woman (long hair)
+	gids = [_Mannequin (False, column, 0, 5, 1, hairColour = 36 + column) for column in range (10)]
+	gids += [_Mannequin (True, column, 1, 11, 0, hairColour = 36 + column) for column in range (10)]
+	yield
+	yield
+	_Check ("looks2: hair colours", [GemRB.GetPlayerStat (gid, IE_HAIR_COLOR) & 0xff for gid in gids[:10]], list (range (36, 46)))
+	for face, label in ((0, "s"), (4, "w")):
+		_Face (gids, face)
+		yield
+		_LooksShot ("haircolours_%s" % label, gids[4])
+	_Clear ()
+	yield
+	# the items keep their own colours whatever the body's: a spear's wooden shaft on two leather colours, the
+	# longsword's steel blade, the sling's leather, shield, helmets
+	items = [[("weapon", "FNTSPEAR")], [("weapon", "FNTSPEAR")], [("weapon", "FNTLSWD")], [("weapon", "FNTSLGS"), ("quiver", "FNTBULL")],
+		[("weapon", "FNTCLUB"), ("shield", "FNTSHLD")], [("weapon", "FNTHAXE")], [("weapon", "FNTDAGR")], [("helmet", "FNTKHAT")], [("helmet", "FNTNHLM")], [("helmet", "FNTCAP")], [("helmet", "FNTFHLM")]]
+	worn = [_Mannequin (column % 2 == 1, column % 6, column // 6, 3 if column % 2 == 0 else 8, 0, kit) for column, kit in enumerate (items)]
+	GemRB.SetPlayerStat (worn[0], IE_LEATHER_COLOR, 46)
+	GemRB.SetPlayerStat (worn[1], IE_LEATHER_COLOR, 50)
+	yield
+	yield
+	_Check ("looks2: the spear's shaft stays wood (byte 1) on bodies in leather 46 and 50", [((GemRB.GetPlayerStat (gid, IE_LEATHER_COLOR) & 0xff), (GemRB.GetPlayerStat (gid, IE_LEATHER_COLOR) >> 8) & 0xff) for gid in worn[:2]], [(46, 51), (50, 51)])
+	_Play (worn, IE_ANI_READY)
+	yield
+	_LooksShot ("itemcolours", worn[2])
+	_Clear ()
+	yield
+
+	if not wasOn:
+		GemRB.GameSetScreenFlags (GS_PARTYAI, OP_NAND)
+	else:
+		GemRB.GameSetScreenFlags (GS_PARTYAI, OP_OR)
+	_Block (pcs)
+	yield
+
 def _ClassPicks ():
 	"""5: the level-1 class picks: spells by class and level, substitutes, open slots, choices"""
 	import DCCLearn
@@ -805,8 +1051,8 @@ def _ExpectedSummary ():
 	return text + (", %d dying" % dying if dying else "") + (", %d dead" % dead if dead else "")
 
 def _HeldStances ():
-	"""a weapon held in both hands though one-handed in DCC (dcchold.2da; the autotest's copy lists
-	FNTSPEAR): Wyn's spear takes the two-handed stances with her off hand free, its ITM's 100% thrust
+	"""a weapon held in both hands though one-handed in DCC (dcchold.2da's SP row: FNTSPEAR's animation
+	code, S3): Wyn's spear takes the two-handed stances with her off hand free, its ITM's 100% thrust
 	picking the two-handed jab (A6); the rules still see a one-handed weapon (d20 initiative). A club
 	keeps the one-handed files"""
 	wyn = _Slot ("fntwyn")
@@ -1189,6 +1435,7 @@ SCENARIOS = (
 	("encumbrance", _Encumbrance), # b
 	("linetravel", _LineTravel), # c
 	("sprites", _Sprites), # M2.11: the peasant sprites, with screenshots
+	("looks2", _Looks2), # S3/S4: weapon, shield, helmet, hair and beard overlays on both rigs, with screenshots
 	("classpicks", _ClassPicks), # 5
 	("skills", _Skills), # M3.4: occupation skills: checks from Python, the world, a dialog; Luck; the sheet
 	("prompts", _Prompts), # 6
