@@ -7049,6 +7049,8 @@ static PyObject* GemRB_GetDCCStats(PyObject* /*self*/, PyObject* args)
 	DictInt(dict, "God", actor->GetBase(IE_DCC_GOD));
 	const DCC::God* god = rules ? rules->gods.Find(int(actor->GetBase(IE_DCC_GOD))) : nullptr;
 	PyDict_SetItemString(dict, "GodName", DecRef(PyString_FromString, god ? god->name.c_str() : ""));
+	PyDict_SetItemString(dict, "GodDomain", DecRef(PyString_FromString, god ? god->domain.c_str() : ""));
+	PyDict_SetItemString(dict, "GodDCC", DecRef(PyString_FromString, god ? god->dcc.c_str() : ""));
 	DictInt(dict, "AlignmentCode", DCC::AlignmentCode(actor->GetStat(IE_ALIGNMENT)));
 	const CharAnimations* looks = actor->GetAnims();
 	PyDict_SetItemString(dict, "HairOverlay", DecRef(PyString_FromString, looks ? looks->GetHairRef().c_str() : ""));

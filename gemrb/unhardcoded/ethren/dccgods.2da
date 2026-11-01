@@ -1,26 +1,27 @@
 2DA V1.0
 *
-# ethren (M3.3): the gods a cleric may serve, by alignment (docs/rules/classes.md, "Gods"). A cleric's god
-# must share its alignment: the level-1 class pick offers the gods of the character's alignment, and an
-# alignment change at level 0 drops a god of another one. ID is the CRE extension's CHAR god (IE_DCC_GOD);
-# ALIGN L, N or C; NAME with _ for spaces. The game's own pantheon replaces this list when it is written.
-             ID  ALIGN  NAME
-SHUL         1   L      Shul
-KLAZATH      2   L      Klazath
-ULESH        3   L      Ulesh
-CHORANUS     4   L      Choranus
-DAENTHAR     5   L      Daenthar
-GORHAN       6   L      Gorhan
-JUSTICIA     7   L      Justicia
-ARISTEMIS    8   L      Aristemis
-AMUN_TOR     9   N      Amun_Tor
-ILDAVIR      10  N      Ildavir
-PELAGIA      11  N      Pelagia
-CTHULHU      12  N      Cthulhu
-AHRIMAN      13  C      Ahriman
-HIDDEN_LORD  14  C      The_Hidden_Lord
-AZI_DAHAKA   15  C      Azi_Dahaka
-BOBUGBUBILZ  16  C      Bobugbubilz
-CADIXTAT     17  C      Cadixtat
-NIMLURUN     18  C      Nimlurun
-MALOTOCH     19  C      Malotoch
+# ethren: the gods a cleric may serve, by alignment: the Estaronan pantheon (docs/world/ethren.md, "The
+# pantheon"; docs/rules/classes.md, "Gods"). A cleric's god must share its alignment: the level-1 class pick
+# offers the gods of the character's alignment, and an alignment change at level 0 drops a god of another one.
+# ID is the CRE extension's CHAR god (IE_DCC_GOD), in the pantheon's order; ALIGN L, N or C (Ethren's own, not
+# the DCC equivalent's: Turil is neutral though Aristemis is lawful); NAME with _ for spaces; DCC the DCC core
+# god it stands in for, whose weapons, unholy creatures and disapproval it takes (a key, _ for spaces); DOMAIN
+# what it is the god of (shown at the class pick), _ for spaces.
+                   ID  ALIGN  NAME               DCC              DOMAIN
+LOM                1   L      Lom                Ulesh            peace,_calm
+CYFAWNDER          2   L      Cyfawnder          Justicia         justice
+COGADA             3   L      Cogada             Klazath          war
+BHIFACE            4   L      Bhiface            Gorhan           vengeance,_chivalry
+LENYARIL           5   L      Lenyaril           Choranus         sun,_creation,_life,_healing
+HAUL               6   L      Haul               Shul             moon,_knowledge,_history
+MAELOR             7   N      Maelor             Ildavir          forests,_nature
+AIGEYA             8   N      Aigeya             Pelagia          sea
+TURIL              9   N      Turil              Aristemis        luck
+MASCREF            10  N      Mascref            Daenthar         merchants,_craft
+HUDREY             11  N      Hudrey             Cthulhu          magic
+NASEEN             12  C      Naseen             Azi_Dahaka       wind,_storms
+OLYKA              13  C      Olyka              Amun_Tor         misfortune,_trickery
+WOLAETH            14  C      Wolaeth            Ahriman          death,_dark_magic
+BUUDRED            15  C      Buudred            Bobugbubilz      demon_prince_of_gluttony
+HEMLIGET           16  C      Hemliget           The_Hidden_Lord  archdevil_of_secrets_and_lies
+MORGEN_WINDWALKER  17  C      Morgen_Windwalker  Three_Fates      freedom,_the_traveller

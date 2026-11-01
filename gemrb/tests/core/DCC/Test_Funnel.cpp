@@ -16,10 +16,11 @@ namespace DCC {
 static GodTable SomeGods()
 {
 	GodTable gods;
-	gods.Set({ 1, Alignment::Lawful, "Shul" });
-	gods.Set({ 2, Alignment::Lawful, "Klazath" });
-	gods.Set({ 9, Alignment::Neutral, "Amun Tor" });
-	gods.Set({ 13, Alignment::Chaotic, "Ahriman" });
+	// some of the Estaronan pantheon (dccgods.2da), with the DCC core gods they stand in for
+	gods.Set({ 1, Alignment::Lawful, "Lom", "Ulesh", "peace, calm" });
+	gods.Set({ 2, Alignment::Lawful, "Cyfawnder", "Justicia", "justice" });
+	gods.Set({ 9, Alignment::Neutral, "Turil", "Aristemis", "luck" }); // neutral, though Aristemis is lawful
+	gods.Set({ 13, Alignment::Chaotic, "Olyka", "Amun_Tor", "misfortune, trickery" });
 	return gods;
 }
 
@@ -28,7 +29,10 @@ TEST(DCC_Funnel, GodsByAlignment)
 	GodTable gods = SomeGods();
 	EXPECT_FALSE(gods.Empty());
 	ASSERT_TRUE(gods.Find(9));
-	EXPECT_EQ(gods.Find(9)->name, "Amun Tor");
+	EXPECT_EQ(gods.Find(9)->name, "Turil");
+	EXPECT_EQ(gods.Find(9)->dcc, "Aristemis");
+	EXPECT_EQ(gods.Find(9)->domain, "luck");
+	EXPECT_EQ(gods.Find(9)->alignment, Alignment::Neutral);
 	EXPECT_FALSE(gods.Find(0));
 	EXPECT_FALSE(gods.Find(5));
 	auto lawful = gods.For(Alignment::Lawful);
@@ -40,8 +44,8 @@ TEST(DCC_Funnel, GodsByAlignment)
 	EXPECT_EQ(gods.Default(Alignment::Chaotic), 13);
 	EXPECT_EQ(GodTable().Default(Alignment::Neutral), 0);
 	// a later Set with the same id replaces it
-	gods.Set({ 2, Alignment::Lawful, "Justicia" });
-	EXPECT_EQ(gods.Find(2)->name, "Justicia");
+	gods.Set({ 2, Alignment::Lawful, "Cogada", "Klazath", "war" });
+	EXPECT_EQ(gods.Find(2)->name, "Cogada");
 	EXPECT_EQ(gods.For(Alignment::Lawful).size(), 2u);
 }
 

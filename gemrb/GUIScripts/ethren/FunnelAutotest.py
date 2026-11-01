@@ -1270,6 +1270,8 @@ def _StepRolled ():
 ChooseSteps = None
 ReserveSteps = None
 
+WOLAETH = 14 # dccgods.2da: the chaotic god of death and dark magic, the DCC Ahriman
+
 def _Funnel (pc):
 	return GemRB.GetDCCFunnel (pc)["Funnel"]
 
@@ -1397,18 +1399,20 @@ def _Choose ():
 			want, alignment, god = ClassPick.Last["Choice"]["Class"], None, None
 			_Check ("class pick: a demihuman takes its own class", len (ClassPick.Last["Classes"]), 1)
 		elif index == 0:
-			want, alignment, god = 3, 3, 13 # a chaotic cleric of Ahriman
+			want, alignment, god = 3, 3, WOLAETH # a chaotic cleric of Wolaeth (the Ethren Ahriman)
 		elif index == 1:
 			want, alignment, god = 1, None, None # a wizard
 		else:
 			want, alignment, god = 2 if index == 2 else 4, None, None
 		valid = ClassPick.Choose (want, alignment, god)
 		if index == 0:
-			_Check ("class pick: the cleric's gods are its alignment's", ClassPick.Last["Gods"], [name for i, name in FunnelChoose.GodsFor (ChooseFour.Tables ()["dccgods"], 3)])
+			chaotic = FunnelChoose.GodsFor (ChooseFour.Tables ()["dccgods"], 3)
+			_Check ("class pick: the cleric's gods are its alignment's (the Ethren pantheon)", ClassPick.Last["Gods"], ["Naseen", "Olyka", "Wolaeth", "Buudred", "Hemliget", "Morgen Windwalker"])
+			_Check ("class pick: each god's button names its domain on hover, the info line the chosen one's", [ClassPick.Last["GodLines"][2], "Wolaeth, god of death, dark magic" in ClassPick.Last["Info"]], ["Wolaeth, god of death, dark magic", True])
 			ClassPick.SetAlignment (1)
-			_Check ("class pick: a lawful cleric can't keep Ahriman (the god follows)", [ClassPick.Choice["God"], ClassPick.Last["Valid"]], [0, False])
+			_Check ("class pick: a lawful cleric can't keep Wolaeth (the god follows)", [ClassPick.Choice["God"], ClassPick.Last["Valid"]], [0, False])
 			ClassPick.SetAlignment (3)
-			ClassPick.SetGod (0)
+			ClassPick.SetGod ([i for i, name in chaotic].index (WOLAETH))
 			valid = ClassPick.Last["Valid"]
 			_ShotScreen ("class_pick")
 		_Check ("class pick %d: valid" % (index + 1), valid, True)
@@ -1423,8 +1427,8 @@ def _Choose ():
 	cleric = Saved["picks"][0]
 	stats = GemRB.GetDCCStats (cleric)
 	if GemRB.GetPlayerStat (cleric, IE_RACE) == 1:
-		_Check ("the cleric: chaotic, of Ahriman", [stats["AlignmentCode"], stats["God"], stats["GodName"]], [3, 13, "Ahriman"])
-		_Check ("the cleric's sheet names its god", "serves Ahriman" in DCCSheet.Lines (cleric)[0], True)
+		_Check ("the cleric: chaotic, of Wolaeth (death, dark magic; the DCC Ahriman's mechanics)", [stats["AlignmentCode"], stats["God"], stats["GodName"], stats["GodDomain"], stats["GodDCC"]], [3, WOLAETH, "Wolaeth", "death, dark magic", "Ahriman"])
+		_Check ("the cleric's sheet names its god", "serves Wolaeth" in DCCSheet.Lines (cleric)[0], True)
 		_Check ("alignment is fixed past level 0", GemRB.DCCSetAlignment (cleric, 1), False)
 	Saved["classes"] = classes
 	# the end screen, once every pick is made
