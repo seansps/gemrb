@@ -93,6 +93,7 @@ def _Tables ():
 
 def RollAll ():
 	global Cards
+	Options.ammo = int (StartValue ("AMMO", "0") or 0)
 	Cards = FunnelRoll.RollAll (FunnelRoll.EngineDie, _Tables (), PartySize (), Options)
 	NamesToShow.update (range (len (Cards)))
 	_Log ("rolled %d (%s)" % (len (Cards), "4d6 drop the lowest" if Options.fourDice else "3d6 in order"))

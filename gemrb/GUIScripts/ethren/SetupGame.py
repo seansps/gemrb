@@ -45,6 +45,7 @@ def OnLoad():
 def _Log (text):
 	print ("[Funnel] " + text)
 
+LAUNCHER_AMMO = (5, 14, 31) # arrows, bullets (sling stones), bolts: the item types that go in a quiver
 COLOR_STATS = (IE_METAL_COLOR, IE_MINOR_COLOR, IE_MAJOR_COLOR, IE_SKIN_COLOR, IE_LEATHER_COLOR, IE_ARMOR_COLOR, IE_HAIR_COLOR)
 SCORE_STATS = (IE_STR, IE_DEX, IE_CON, IE_CHR, IE_INT, IE_DCC_LUCK) # Str Agi Sta Per Int Luck
 
@@ -92,10 +93,20 @@ def CreatePeasant (card, template, owner = -1):
 	for stat, colour in zip (COLOR_STATS, looks["Colors"]):
 		GemRB.SetPlayerStat (pc, stat, colour)
 	GemRB.DCCSetLooks (pc, looks["Hair"], looks["Beard"])
-	# the occupation's things: the weapon (DCCSetOccupation puts it in hand), ammunition in the quiver
-	weapon = _GiveItem (pc, card, card["WeaponItem"], card["WeaponName"])
-	if card["Ammo"]:
-		_GiveItem (pc, card, card["AmmoItem"], "%d %s" % (card["Ammo"], card["AmmoName"]), SLOT_QUIVER, card["Ammo"])
+	# the occupation's things: the weapon (DCCSetOccupation puts it in hand) and its ammunition: a
+	# launcher's (arrows, bolts, sling stones) in the quiver; thrown darts on the dart in hand (one stack),
+	# or in the pack beside a weapon that only throws like one (the quill)
+	ammo, count = card["AmmoItem"], card["Ammo"]
+	if count and ammo == card["WeaponItem"]:
+		weapon = _GiveItem (pc, card, card["WeaponItem"], "%s and %d more" % (card["WeaponName"], count), None, count + 1)
+	else:
+		weapon = _GiveItem (pc, card, card["WeaponItem"], card["WeaponName"])
+		if count and ammo:
+			what = "%d %s" % (count, card["AmmoName"])
+			if GemRB.HasResource (ammo, RES_ITM, 1) and GemRB.GetItem (ammo)["Type"] in LAUNCHER_AMMO:
+				_GiveItem (pc, card, ammo, what, SLOT_QUIVER, count)
+			else:
+				_GiveItem (pc, card, ammo, what, None, count)
 	good = ""
 	if not card["GoodCopper"]:
 		good = _GiveItem (pc, card, card["GoodItem"], card["GoodName"])

@@ -103,9 +103,10 @@ def EngineDie (sides):
 
 class Options (object):
 	"""the rolling screen's house rules, both off by default (ui-design.md, "Funnel screens")"""
-	def __init__ (self, rerollOne = False, fourDice = False):
+	def __init__ (self, rerollOne = False, fourDice = False, ammo = 0):
 		self.rerollOne = rerollOne # reroll a single card
 		self.fourDice = fourDice # 4d6, drop the lowest, for each ability
+		self.ammo = ammo # a missile weapon's ammunition: 0 the book's 1d6, else this many (dccstart.2da AMMO)
 
 def AbilityMod (tables, score):
 	"""abilmod.2da: the DCC curve (3: -3 ... 18: +3)"""
@@ -136,7 +137,7 @@ def ItemName (tables, key, weapon = False):
 		name += " (as %s)" % items.Text (key, "AS")
 	return name
 
-def RollOccupation (die, tables, earlier):
+def RollOccupation (die, tables, earlier, ammoCount = 0):
 	"""Table 1-3 with its sub-rolls. earlier: the occupation ids of the cards already rolled (a
 	duplicate farmer or herder gets another animal). Returns the card's occupation part."""
 	occupations, items = tables["dccoccup"], tables["dccoccit"]
@@ -183,7 +184,7 @@ def RollOccupation (die, tables, earlier):
 		card["GoodName"] += " (%s)" % items.Text ("CART_%d" % sub, "NAME")
 	ammo = items.Get (weapon, "AMMO")
 	if ammo:
-		card["Ammo"] = die (6)
+		card["Ammo"] = ammoCount or die (6)
 		card["AmmoName"] = items.Text (ammo, "NAME")
 		card["AmmoItem"] = (items.Get (ammo, "ITEM") or "").lower ()
 	return card
@@ -269,7 +270,7 @@ def RollCard (die, tables, order, options = None, earlier = (), taken = ()):
 	scores = [RollAbility (die, options.fourDice) for ability in ABILITIES]
 	mods = [AbilityMod (tables, score) for score in scores]
 	card = {"Order": order, "Name": name, "Sex": sex, "Scores": scores, "Mods": mods}
-	card.update (RollOccupation (die, tables, earlier))
+	card.update (RollOccupation (die, tables, earlier, options.ammo))
 	augurs = tables["dccaugur"]
 	augur = die (30)
 	card["Augur"] = augur

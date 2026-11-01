@@ -138,6 +138,9 @@ class FunnelRollTest (unittest.TestCase):
 		occ = FunnelRoll.RollOccupation (Scripted (self, [30, 2]), TABLES, [])
 		self.assertEqual ([occ["WeaponName"], occ["Ammo"], occ["AmmoName"], occ["Race"]], ["Quill (as dart)", 2, "darts", 2])
 		self.assertEqual (FunnelRoll.GearLine (occ), "Quill (as dart), 2 darts; Book")
+		# a game's own count (dccstart.2da AMMO, Ethren's 20): no die rolled for it
+		occ = FunnelRoll.RollOccupation (Scripted (self, [53]), TABLES, [], 20)
+		self.assertEqual ([occ["WeaponName"], occ["Ammo"]], ["Sling", 20])
 		# money as a trade good
 		occ = FunnelRoll.RollOccupation (Scripted (self, [62]), TABLES, [])
 		self.assertEqual ([occ["GoodCopper"], occ["Race"]], [800, 5])
