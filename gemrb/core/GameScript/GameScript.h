@@ -776,6 +776,11 @@ public: //Script Functions
 	static int XP(Scriptable* Sender, const Trigger* parameters);
 	static int XPGT(Scriptable* Sender, const Trigger* parameters);
 	static int XPLT(Scriptable* Sender, const Trigger* parameters);
+	// DCC (DCCScript.cpp): occupation skill checks (M3.4)
+	static int DCCSkillCheck(Scriptable* Sender, const Trigger* parameters);
+	static int DCCPartySkillCheck(Scriptable* Sender, const Trigger* parameters);
+	static int DCCHasSkill(Scriptable* Sender, const Trigger* parameters);
+	static int DCCPartyHasSkill(Scriptable* Sender, const Trigger* parameters);
 
 	//Actions
 	static void Activate(Scriptable* Sender, Holder<Action> parameters);
@@ -1299,6 +1304,10 @@ public: //Script Functions
 	static void Weather(Scriptable* Sender, Holder<Action> parameters);
 	static void XEquipItem(Scriptable* Sender, Holder<Action> parameters);
 	static void ZoomLock(Scriptable* Sender, Holder<Action> parameters);
+	// DCC (DCCScript.cpp): occupation skill checks (M3.4)
+	static void DCCSkillCheck(Scriptable* Sender, Holder<Action> parameters);
+	static void DCCPartySkillCheck(Scriptable* Sender, Holder<Action> parameters);
+	static void DCCAddSkill(Scriptable* Sender, Holder<Action> parameters);
 
 	//Objects
 	static Targets* BestAC(const Scriptable* Sender, Targets* parameters, int ga_flags);

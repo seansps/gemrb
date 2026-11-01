@@ -1,0 +1,40 @@
+2DA V1.0
+*
+# ethren (M3.4): the occupation skill tags (docs/rules/funnel.md, "Ethren design proposal: occupation skills"),
+# rows in the order of the OCCU record's bits (DCC::OccupationSkill, ANIMALS bit 0 .. COOKING bit 29). ABILITY is
+# the tag's default ability (a check that asks for DEFAULT), FAMILIAR the tags that give some familiarity
+# (d10 + 2, the book's "miller knows a little about seeds"), THIEF the Table 1-9 skill the tag overlaps (a thief
+# of level 1+ adds its bonus there), CAP the highest DC occupation training reaches in it (classes.md: a
+# locksmith who isn't a thief picks simple locks trained, up to DC 10; d10 + 2 past it). NAME and USES are what
+# the record sheet shows; _ for spaces, * for none.
+                 ABILITY  FAMILIAR                          THIEF        CAP  NAME             USES
+ANIMALS          PER      OUTDOORS|FARMING|BUTCHERY         *            *    Animals          handling,_riding,_calming_beasts
+FARMING          INT      HERBALISM|ANIMALS|COOKING         *            *    Farming          crops,_seeds,_weather,_soil
+HERBALISM        INT      FARMING|MEDICINE|ALCHEMY|OUTDOORS *            *    Herbalism        plants,_poultices,_poisons_from_plants
+MEDICINE         INT      HERBALISM|BUTCHERY|ALCHEMY        *            *    Medicine         wounds,_disease
+ALCHEMY          INT      HERBALISM|MEDICINE|LORE_ARCANE    *            *    Alchemy          reagents,_oils,_acids
+SMITHING         STR      MINING|LOCKS|MILITARY             *            *    Smithing         metal,_weapons,_armor_quality
+MASONRY          INT      MINING|DIGGING|CARPENTRY          *            *    Masonry          stone,_construction,_structural_weakness
+CARPENTRY        AGI      MASONRY|CRAFT_FINE                *            *    Carpentry        wood,_barrels,_carts,_doors
+MINING           INT      MASONRY|DIGGING|SMITHING          *            *    Mining           tunnels,_ore,_cave-ins,_underground_direction
+CRAFT_FINE       AGI      APPRAISAL|CARPENTRY               *            *    Craft_(fine)     jewelry,_glass,_clothing,_leather
+APPRAISAL        INT      HAGGLE|CRAFT_FINE|SMITHING        *            *    Appraisal        the_value_of_goods,_gems,_art
+HAGGLE           PER      APPRAISAL|DECEPTION               *            *    Haggling         trade,_prices,_bargaining
+LOCKS            AGI      SMITHING|CARPENTRY|STEALTH_STREET PICK_LOCK    10   Locks            simple_locks,_mechanisms
+STEALTH_STREET   AGI      DECEPTION|LOCKS                   PICK_POCKET  10   Street_stealth   pickpocketing,_cons,_urban_sneaking
+DECEPTION        PER      STEALTH_STREET|PERFORMANCE|HAGGLE *            *    Deception        lies,_disguise,_gambling_tells
+PERFORMANCE      PER      DECEPTION|NOBILITY                *            *    Performance      music,_jest,_distraction
+LORE_RELIGION    INT      LORE_ARCANE|LETTERS               *            *    Religion         gods,_rites,_holy_symbols
+LORE_ARCANE      INT      LORE_RELIGION|LORE_STARS|ALCHEMY  *            *    Arcana           magic_writing,_sigils,_grimoires
+LORE_STARS       INT      LORE_ARCANE|SEA                   *            *    Stars            astrology,_navigation_by_stars,_calendars
+LETTERS          INT      LORE_ARCANE|NOBILITY              *            *    Letters          reading,_writing,_documents,_law
+NOBILITY         PER      LETTERS|MILITARY|PERFORMANCE      *            *    Nobility         etiquette,_heraldry,_courts
+MILITARY         INT      NOBILITY|SMITHING|OUTDOORS        *            *    Military         tactics,_ranks,_fortifications,_drill
+OUTDOORS         INT      ANIMALS|HERBALISM|CLIMB           *            *    Outdoors         tracking,_hunting,_foraging,_trapping
+SEA              STR      ROPE|CLIMB|LORE_STARS             *            *    Sea              boats,_swimming,_knots,_weather_at_sea
+CLIMB            STR      ROPE|OUTDOORS|SEA                 CLIMB        *    Climbing         trees,_rigging,_cliffs
+DIGGING          STR      MINING|MASONRY|FILTH              *            *    Digging          excavation,_graves,_ditches
+FILTH            STA      DIGGING|MEDICINE                  *            *    Filth            sewers,_middens,_night_soil,_avoiding_disease
+BUTCHERY         INT      COOKING|ANIMALS|MEDICINE          *            *    Butchery         anatomy,_meat,_carcasses
+ROPE             AGI      SEA|CLIMB                         *            *    Rope             rope_work,_knots,_rigging
+COOKING          INT      BUTCHERY|FARMING                  *            *    Cooking          food,_brewing,_cheese,_honey

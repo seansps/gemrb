@@ -27,6 +27,7 @@
 #include "DCC/Looks.h"
 #include "DCC/Learning.h"
 #include "DCC/Magic.h"
+#include "DCC/Skills.h"
 
 #include <array>
 #include <map>
@@ -88,6 +89,8 @@ public:
 	HairTable hair; // M2.11: the hair and beard overlays (dcchair.2da)
 	GodTable gods; // M3.3: the gods a cleric may serve by alignment (dccgods.2da)
 	HeldTable held; // weapons held in both hands though one-handed in DCC, for their animation (dcchold.2da)
+	SkillTable skills; // M3.4: the occupation skill tags (dccskill.2da)
+	OccupationTable occupations; // M3.4: Table 1-3's names and tags (dccoccup.2da)
 
 	/** loads every table through gamedata; logs and returns false if one is missing or bad */
 	bool Load();

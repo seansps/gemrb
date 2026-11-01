@@ -119,6 +119,11 @@ def Lines (pc):
 			if key in stats["Skills"]:
 				value = stats["Skills"][key]
 				lines.append ("%-23s %s" % (label, ("d%d" % value) if key == "SCROLL_DIE" else Signed (value)))
+	# M3.4: the occupation and its skill tags
+	skills = SkillLines (pc, stats)
+	if skills:
+		lines.append ("")
+		lines.extend (skills)
 	import DCCLuck
 	extra = DCCLuck.Lines (stats)
 	if extra:
@@ -133,6 +138,15 @@ def Lines (pc):
 	lines.append ("On its own (party AI): " + PartyAIWords.get (stats["PartyAI"], "?"))
 	lines.append ("States: " + StateNames (stats["States"]))
 	return lines
+
+def SkillLines (pc, stats = None):
+	"""the occupation and its skill tags (M3.4): trained d20, familiar d10+2, the rest d10"""
+	import DCCSkills
+	stats = stats or GemRB.GetDCCStats (pc)
+	if not stats or not stats["Character"]:
+		return []
+	record = GemRB.GetDCCFunnel (pc)["Occupation"]
+	return DCCSkills.SheetLines (DCCSkills.Tables (), record, stats["Level"])
 
 def Compact (pc):
 	"""one line for logs"""
@@ -154,4 +168,6 @@ def Compact (pc):
 	]
 	if stats["Skills"]:
 		parts.append ("skills " + " ".join ("%s%s" % (key, Signed (stats["Skills"][key])) for key, label in SkillNames if key in stats["Skills"] and key != "SCROLL_DIE"))
+	import DCCSkills
+	parts.append (DCCSkills.Compact (GemRB.GetDCCFunnel (pc)["Occupation"]))
 	return " | ".join (parts)

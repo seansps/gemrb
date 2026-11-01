@@ -141,6 +141,11 @@ bool RulesData::Load()
 	// weapons held in both hands though one-handed in DCC: the two-handed stances (animation only)
 	table = gamedata->LoadTable("dcchold");
 	if (!table || !held.Load(*table)) fail("dcchold");
+	// M3.4: occupation skills (the tags, and the occupations that carry them)
+	table = gamedata->LoadTable("dccskill");
+	if (!table || !skills.Load(*table)) fail("dccskill");
+	table = gamedata->LoadTable("dccoccup");
+	if (!table || !occupations.Load(*table)) fail("dccoccup");
 	return ok;
 }
 

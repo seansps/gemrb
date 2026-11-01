@@ -249,6 +249,7 @@ IF (BUILD_TESTING)
     tests/core/DCC/Test_Magic.cpp
     tests/core/DCC/Test_Learning.cpp
     tests/core/DCC/Test_Looks.cpp
+    tests/core/DCC/Test_Skills.cpp
     tests/core/Test_BucketPriorityQueue.cpp
     tests/core/Test_Map.cpp
     tests/core/Test_Movement.cpp
@@ -293,6 +294,8 @@ IF (BUILD_TESTING)
     ADD_TEST(NAME Test_FunnelRoll COMMAND ${GEMRB_TEST_PYTHON} ${CMAKE_SOURCE_DIR}/gemrb/tests/GUIScripts/test_funnelroll.py)
     # M3.3: the end of the funnel's rules (GUIScripts/ethren/FunnelChoose.py)
     ADD_TEST(NAME Test_FunnelChoose COMMAND ${GEMRB_TEST_PYTHON} ${CMAKE_SOURCE_DIR}/gemrb/tests/GUIScripts/test_funnelchoose.py)
+    # M3.4: the record sheet's occupation skill lines (GUIScripts/ethren/DCCSkills.py)
+    ADD_TEST(NAME Test_DCCSkills COMMAND ${GEMRB_TEST_PYTHON} ${CMAKE_SOURCE_DIR}/gemrb/tests/GUIScripts/test_dccskills.py)
   ENDIF()
 
   ADD_CUSTOM_COMMAND(TARGET Test_gemrb_core POST_BUILD

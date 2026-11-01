@@ -8143,7 +8143,7 @@ PyDoc_STRVAR(GemRB_GetDCCFunnel__doc,
 extension's OCCU and FUNL records, Phase 3).\n\
 \n\
 **Return value:** dict: Occupation (Id, Sub, TradeGood, Weapon, LastWeapon, Skills: list of \n\
-tag names, SkillBits), Funnel (Status: 0 none, 1 alive, 2 dead, 3 chosen, 4 reserve; StatusName, \n\
+tag names, SkillBits; M3.4: Tags, the ones it rolls with, Acquired, those beyond its occupation's), Funnel (Status: 0 none, 1 alive, 2 dead, 3 chosen, 4 reserve; StatusName, \n\
 Order, Player (-1 none), ClassPending, Recovered, DiedAt, DiedIn, Killer, Cause, Place; M3.3: \n\
 Kills, NearDeaths), GlobalID, Slot (its party slot, 0 outside the party)");
 
@@ -8169,6 +8169,23 @@ static PyObject* GemRB_GetDCCFunnel(PyObject* /*self*/, PyObject* args)
 	PyDict_SetItemString(occupation, "Skills", skillList);
 	Py_DecRef(skillList);
 	DictInt(occupation, "SkillBits", long(occ.skills));
+	// M3.4: the tags it rolls with (its occupation's when the record has none) and those beyond the occupation's
+	uint32_t tags = actor->GetDCCSkills();
+	const DCC::RulesData* rules = core->GetDCCRules();
+	const DCC::OccupationInfo* own = rules ? rules->occupations.Find(occ.id) : nullptr;
+	std::vector<std::string> trained;
+	std::vector<std::string> acquired;
+	for (int bit = 0; bit < DCC::OCCUPATION_SKILL_COUNT; ++bit) {
+		if (!(tags & (1u << bit))) continue;
+		trained.emplace_back(DCC::OccupationSkillName(bit));
+		if (own && !(own->skills & (1u << bit))) acquired.emplace_back(DCC::OccupationSkillName(bit));
+	}
+	PyObject* tagList = DCCStringList(trained);
+	PyDict_SetItemString(occupation, "Tags", tagList);
+	Py_DecRef(tagList);
+	PyObject* acquiredList = DCCStringList(acquired);
+	PyDict_SetItemString(occupation, "Acquired", acquiredList);
+	Py_DecRef(acquiredList);
 	PyObject* place = PyDict_New();
 	DictInt(place, "Status", static_cast<int>(funnel.status));
 	PyDict_SetItemString(place, "StatusName", DecRef(PyUnicode_FromString, DCC::FunnelStatusName(funnel.status)));
@@ -8547,6 +8564,227 @@ static PyObject* GemRB_DCCSetOccupation(PyObject* /*self*/, PyObject* args)
 		}
 	}
 	Py_RETURN_TRUE;
+}
+
+// M3.4: occupation skill checks
+static const char* const DCCAbilityNames[] = { "Str", "Agi", "Sta", "Per", "Int", "Luck" };
+
+static PyObject* DCCSkillPlanDict(const DCC::SkillPlan& plan, int dc)
+{
+	PyObject* dict = PyDict_New();
+	PyDict_SetItemString(dict, "Training", DecRef(PyUnicode_FromString, DCC::SkillTrainingName(plan.training)));
+	DictInt(dict, "Die", plan.die);
+	DictInt(dict, "Modifier", plan.Modifier());
+	DictInt(dict, "Familiarity", plan.familiarity);
+	DictInt(dict, "ThiefBonus", plan.thiefBonus);
+	DictInt(dict, "AbilityMod", plan.abilityMod);
+	DictInt(dict, "Augur", plan.augur);
+	DictInt(dict, "Situational", plan.situational);
+	DictInt(dict, "Capped", plan.capped);
+	std::vector<std::string> matched;
+	for (int bit = 0; bit < DCC::OCCUPATION_SKILL_COUNT; ++bit) {
+		if (plan.matched & (1u << bit)) matched.emplace_back(DCC::OccupationSkillName(bit));
+	}
+	PyObject* list = DCCStringList(matched);
+	PyDict_SetItemString(dict, "Matched", list);
+	Py_DecRef(list);
+	DictInt(dict, "Successes", DCC::SkillSuccesses(plan, dc));
+	return dict;
+}
+
+static PyObject* DCCSkillResultDict(const DCC::SkillCheckResult& r)
+{
+	PyObject* dict = PyDict_New();
+	DictInt(dict, "Roller", long(r.roller));
+	const Game* game = core->GetGame();
+	const Actor* roller = game && r.roller ? game->GetActorByGlobalID(r.roller) : nullptr;
+	PyObject* name = PyString_FromStringObj(roller ? roller->GetName() : String());
+	PyDict_SetItemString(dict, "Name", name);
+	Py_DecRef(name);
+	PyDict_SetItemString(dict, "Tags", DecRef(PyUnicode_FromString, r.tags.c_str()));
+	PyDict_SetItemString(dict, "Ability", DecRef(PyUnicode_FromString, DCCAbilityNames[static_cast<int>(r.ability) % DCC::ABILITY_COUNT]));
+	PyObject* plan = DCCSkillPlanDict(r.plan, r.dc);
+	PyDict_SetItemString(dict, "Plan", plan);
+	Py_DecRef(plan);
+	PyDict_SetItemString(dict, "Training", DecRef(PyUnicode_FromString, DCC::SkillTrainingName(r.plan.training)));
+	DictInt(dict, "Die", r.plan.die);
+	DictInt(dict, "Natural", r.natural);
+	DictInt(dict, "RollMod", r.rollMod);
+	DictInt(dict, "Total", r.total);
+	DictInt(dict, "DC", r.dc);
+	DictInt(dict, "Success", r.success);
+	DictInt(dict, "Cursed", r.cursed);
+	DictInt(dict, "LuckBurned", r.luckBurned);
+	DictInt(dict, "LuckBonus", r.luckBonus);
+	DictInt(dict, "Waiting", r.waiting);
+	DictInt(dict, "Party", r.party);
+	return dict;
+}
+
+static bool DCCParseSkillTags(const char* text, DCC::SkillTags& tags)
+{
+	tags = DCC::ParseSkillTags(text ? text : "");
+	return tags.valid;
+}
+
+PyDoc_STRVAR(GemRB_GetDCCSkillPlan__doc,
+	     "===== GetDCCSkillPlan =====\n\
+\n\
+**Prototype:** GemRB.GetDCCSkillPlan (globalID, tags, ability, dc[, situational])\n\
+\n\
+**Description:** How a character would roll an occupation skill check (M3.4): tags as the \n\
+scripts write them ('SMITHING|MINING', ANYONE, UNTRAINABLE), ability 0 the tag's own (dccskill.2da) \n\
+or 1-6 Str Agi Sta Per Int Luck (dccabil.ids).\n\
+\n\
+**Return value:** dict: Training (untrained, familiar, trained, anyone, thief), Die (20 or 10), \n\
+Modifier, Familiarity, ThiefBonus, AbilityMod, Augur, Situational, Capped, Matched (tags), \n\
+Successes (the naturals that make dc); None for unknown tags");
+
+static PyObject* GemRB_GetDCCSkillPlan(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	char* text = nullptr;
+	int ability;
+	int dc;
+	int situational = 0;
+	PARSE_ARGS(args, "isii|i", &globalID, &text, &ability, &dc, &situational);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	DCC::SkillTags tags;
+	if (!core->GetDCCRules() || !DCCParseSkillTags(text, tags)) Py_RETURN_NONE;
+	return DCCSkillPlanDict(actor->DCCSkillPlan(tags, ability, dc, situational), dc);
+}
+
+PyDoc_STRVAR(GemRB_DCCSkillCheck__doc,
+	     "===== DCCSkillCheck =====\n\
+\n\
+**Prototype:** GemRB.DCCSkillCheck (globalID, tags, ability, dc[, flags[, situational[, natural[, ask]]]])\n\
+\n\
+**Description:** Rolls an occupation skill check for a character (M3.4), as the scripts' \n\
+DCCSkillCheck does: d20 trained, d10 untrained, d10+2 familiar, plus the ability's modifier; Luck by \n\
+the burn policy; the combat log and a floating line. flags: 1 deadly (a key roll), 2 no Luck. \n\
+natural forces the die (else the character's forced dice or the engine's RNG). With ask, a deadly \n\
+failure of a party member who pauses on key rolls opens the Luck prompt (Waiting 1; the answer \n\
+comes on a later tick, see GetDCCLastSkillCheck). Host or single player only.\n\
+\n\
+**Return value:** dict: Roller, Name, Tags, Ability, Plan, Training, Die, Natural, RollMod, Total, \n\
+DC, Success, Cursed, LuckBurned, LuckBonus, Waiting, Party; None on a client or for unknown tags");
+
+static PyObject* GemRB_DCCSkillCheck(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	char* text = nullptr;
+	int ability;
+	int dc;
+	int flags = 0;
+	int situational = 0;
+	int natural = 0;
+	int ask = 0;
+	PARSE_ARGS(args, "isii|iiii", &globalID, &text, &ability, &dc, &flags, &situational, &natural, &ask);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	const NetSession* net = core->GetNetSession();
+	DCC::SkillTags tags;
+	if ((net && !net->IsHost()) || !core->GetDCCRules() || !DCCParseSkillTags(text, tags)) Py_RETURN_NONE;
+	flags &= DCC::SKILL_DEADLY | DCC::SKILL_NO_LUCK;
+	return DCCSkillResultDict(actor->DCCSkillCheck(tags, ability, dc, uint32_t(flags), situational, natural, ask != 0));
+}
+
+PyDoc_STRVAR(GemRB_DCCPartySkillCheck__doc,
+	     "===== DCCPartySkillCheck =====\n\
+\n\
+**Prototype:** GemRB.DCCPartySkillCheck (tags, ability, dc[, flags[, situational]])\n\
+\n\
+**Description:** The party's check (M3.4): the member best placed for it (the best chance of \n\
+making dc, then the best average, then party order) among those in the current area who can try \n\
+rolls once, as GetDCCBestSkillRoller picks. Host or single player only.\n\
+\n\
+**Return value:** dict as DCCSkillCheck (Roller 0, Success 0 when nobody can try); None on a client");
+
+static PyObject* GemRB_DCCPartySkillCheck(PyObject* /*self*/, PyObject* args)
+{
+	char* text = nullptr;
+	int ability;
+	int dc;
+	int flags = 0;
+	int situational = 0;
+	PARSE_ARGS(args, "sii|ii", &text, &ability, &dc, &flags, &situational);
+	GET_GAME();
+	const NetSession* net = core->GetNetSession();
+	DCC::SkillTags tags;
+	if ((net && !net->IsHost()) || !core->GetDCCRules() || !DCCParseSkillTags(text, tags)) Py_RETURN_NONE;
+	Actor* roller = Actor::DCCBestSkillRoller(game->GetCurrentArea(), tags, ability, dc, situational);
+	if (!roller) {
+		DCC::SkillCheckResult none;
+		none.tags = DCC::SkillTagsKey(tags);
+		none.dc = dc;
+		none.party = true;
+		return DCCSkillResultDict(none);
+	}
+	flags = (flags & (DCC::SKILL_DEADLY | DCC::SKILL_NO_LUCK)) | DCC::SKILL_PARTY;
+	return DCCSkillResultDict(roller->DCCSkillCheck(tags, ability, dc, uint32_t(flags), situational));
+}
+
+PyDoc_STRVAR(GemRB_GetDCCBestSkillRoller__doc,
+	     "===== GetDCCBestSkillRoller =====\n\
+\n\
+**Prototype:** GemRB.GetDCCBestSkillRoller (tags, ability, dc)\n\
+\n\
+**Description:** The party member in the current area best placed for a check (M3.4), the one \n\
+a party check would have roll; for the UI's recommendation.\n\
+\n\
+**Return value:** global ID, 0 if nobody can try");
+
+static PyObject* GemRB_GetDCCBestSkillRoller(PyObject* /*self*/, PyObject* args)
+{
+	char* text = nullptr;
+	int ability;
+	int dc;
+	PARSE_ARGS(args, "sii", &text, &ability, &dc);
+	GET_GAME();
+	DCC::SkillTags tags;
+	if (!core->GetDCCRules() || !DCCParseSkillTags(text, tags)) return PyLong_FromLong(0);
+	const Actor* roller = Actor::DCCBestSkillRoller(game->GetCurrentArea(), tags, ability, dc);
+	return PyLong_FromLong(roller ? long(roller->GetGlobalID()) : 0);
+}
+
+PyDoc_STRVAR(GemRB_GetDCCLastSkillCheck__doc,
+	     "===== GetDCCLastSkillCheck =====\n\
+\n\
+**Prototype:** GemRB.GetDCCLastSkillCheck ()\n\
+\n\
+**Description:** The last occupation skill check anyone rolled (M3.4; scripts, dialogs, Python), \n\
+with the Luck burned once a prompt was answered. Not saved.\n\
+\n\
+**Return value:** dict as DCCSkillCheck");
+
+static PyObject* GemRB_GetDCCLastSkillCheck(PyObject* /*self*/, PyObject* /*args*/)
+{
+	return DCCSkillResultDict(Actor::DCCLastSkillCheck());
+}
+
+PyDoc_STRVAR(GemRB_DCCAddSkill__doc,
+	     "===== DCCAddSkill =====\n\
+\n\
+**Prototype:** GemRB.DCCAddSkill (globalID, tag)\n\
+\n\
+**Description:** An acquired skill tag (M3.4, a story event: an apprenticeship, years of \n\
+downtime), at most two beyond the occupation's, kept in the OCCU record. Host or single player.\n\
+\n\
+**Return value:** bool (False when refused: an unknown tag, two acquired already, a client)");
+
+static PyObject* GemRB_DCCAddSkill(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	char* text = nullptr;
+	PARSE_ARGS(args, "is", &globalID, &text);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	const NetSession* net = core->GetNetSession();
+	DCC::SkillTags tags;
+	if ((net && !net->IsHost()) || !core->GetDCCRules() || !DCCParseSkillTags(text, tags) || DCC::SkillTagCount(tags.bits) != 1) Py_RETURN_FALSE;
+	if (actor->DCCAddSkill(tags.bits)) Py_RETURN_TRUE;
+	Py_RETURN_FALSE;
 }
 
 PyDoc_STRVAR(GemRB_DCCCast__doc,
@@ -15592,6 +15830,12 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(DCCReplaceSpell, METH_VARARGS),
 	METHOD(DCCConfirmSpells, METH_VARARGS),
 	METHOD(GetDCCFunnel, METH_VARARGS),
+	METHOD(GetDCCSkillPlan, METH_VARARGS),
+	METHOD(DCCSkillCheck, METH_VARARGS),
+	METHOD(DCCPartySkillCheck, METH_VARARGS),
+	METHOD(GetDCCBestSkillRoller, METH_VARARGS),
+	METHOD(GetDCCLastSkillCheck, METH_NOARGS),
+	METHOD(DCCAddSkill, METH_VARARGS),
 	METHOD(DCCSetAlignment, METH_VARARGS),
 	METHOD(DCCKillFor, METH_VARARGS),
 	METHOD(DCCSetScriptName, METH_VARARGS),

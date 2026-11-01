@@ -31,6 +31,7 @@
 #include "DCC/Learning.h"
 #include "DCC/Luck.h"
 #include "DCC/Magic.h"
+#include "DCC/Skills.h"
 #include "Scriptable/Movable.h"
 #include "Scriptable/PCStatStruct.h"
 
@@ -878,6 +879,29 @@ public:
 	/** the signature deed (IE_DCC_DEED) and the one-off deed queued for the next attack */
 	DCC::Deed GetDCCSignatureDeed() const;
 	DCC::Deed GetDCCQueuedDeed() const;
+
+	// DCC occupation skills (M3.4, ActorDCCSkills.cpp)
+	using DCCSkillDone = std::function<void(const DCC::SkillCheckResult&)>;
+	/** the skill tags: the OCCU record's (occupation and acquired), or its occupation's (dccoccup.2da)
+	 * when the record has none (a character made before the tags) */
+	uint32_t GetDCCSkills() const;
+	/** an acquired tag (a story event): at most DCC_ACQUIRED_SKILLS beyond the occupation's; false if refused */
+	bool DCCAddSkill(uint32_t bit);
+	/** awake and able to try something: alive, not dying, held, asleep or out */
+	bool DCCCanTrySkill() const;
+	/** how this character rolls a check (ability: DCC::SkillAbilityCode) */
+	DCC::SkillPlan DCCSkillPlan(const DCC::SkillTags& tags, int ability, int dc, int situational = 0) const;
+	/** rolls an occupation skill check on its dice (DCCDie; natural forces the die): Luck by the policy
+	 * (unless SKILL_NO_LUCK), the combat log, a floating line. With ask, a SKILL_DEADLY failure of a
+	 * party member who pauses on key rolls asks the owner; the result is then "waiting" and done gets
+	 * the final one on a later tick (without ask, or when nothing waits, done is called at once) */
+	DCC::SkillCheckResult DCCSkillCheck(const DCC::SkillTags& tags, int ability, int dc, uint32_t flags = 0, int situational = 0, int natural = 0,
+					    bool ask = false, const DCCSkillDone& done = nullptr);
+	/** the party member best placed for a check (the best chance, then the best average; party
+	 * order breaks ties) among those in area (any area if null) who can try; nullptr if nobody */
+	static Actor* DCCBestSkillRoller(const Map* area, const DCC::SkillTags& tags, int ability, int dc, int situational = 0);
+	/** the last skill check anyone rolled (not saved) */
+	static const DCC::SkillCheckResult& DCCLastSkillCheck();
 
 	// DCC spellcasting (M2.5, ActorDCCMagic.cpp)
 	/** the lists and settings that don't fit in stats: known spells (mercurial magic, manifestation,
