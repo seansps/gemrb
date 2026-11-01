@@ -4259,18 +4259,27 @@ struct NetSession::Impl {
 	{
 		bool changed = false;
 		bool colors = false;
+		bool body = false;
 		for (const auto& stat : known) {
 			bool color = stat.first >= IE_COLORS && stat.first < IE_COLORS + 7;
 			if (actor->GetBase(stat.first) != stat.second.first) {
 				actor->SetBaseNoPCF(stat.first, stat.second.first);
 				changed = true;
 				colors = colors || color;
+				body = body || stat.first == IE_ANIMATION_ID;
 			}
 			if (actor->GetStat(stat.first) != stat.second.second) {
 				actor->SetStat(stat.first, stat.second.second, 0);
 				changed = true;
 				colors = colors || color;
+				body = body || stat.first == IE_ANIMATION_ID;
 			}
+		}
+		// S4: a new animation id is a new body (eg. a peasant's bald body for the hair layers): what the
+		// stat's post-change function does on the host. It takes the colours and the overlays along
+		if (body) {
+			actor->SetAnimationID(actor->Modified[IE_ANIMATION_ID]);
+			colors = true;
 		}
 		// M2.11: the colours go to the animation's palettes (what the stat's post-change function
 		// does on the host: recolouring, an item's overlay colours)

@@ -63,6 +63,20 @@ GEM_EXPORT std::string HairOverlay(const HairStyle* style, bool helmet);
  * off-hand, 7 helmet take bytes 1-3; the body's parts take byte 0) */
 GEM_EXPORT unsigned int OverlayColourByte(unsigned int paletteType);
 
+/** how many parts a DCC character animation draws (type 0 with the hair and beard layers): 0 the body,
+ * 1 the weapon, 2 the off hand, 3 the helmet, 4 the hair, 5 the beard */
+constexpr int PART_COUNT = 6;
+
+/**
+ * The order those parts are drawn in for a facing (0-15, clockwise from south), first at the bottom.
+ * Every overlay is rendered with its body as a holdout (S3/S4: the body already hides what is behind
+ * it), so each goes over the body. Stock GemRB drew the weapon under the body while the character faces
+ * away (4-12), which hid a weapon swung across the back (a club's backswing facing north lost up to 85
+ * of its pixels a frame). Facing away the weapon goes right over the body, under the hair, the helmet
+ * and the off hand; facing the viewer over the off hand. Hair and beard always go under the helmet.
+ */
+GEM_EXPORT const int* PartOrder(unsigned char orient);
+
 /** the IE games' stances: a character stands ready (G1) while it is engaged in melee or its
  * party is in a fight, awake (G17) otherwise */
 GEM_EXPORT bool CombatStance(bool engaged, bool partyFight);

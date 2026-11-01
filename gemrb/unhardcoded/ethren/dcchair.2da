@@ -1,10 +1,28 @@
 2DA V1.0
 *
-# ethren (M2.11): the hair and beard overlays (DCC/Looks.h, docs/architecture/art-pipeline.md "Sprites").
+# ethren (M2.11, S4): the hair and beard overlays (DCC/Looks.h, docs/architecture/art-pipeline.md "Sprites").
 # A character's IE_DCC_HAIR / IE_DCC_BEARD (the CRE extension's CHAR record) picks a row by ID and KIND
-# (0 none: a body with its hair baked in). CODE is the overlay's 2-letter animation code: its BAMs are
-# WQ<size><code><suffix>, drawn like a helmet's over the body and coloured by the hair range. HELMET is
-# what is drawn while a helmet is worn: a cropped style's code, or * for nothing.
+# (0 none: a body with its hair baked in, or a bald one). CODE is the overlay's 2-letter animation code: its
+# BAMs are WQ<size><code><suffix>, drawn like a helmet's over the body and coloured by the hair range. HELMET
+# is what is drawn while a helmet is worn: a cropped style's code (X?: the style cut at the helmets' rim, so
+# what hangs below still shows), the style itself (beards), or * for nothing (short styles).
+# Each style is rendered on one rig only, so it draws only on that rig's bodies (the size letter): hair 1-7
+# and the beards on the male (L: CPM2), hair 8-13 on the female (F: CPF2). The looks roll (dcclooks.2da)
+# picks them by sex; elsewhere the file is missing and nothing is drawn.
                ID   KIND   CODE  HELMET
 SIMPLE_PARTED  1    HAIR   HP    *
+BALDING        2    HAIR   HA    *
+BUZZED         3    HAIR   HZ    *
+DREADS         4    HAIR   HD    XD
+MOHAWK         5    HAIR   HM    *
+PONYTAIL       6    HAIR   HT    XT
+SLICKBACK      7    HAIR   HS    *
+BOB            8    HAIR   HO    XO
+BUNS           9    HAIR   HN    *
+BUZZED_F       10   HAIR   HY    *
+LONG           11   HAIR   HL    XL
+LONG_DREADS    12   HAIR   HR    XR
+PONYTAIL_F     13   HAIR   HQ    XQ
 FULL_BEARD     1    BEARD  BD    BD
+MOUSTACHE      2    BEARD  BM    BM
+MUTTON_CHOPS   3    BEARD  BC    BC

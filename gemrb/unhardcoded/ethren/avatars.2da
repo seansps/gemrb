@@ -4,12 +4,14 @@
 0x6500     CPM1       CPM1       CPM1       CPM1       0          2          0          L
 0x6501     CPM2       CPM2       CPM2       CPM2       0          2          0          L
 0x6510     CPF1       CPF1       CPF1       CPF1       0          2          0          F
+0x6511     CPF2       CPF2       CPF2       CPF2       0          2          0          F
 # ethren (M2.11): our character animations (tools/sprite_render writes the rows; the test games merge
 # them into the demo's table). The engine uses the row with the largest id not above the CRE's, so each
 # body owns a block of 16 ids (variants, outfits) and each species and gender a block of 0x10 bodies:
 #   0x6500 human male    0x6510 human female   0x6520 dwarf male      0x6530 dwarf female
 #   0x6540 elf male      0x6550 elf female     0x6560 halfling male   0x6570 halfling female
 # 0x6500 CPM1 the male peasant, hair and beard baked in; 0x6501 CPM2 the same body bald and beardless,
-# for the hair and beard overlays (dcchair.2da); 0x6510 CPF1 the female peasant. TYPE 0 (IE_ANI_CODE_MIRROR),
+# for the hair and beard overlays (dcchair.2da); 0x6510 CPF1 the female peasant (her hair baked in); 0x6511
+# CPF2 the female body bald, for her hair layers (S4). TYPE 0 (IE_ANI_CODE_MIRROR),
 # SPACE 2, PALETTE 0 (recoloured from the CRE's colours). SIZE is the overlays' letter (WQ<size><code>):
 # weapons, helmets and hair are rendered on one rig, so each body has its own (L the male, F the female).

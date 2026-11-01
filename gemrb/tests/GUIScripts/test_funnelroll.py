@@ -110,12 +110,14 @@ class FunnelRollTest (unittest.TestCase):
 
 	def test_hp_at_least_one (self):
 		# Sta 3 (-3) and a 1 on the d4
+		# looks: hair style d6 4 (the female styles 8-13: long), bald d100 50, beard d100 (none for women), colours
 		dice = Scripted (self, [2, 1,  3, 3, 3,  3, 3, 3,  1, 1, 1,  3, 3, 3,  3, 3, 3,  3, 3, 3,  1,  1,  1,  1, 1, 1, 1, 1,  2,
-			1, 1, 1, 1, 1, 1, 1,  24])
+			4, 50, 1, 1, 1, 1, 1, 1, 1,  24])
 		card = FunnelRoll.RollCard (dice, TABLES, 2)
 		self.assertEqual ([card["Sex"], card["Scores"][2], card["Occupation"], card["HP"], card["Copper"]], [2, 3, 1, 1, 5])
-		# a woman: no beard, her hair is the body's own
-		self.assertEqual ([card["Looks"]["Animation"], card["Looks"]["Hair"], card["Looks"]["Beard"]], [0x6510, 0, 0])
+		# a woman: the bald female body (CPF2) with a hair layer of her rig, no beard
+		self.assertIn (6, dice.asked) # the hair style: one of six
+		self.assertEqual ([card["Looks"]["Animation"], card["Looks"]["Hair"], card["Looks"]["Beard"]], [0x6511, 11, 0])
 
 	def test_sub_rolls (self):
 		die = Seeded (3)
@@ -167,6 +169,42 @@ class FunnelRollTest (unittest.TestCase):
 		dice = Scripted (self, [2, 2, 2, 1])
 		self.assertEqual (FunnelRoll.RollAbility (dice, True), 6)
 
+	def test_looks_by_sex (self):
+		# S4: each hair and beard style is rendered on one rig only (art/_cache/sprites/.../engine_rows.md):
+		# hair 1-7 and the beards on the male (CPM2, WQL..), hair 8-13 on the female (CPF2, WQF..). Every
+		# species and sex only rolls the styles of its body's rig, each of them comes up, and a bald woman
+		# keeps the bald female body
+		hair = FunnelRoll.ParseTwoDA (open (os.path.join (GEMRB, "unhardcoded", "ethren", "dcchair.2da")).read ())
+		kinds = {}
+		for row in hair.order:
+			kinds[(hair.Get (row, "KIND"), hair.Int (row, "ID"))] = row
+		rigs = {0x6501: (set (range (1, 8)), {1, 2, 3}), 0x6511: (set (range (8, 14)), set ())}
+		die = Seeded (11)
+		seen = {0x6501: (set (), set ()), 0x6511: (set (), set ())}
+		bald = {0x6501: 0, 0x6511: 0}
+		for race in (1, 2, 4, 5):
+			for sex in (1, 2):
+				for i in range (400):
+					looks = FunnelRoll.RollLooks (die, TABLES, race, sex)
+					anim = looks["Animation"]
+					self.assertEqual (anim, 0x6511 if sex == 2 else 0x6501)
+					styles, beards = rigs[anim]
+					if looks["Hair"]:
+						self.assertIn (looks["Hair"], styles, (race, sex))
+						self.assertIn (("HAIR", looks["Hair"]), kinds)
+						seen[anim][0].add (looks["Hair"])
+					else:
+						bald[anim] += 1
+					if looks["Beard"]:
+						self.assertIn (looks["Beard"], beards, (race, sex))
+						self.assertIn (("BEARD", looks["Beard"]), kinds)
+						seen[anim][1].add (looks["Beard"])
+		self.assertEqual (seen[0x6501], rigs[0x6501])
+		self.assertEqual (seen[0x6511], rigs[0x6511])
+		self.assertTrue (bald[0x6501] > 0 and bald[0x6511] > 0, bald)
+		# the same dice, the same looks
+		self.assertEqual (FunnelRoll.RollLooks (Seeded (4), TABLES, 1, 2), FunnelRoll.RollLooks (Seeded (4), TABLES, 1, 2))
+
 	def test_sixteen (self):
 		cards = FunnelRoll.RollAll (Seeded (1), TABLES)
 		self.assertEqual ([c["Order"] for c in cards], list (range (1, 17)))
@@ -181,7 +219,7 @@ class FunnelRollTest (unittest.TestCase):
 			self.assertTrue (1 <= card["Augur"] <= 30 and card["AugurName"])
 			colors = card["Looks"]["Colors"]
 			self.assertTrue (28 <= colors[3] <= 35 and 36 <= colors[6] <= 45 and 7 <= colors[1] <= 27)
-			self.assertEqual (card["Looks"]["Animation"], 0x6510 if card["Sex"] == 2 else 0x6501)
+			self.assertEqual (card["Looks"]["Animation"], 0x6511 if card["Sex"] == 2 else 0x6501)
 			text = FunnelRoll.CardText (card)
 			self.assertEqual (len (text.split ("\n")), 7)
 			self.assertTrue (len (text.encode ("utf-8")) < 1024) # NetSetLobbyCards' limit

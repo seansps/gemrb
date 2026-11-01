@@ -7642,6 +7642,33 @@ static PyObject* GemRB_DCCSetLooks(PyObject* /*self*/, PyObject* args)
 	Py_RETURN_TRUE;
 }
 
+PyDoc_STRVAR(GemRB_DCCPose__doc,
+	     "===== DCCPose =====\n\
+\n\
+**Prototype:** GemRB.DCCPose (globalID[, stance, orientation])\n\
+\n\
+**Description:** Tests (the sprite checks): sets an actor's stance (IE_ANI_*: 0 an attack picked by \n\
+the weapon's overhand, backhand and thrust weights; 8 shoot; 5 die, then the twitch) and its facing \n\
+(0-15, clockwise from south) at once, without its action queue; -1 keeps either. The stance plays as \n\
+an action's would: an attack, a shot or a death once, the idle stances looping.\n\
+\n\
+**Return value:** the stance now (an attack's: slash 11, backslash 12, jab 13)\n\
+\n\
+**See also:** [GetDCCStats](GetDCCStats.md)");
+
+static PyObject* GemRB_DCCPose(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int stance = -1;
+	int orient = -1;
+	PARSE_ARGS(args, "i|ii", &globalID, &stance, &orient);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	if (orient >= 0) actor->SetOrientation(ClampToOrientation(orient), false);
+	if (stance >= 0) actor->SetStance(ieDword(stance));
+	return PyLong_FromLong(actor->GetStance());
+}
+
 PyDoc_STRVAR(GemRB_DCCSetDeeds__doc,
 	     "===== DCCSetDeeds =====\n\
 \n\
@@ -15814,6 +15841,7 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(DCCForceDice, METH_VARARGS),
 	METHOD(SaveScreenshot, METH_VARARGS),
 	METHOD(DCCSetLooks, METH_VARARGS),
+	METHOD(DCCPose, METH_VARARGS),
 	METHOD(DCCAttack, METH_VARARGS),
 	METHOD(GetDCCLastAttack, METH_VARARGS),
 	METHOD(GetDCCCombatLog, METH_VARARGS),

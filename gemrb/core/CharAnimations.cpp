@@ -14,6 +14,8 @@
 #include "DCC/Looks.h"
 #include "Logging/Logging.h"
 
+#include <set>
+
 namespace GemRB {
 
 static const int zOrder_TwoPiece[2] = { 1, 0 };
@@ -35,26 +37,6 @@ static const int zOrder_Mirror16[16][4] = {
 	{ 0, 3, 1, 2 },
 	{ 0, 3, 1, 2 },
 	{ 0, 3, 2, 1 }
-};
-
-// DCC (M2.11): the hair and beard overlays (parts 4 and 5) right over the body, under the helmet
-static const int zOrder_Mirror16DCC[16][6] = {
-	{ 0, 4, 5, 3, 2, 1 },
-	{ 0, 4, 5, 3, 2, 1 },
-	{ 0, 4, 5, 3, 1, 2 },
-	{ 0, 4, 5, 3, 1, 2 },
-	{ 1, 0, 4, 5, 3, 2 },
-	{ 1, 0, 4, 5, 3, 2 },
-	{ 1, 0, 4, 5, 3, 2 },
-	{ 1, 0, 4, 5, 3, 2 },
-	{ 1, 0, 4, 5, 3, 2 },
-	{ 1, 0, 4, 5, 3, 2 },
-	{ 1, 0, 4, 5, 3, 2 },
-	{ 1, 0, 4, 5, 3, 2 },
-	{ 1, 0, 4, 5, 3, 2 },
-	{ 0, 4, 5, 3, 1, 2 },
-	{ 0, 4, 5, 3, 1, 2 },
-	{ 0, 4, 5, 3, 2, 1 }
 };
 
 static const int zOrder_8[8][4] = {
@@ -1004,6 +986,13 @@ const CharAnimations::PartAnim* CharAnimations::GetAnimation(unsigned char stanc
 				return nullptr;
 			} else {
 				// not fatal if animation for equipment is missing
+				// DCC (S3/S4): but say so, once a file, so a layer the sprites lack shows in the log
+				if (core->HasFeature(GFFlags::RULES_DCC)) {
+					static std::set<ResRef> reported;
+					if (reported.insert(NewResRef).second) {
+						Log(WARNING, "CharAnimations", "DCC: no overlay file {} for animation {:#x} (part {})", NewResRef, GetAnimationID(), part - actorPartCount);
+					}
+				}
 				continue;
 			}
 		}
@@ -1016,6 +1005,13 @@ const CharAnimations::PartAnim* CharAnimations::GetAnimation(unsigned char stanc
 				return nullptr;
 			} else {
 				// not fatal if animation for equipment is missing
+				// DCC (S3/S4): an overlay file without the stance's cycle, said once
+				if (core->HasFeature(GFFlags::RULES_DCC)) {
+					static std::set<std::pair<ResRef, unsigned char>> reported;
+					if (reported.insert({ NewResRef, Cycle }).second) {
+						Log(WARNING, "CharAnimations", "DCC: overlay {} has no cycle {} (animation {:#x}, part {})", NewResRef, Cycle, GetAnimationID(), part - actorPartCount);
+					}
+				}
 				continue;
 			}
 		}
@@ -1440,7 +1436,8 @@ const int* CharAnimations::GetZOrder(unsigned char Orient) const
 {
 	switch (GetAnimType()) {
 		case IE_ANI_CODE_MIRROR:
-			if (GetTotalPartCount() == GetActorPartCount() + 5) return zOrder_Mirror16DCC[Orient];
+			// DCC: with the hair and beard layers, every overlay over the body (DCC/Looks.h)
+			if (GetTotalPartCount() == GetActorPartCount() + 5) return DCC::PartOrder(Orient);
 			return zOrder_Mirror16[Orient];
 		case IE_ANI_TWENTYTWO:
 			return zOrder_8[Orient / 2];
