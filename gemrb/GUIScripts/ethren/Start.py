@@ -8,6 +8,7 @@
 # game (NetLobby.BeforeStart), and clients watch the cards from their lobby (RollScreen.WatchLobby).
 
 import GemRB
+import GameAutotest
 import NetLobby
 import RollScreen
 from GUIDefines import *
@@ -72,6 +73,8 @@ def NewGame():
 	# the funnel: roll the sixteen first (single player; the co-op host has rolled them already)
 	if RollScreen.Rolling () and RollScreen.Accepted is None and GemRB.NetGetMode () != "host":
 		RollScreen.Open (StartGame, BackToStart)
+		# ethren-auto: the game's smoke test accepts the cards by itself
+		GameAutotest.BeforeRoll ()
 		return
 	StartGame ()
 

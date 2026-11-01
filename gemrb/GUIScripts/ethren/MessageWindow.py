@@ -15,6 +15,7 @@ import GUIMA
 import GUIREC
 import DCCAutotest
 import FunnelAutotest
+import GameAutotest
 import Roster
 import NetChat
 from GUIDefines import *
@@ -77,6 +78,8 @@ def OnLoad():
 	DCCAutotest.OnGameStart ()
 	# funneltest-auto: the funnel readiness checks (M2.9), likewise
 	FunnelAutotest.OnGameStart ()
+	# ethren-auto: the real game's smoke test (game/), when its autotest table is there
+	GameAutotest.OnGameStart ()
 
 def UpdateControlStatus():
 	pass
