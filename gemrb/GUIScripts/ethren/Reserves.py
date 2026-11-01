@@ -224,7 +224,9 @@ def DealCard (index):
 	return ok
 
 def _Reopen ():
-	"""the reserves changed: the cards again"""
+	"""the reserves changed: the cards again, and the roster's tiles for the new party"""
+	import Roster
+	Roster.UpdateRoster ()
 	if Window:
 		Open ()
 

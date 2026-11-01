@@ -797,6 +797,18 @@ def _ExpectedSummary ():
 	text = "Alive %d of 16" % (16 - dead - dying)
 	return text + (", %d dying" % dying if dying else "") + (", %d dead" % dead if dead else "")
 
+def _RosterIsParty (what):
+	"""the roster's tiles are the party as it is: one tile per member (no stale ones from a bigger
+	party), in slot order, no name twice"""
+	import Roster
+	Roster.UpdateRoster ()
+	size = GemRB.GetPartySize ()
+	names = [GemRB.GetPlayerName (pc, 0) for pc in range (1, size + 1)]
+	shown = [Roster.Shown.get (pc, "").split ("\n")[0].split ("  ")[0] for pc in range (1, size + 1)]
+	_Check ("%s: the roster's tiles are the party (tiles, built for, names)" % what,
+		[Roster.TileCount (), Roster.Built == tuple (_Id (pc) for pc in range (1, size + 1)), shown, len (set (shown))],
+		[size, True, names, size])
+
 def _Kill (attacker, victim):
 	"""the marauder hits a peasant (a natural 20: the weak marauder needs it) until it is down"""
 	for i in range (4):
@@ -1296,6 +1308,7 @@ def _Choose ():
 	"""f: choose your four, their class picks (a cleric with its god, a wizard and the learn window), the end screen"""
 	import ChooseFour, ClassPick, DCCLearn, FunnelEnd, FunnelChoose, Roster
 	yield from _FunnelHistory ()
+	Saved["rebuilds"] = Roster.Rebuilds
 	# the funnel ends by a script action (the adventure's last scene will do the same)
 	GemRB.ExecuteString ('SetGlobal("DCC_FUNNEL","GLOBAL",1)')
 	yield from _Wait (lambda: ChooseFour.Window, 10)
@@ -1348,6 +1361,10 @@ def _Choose ():
 	_Check ("funnel's end: the dead are out of the party, in the graveyard", [len (Roster.GraveLinesAll ()), any (_Funnel (pc)["StatusName"] == "dead" for pc in range (1, 5))], [2, False])
 	Roster.UpdateRoster ()
 	_Check ("funnel's end: the roster shows four", [len (Roster.Tiles), Roster.Header["Summary"]], [4, "Alive 4 of 4"])
+	_Check ("funnel's end: the roster was rebuilt for the four", Roster.Rebuilds > Saved["rebuilds"], True)
+	_RosterIsParty ("funnel's end")
+	yield
+	_ShotScreen ("roster_four")
 	# the class picks: one window at a time, for each of the four
 	classes = {}
 	for index, ident in enumerate (Saved["picks"]):
@@ -1444,6 +1461,7 @@ def _Reserves ():
 	_Check ("reserves: it is chosen, level 0, 10 XP, its pick pending", [_Funnel (newcomer)["StatusName"], GemRB.GetDCCStats (newcomer)["Level"], GemRB.GetDCCStats (newcomer)["XP"], _Funnel (newcomer)["ClassPending"]], ["chosen", 0, 10, 1])
 	_Check ("reserves: nine wait now", len (GemRB.GetDCCReserves ()), 9)
 	_Check ("reserves: the dead one is buried, its grave kept", [Saved["victim"] in [GemRB.GetPlayerName (pc, 0) for pc in range (1, 5)], len (Roster.GraveLinesAll ())], [False, 3])
+	_RosterIsParty ("reserves: after the swap")
 	# its class pick comes up
 	yield from _Wait (lambda: ClassPick.Window, 10)
 	_Check ("reserves: the newcomer's class pick opens", [bool (ClassPick.Window), ClassPick.Shown], [True, newcomer])
@@ -1461,6 +1479,7 @@ def _Reserves ():
 	Reserves.Open ()
 	_Check ("reserves: dismiss the first", Reserves.Dismiss (1), 0)
 	_Check ("reserves: dismissed, in the reserves, still level 1", [GemRB.GetPartySize (), first in GemRB.GetDCCReserves (), GemRB.GetDCCStats (first)["Level"], _Funnel (first)["StatusName"]], [3, True, 1, "reserve"])
+	_RosterIsParty ("reserves: a party of three")
 	_Check ("reserves: and back again (room for one)", Reserves.Join (first) >= 0, True)
 	Reserves.Leave ()
 	_Check ("reserves: closed, the camp's global cleared", [Reserves.Window, GemRB.GetGameVar ("DCC_CAMP")], [None, 0])
@@ -1501,6 +1520,7 @@ def _StepReservesLoaded ():
 	import Roster
 	Roster.UpdateRoster ()
 	_Check ("loaded: the roster of four", len (Roster.Tiles), 4)
+	_RosterIsParty ("loaded")
 	return "done"
 
 StepTable = {
