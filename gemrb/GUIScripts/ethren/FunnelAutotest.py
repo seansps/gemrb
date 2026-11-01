@@ -161,6 +161,10 @@ def _Party ():
 	farmer = GemRB.GetDCCFunnel (_Slot ("protagon"))["Occupation"]
 	_Check ("the farmer's items and sub-roll", [farmer["Weapon"], farmer["TradeGood"], farmer["Sub"]], ["fntpfork", "fnthen", 2])
 	_Check ("class picks pending", [GemRB.GetDCCFunnel (_Slot (n))["Funnel"]["ClassPending"] for n in ("fntmira", "fntlael", "fnttobb", "fntodo")], [1, 1, 1, 0])
+	# the weapon a swing uses is the occupation's, the protagonist's too (made by CreatePlayer, its quick
+	# weapon slot was the fists until the engine lined it up with the equipped weapon)
+	unarmed = [(pc, _SwungItem (pc)) for pc in range (1, size + 1) if GemRB.GetDCCFunnel (pc)["Occupation"]["Weapon"] and _SwungItem (pc) != GemRB.GetDCCFunnel (pc)["Occupation"]["Weapon"]]
+	_Check ("everyone swings its occupation's weapon", unarmed, [])
 	yield
 
 	# 2: the roster: sixteen slots; one, a toggle, everyone
@@ -1140,12 +1144,12 @@ def _Rolled ():
 			bad.append ((pc, got, want))
 		# the items funneltest has (dccoccit.2da), the weapon in a weapon slot; the others logged
 		weapons = [GemRB.GetSlotItem (pc, slot)["ItemResRef"].lower () for slot in GemRB.GetSlots (pc, SLOT_WEAPON, 1)]
-		equipped = GemRB.GetEquippedQuickSlot (pc)
-		held = GemRB.GetSlotItem (pc, equipped) if card["WeaponItem"] else None
+		swung = _SwungItem (pc)
 		if [occ["Weapon"], occ["TradeGood"]] != [card["WeaponItem"], card["GoodItem"] if not card["GoodCopper"] else ""] or (card["WeaponItem"] and card["WeaponItem"] not in weapons):
 			bad.append ((pc, "items", occ["Weapon"], occ["TradeGood"], weapons, card["WeaponItem"], card["GoodItem"]))
-		elif card["WeaponItem"] and (not held or held["ItemResRef"].lower () != card["WeaponItem"]):
-			bad.append ((pc, "not equipped", equipped, held and held["ItemResRef"]))
+		elif card["WeaponItem"] and swung != card["WeaponItem"]:
+			# the weapon a swing uses (the engine's cached weapon info), not the slot that reads as equipped
+			bad.append ((pc, "not in hand", swung))
 		low, high = ranges[card["Race"]]
 		if not stats["BodyRolled"] or not low <= stats["BodyWeight"] <= high:
 			bad.append ((pc, "weight", stats["BodyWeight"]))
@@ -1177,6 +1181,45 @@ def _Rolled ():
 	yield
 	_Shot ("rolled_party", 1)
 	_ShotScreen ("rolled_roster")
+	yield from _ArmedHit (cards)
+
+def _SwungItem (pc):
+	"""the item a melee or missile swing of this party member uses (its cached weapon info: the slot
+	that GetCombatDetails reports, in the engine's own numbering), lower case; "fist" for none"""
+	details = GemRB.GetCombatDetails (pc, 0)
+	if "Slot" not in details:
+		return ""
+	item = GemRB.GetSlotItem (pc, details["Slot"], 1)
+	return item["ItemResRef"].lower () if item else ""
+
+def _ArmedHit (cards):
+	"""e: a rolled peasant's weapon really strikes: a lethal (not subdual) blow with its occupation's
+	weapon (M3.1's weapon check once passed while every swing was the fists')"""
+	armed = [c["Order"] for c in cards if c["WeaponItem"] and GemRB.GetCombatDetails (c["Order"], 0).get ("Flags", 0) & 1]
+	_Check ("rolled: a peasant with a melee weapon", bool (armed), True)
+	if not armed:
+		return
+	pc = armed[0]
+	weapon = [c["WeaponItem"] for c in cards if c["Order"] == pc][0]
+	GemRB.GameSetScreenFlags (GS_PARTYAI, OP_NAND) # nobody joins in
+	where = GemRB.GetActorPosition (pc)
+	gob = GemRB.CreateCreature (1, "FNTGOB", where["X"] + 40, where["Y"])
+	_Put (gob, where["X"] + 40, where["Y"])
+	yield
+	before = GemRB.GetPlayerStat (gob, IE_HITPOINTS)
+	GemRB.DCCForceDice (pc, [19, 6, 6, 6, 6])
+	GemRB.DCCAttack (pc, gob)
+	GemRB.DCCForceDice (pc, [])
+	attack = (GemRB.GetDCCLastAttack (pc) or [{}])[0]
+	yield
+	lost = before - GemRB.GetPlayerStat (gob, IE_HITPOINTS)
+	_Log ("rolled: %s's armed hit: %s" % (GemRB.GetPlayerName (pc, 0), attack))
+	_Check ("rolled: the swing is the occupation's weapon", _SwungItem (pc), weapon)
+	_Check ("rolled: an armed hit (hit, not subdual, damage taken)", [attack.get ("Hit"), attack.get ("Subdual"), attack.get ("Damage", 0) > 0 and lost == attack.get ("Damage")], [1, 0, True])
+	_Shot ("rolled_armed_hit", pc)
+	GemRB.ExecuteString ("DestroySelf()", gob)
+	GemRB.GameSetScreenFlags (GS_PARTYAI, OP_OR)
+	yield
 
 def _StepRolled ():
 	global RolledSteps
@@ -1217,26 +1260,24 @@ def _FunnelHistory ():
 		GemRB.ExecuteString ("DestroySelf()", gob)
 		yield
 	_Check ("history: 15 and 16 dead", [_Dead (15), _Dead (16)], [True, True])
-	# a kill: the giant rat dies to peasant 3 (the kill is credited by DCCOnDeath; a rolled peasant's
-	# blows are its fists' for now, subdual ones, so the rat is knocked out first and then dies to a
-	# blow of the same peasant's once it is down: see the M3.3 notes in the README)
+	# a kill: the giant rat (worn down to 3 hp first) dies to peasant 3's own weapon (the kill is
+	# credited by DCCOnDeath); lethal blows, not the fists' subdual ones (fixed after M3.3)
 	killer = 3
 	x, y = spots[killer]
 	rat = GemRB.CreateCreature (1, "FNTRAT", x + 40, y)
 	_Put (rat, x + 40, y)
+	GemRB.SetPlayerStat (rat, IE_HITPOINTS, 3)
 	yield
-	for i in range (10):
+	subdual = []
+	for i in range (5):
 		if GemRB.GetPlayerStat (rat, IE_STATE_ID) & STATE_DEAD:
 			break
 		GemRB.DCCForceDice (killer, [19, 6, 6, 6, 6])
 		GemRB.DCCAttack (killer, rat)
 		GemRB.DCCForceDice (killer, [])
+		subdual += [a["Subdual"] for a in GemRB.GetDCCLastAttack (killer)]
 		yield
-	if not GemRB.GetPlayerStat (rat, IE_STATE_ID) & STATE_DEAD:
-		_Log ("history: the rat is only knocked out; the peasant finishes it with a script kill on its behalf")
-		GemRB.DCCKillFor (rat, killer)
-		yield
-	_Check ("history: the rat died", bool (GemRB.GetPlayerStat (rat, IE_STATE_ID) & STATE_DEAD), True)
+	_Check ("history: the rat died to the peasant's weapon (no subdual blows)", [bool (GemRB.GetPlayerStat (rat, IE_STATE_ID) & STATE_DEAD), any (subdual)], [True, False])
 	_Check ("history: the killer's kill on its funnel record", _Funnel (killer)["Kills"], 1)
 	# one with 2 hp or more nearly dies: down to 1
 	near = [pc for pc in range (1, 15) if pc != killer and GemRB.GetPlayerStat (pc, IE_HITPOINTS) >= 2][0]

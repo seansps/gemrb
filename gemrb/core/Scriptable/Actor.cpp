@@ -5174,6 +5174,11 @@ void Actor::SetMap(Map* map)
 		//The other word is the equipped header.
 		//find a quiver for the bow, etc
 		inventory.EquipItem(inventory.GetEquippedSlot());
+		// DCC: a party member made in the game (CreatePlayer from a CRE, like the funnel's rolled
+		// peasants and the protagonist) has its weapon equipped while its quick weapon slots are
+		// still the fists; the line below maps the equipped quick slot through them, which put the
+		// fists in its hand, so point the equipped quick slot at the weapon first
+		if (core->HasFeature(GFFlags::RULES_DCC)) DCCSyncEquippedQuickSlot();
 		SetEquippedQuickSlot(inventory.GetEquipped(), inventory.GetEquippedHeader());
 	}
 	if (BlocksSearchMap()) map->BlockSearchMapFor(this);

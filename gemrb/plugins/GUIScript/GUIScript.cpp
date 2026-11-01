@@ -8511,6 +8511,11 @@ static PyObject* GemRB_DCCSetOccupation(PyObject* /*self*/, PyObject* args)
 			actor->inventory.SetSlotItem(item, melee);
 		}
 		if (actor->inventory.FindItem(weaponRef, 0) == melee) {
+			// the first weapon quick slot holds it, as Inventory::EquipItem sets it up: the equipped
+			// slot is a quick weapon slot's index, and it is mapped through that quick slot again when
+			// the actor first gets its area (Actor::SetMap); a quick slot still on the fist turned
+			// the weapon into the fists there, and every swing was an unarmed one
+			actor->SetupQuickSlot(ACT_WEAPON1, ieWord(melee), 0);
 			actor->inventory.SetEquippedSlot(0, 0);
 			actor->ReinitQuickSlots();
 		}

@@ -850,6 +850,9 @@ public:
 	void SetDCCCombatOptions(uint32_t options, int rage);
 	/** whether this weapon slot is one the character is trained in (classes.md; level 0 always) */
 	bool DCCTrainedWith(const WeaponInfo& wi) const;
+	/** points the equipped quick weapon slot at the weapon really equipped, when it still names
+	 * another slot (the fists of a character made in the game): Actor::SetMap maps through it */
+	void DCCSyncEquippedQuickSlot() const;
 
 	// DCC Luck burn and Mighty Deeds (M2.4, ActorDCCLuck.cpp)
 	/** the character's burn policy, threshold and flags (IE_DCC_BURNPOLICY, BURNMIN, LUCKFLAGS) */

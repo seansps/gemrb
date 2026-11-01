@@ -430,6 +430,17 @@ bool Actor::DCCTrainedWith(const WeaponInfo& wi) const
 	return !row || column == WeaponClass::count || row->Trained(column);
 }
 
+void Actor::DCCSyncEquippedQuickSlot() const
+{
+	if (!PCStats) return;
+	int equipped = inventory.GetEquipped();
+	// a melee weapon slot (0-3); bows and their ammunition keep the stock handling
+	if (equipped < 0 || equipped >= MAX_QUICKWEAPONSLOT) return;
+	int slot = inventory.GetEquippedSlot();
+	if (inventory.IsSlotEmpty(slot) || PCStats->QuickWeaponSlots[equipped] == slot) return;
+	SetupQuickSlot(ACT_WEAPON1 + equipped, ieWord(slot), inventory.GetEquippedHeader());
+}
+
 bool Actor::DCCBuildSwing(DCCSwing& swing, int hand, const Actor* target, int index, bool bash)
 {
 	bool character = IsDCCCharacter();
