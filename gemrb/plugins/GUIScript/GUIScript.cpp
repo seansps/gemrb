@@ -4446,8 +4446,9 @@ PyDoc_STRVAR(GemRB_NetEditCard__doc,
 \n\
 **Description:** A co-op client in the lobby while the host rolls (M3.3): changes one of the \n\
 cards dealt to it. field 0 is the name (at most 32 bytes), 1 the alignment ('1' lawful, '2' \n\
-neutral, '3' chaotic). The host's rolling screen applies it (NetTakeCardEdits) and the cards come \n\
-back with the lobby.\n\
+neutral, '3' chaotic), 2 the species (the race: '1' human, '2' elf, '4' dwarf, '5' halfling), 3 the \n\
+sex ('1', '2'), 4 a look ('PART STEP': the part's index in FunnelRoll.LOOK_PARTS, -1 or 1) (M3.5). The \n\
+host's rolling screen applies it (NetTakeCardEdits) and the cards come back with the lobby.\n\
 \n\
 **Return value:** bool (sent)\n\
 ");
@@ -4471,7 +4472,7 @@ PyDoc_STRVAR(GemRB_NetTakeCardEdits__doc,
 **Description:** The co-op host's rolling screen (M3.3): the changes players made to their own cards \n\
 since the last call (checked: the card was dealt to them), in order.\n\
 \n\
-**Return value:** list of dicts: Slot, Field (0 name, 1 alignment), Text, Player\n\
+**Return value:** list of dicts: Slot, Field (0 name, 1 alignment, 2 species, 3 sex, 4 look), Text, Player\n\
 ");
 
 static void DictInt(PyObject* dict, const char* key, long value);
@@ -7769,6 +7770,33 @@ static Holder<Sprite2D> ScaledSprite(const Holder<Sprite2D>& spr, int s)
 	big->Frame.y = spr->Frame.y * s;
 	big->renderFlags = spr->renderFlags | BlitFlags::BLENDED;
 	return big;
+}
+
+PyDoc_STRVAR(GemRB_TestClick__doc,
+	     "===== TestClick =====\n\
+\n\
+**Prototype:** GemRB.TestClick (x, y[, button, mod])\n\
+\n\
+**Description:** For autotests (ethren): a mouse click at the screen point, moved to, pressed and \n\
+released through the event manager, as a player's would be (window order, focus, hit tests). button \n\
+1 is the left (default), 4 the right; mod 1 shift. Two calls in quick succession are a double click.\n\
+\n\
+**Return value:** None\n\
+");
+
+static PyObject* GemRB_TestClick(PyObject* /*self*/, PyObject* args)
+{
+	int x;
+	int y;
+	int button = GEM_MB_ACTION;
+	int mod = 0;
+	PARSE_ARGS(args, "ii|ii", &x, &y, &button, &mod);
+	const WindowManager* wm = core->GetWindowManager();
+	Point pos(x, y);
+	wm->InjectEvent(EventMgr::CreateMouseMotionEvent(pos, mod));
+	wm->InjectEvent(EventMgr::CreateMouseBtnEvent(pos, EventButton(button), true, mod));
+	wm->InjectEvent(EventMgr::CreateMouseBtnEvent(pos, EventButton(button), false, mod));
+	Py_RETURN_NONE;
 }
 
 PyDoc_STRVAR(GemRB_DCCAvatarFrame__doc,
@@ -16030,6 +16058,7 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(DCCSetLooks, METH_VARARGS),
 	METHOD(DCCPose, METH_VARARGS),
 	METHOD(DCCAvatarFrame, METH_VARARGS),
+	METHOD(TestClick, METH_VARARGS),
 	METHOD(DCCAttack, METH_VARARGS),
 	METHOD(GetDCCLastAttack, METH_VARARGS),
 	METHOD(GetDCCCombatLog, METH_VARARGS),

@@ -5,13 +5,15 @@
 # The real game's smoke test (game/, scripts/run.sh ethren-auto): nothing runs unless the table ethauto.2da
 # exists, which only the game's autotest variant ships (game/src/tables/autotest, a ModPath of the -auto run).
 # Then:
-#   1. the rolling screen opens as for a player; the first card is made a dwarf, its looks stepped in the
+#   1. the rolling screen opens as for a player; the second card's buttons are clicked (GemRB.TestClick);
+#      the first card is made a dwarf, its looks stepped in the
 #      paper doll (M3.5); both are screenshotted and the cards accepted by themselves (BeforeRoll);
 #   2. the funnel starts in Delmord's town hall (DL0101) with sixteen peasants on walkable ground;
 #   3. the party walks every way Delmord has, through the doors and along the road, and back to the hall:
 #      hall -> western edge -> village east -> tavern -> east -> smithy -> east -> shrine -> east -> western
 #      edge -> hall, each arrival checked (all sixteen in the new area);
-#   4. screenshots in the save path: game_looks (the paper doll), game_roll (the rolling screen), game_<area> (each area as drawn, the
+#   4. the roster's tiles answer real mouse clicks (GemRB.TestClick): select, shift-click, right click;
+#   5. screenshots in the save path: game_looks (the paper doll), game_roll (the rolling screen), game_<area> (each area as drawn, the
 #      first visit), game_hall_screen (the hall with the GUI).
 # Every check logs "[ETH] ok ..." or "[ETH] FAIL ...", the end "[ETH] autotest done: N checks, F failed";
 # ETH_AT_DONE becomes 1 if all passed, 2 if not (run.sh's AutotestQuit).
@@ -74,6 +76,7 @@ def BeforeRoll ():
 	import FunnelRoll
 	def choose ():
 		"""M3.5: the first card a dwarf with a style stepped on, the paper doll open and turned"""
+		clicks ()
 		card = RollScreen.Cards[0]
 		occupations = dict ((race, occ["OccupationName"]) for race, occ in card["Occupations"].items ())
 		numbers = [list (card["Scores"]), card["HP"], card["Augur"], card["Copper"]]
@@ -90,6 +93,22 @@ def BeforeRoll ():
 		Chosen["Major"] = RollScreen.StepLook (0, "Tunic", 1)
 		RollScreen._Turn (-2)
 		GemRB.SetTimer (look, 800, 0)
+	def clicks ():
+		"""the second card's buttons by real clicks: each button acts on its own card"""
+		second = RollScreen.Cards[1]
+		sex, race, alignment = second["Sex"], second["Race"], second["Alignment"]
+		_Click (RollScreen.Window, RollScreen._Control (1, 7))
+		_Check ("roll: a click on card 2's sex button changes its sex", second["Sex"], 2 if sex == 1 else 1)
+		_Click (RollScreen.Window, RollScreen._Control (1, 6))
+		_Check ("roll: a click on card 2's species button changes its species", second["Race"] != race, True)
+		_Click (RollScreen.Window, RollScreen._Control (1, 5))
+		_Check ("roll: a click on card 2's alignment button changes it", second["Alignment"], FunnelRoll.NextAlignment (alignment))
+		_Click (RollScreen.Window, RollScreen._Control (1, 8))
+		_Check ("roll: a click on card 2's Looks... opens its paper doll", [bool (RollScreen.LooksWindow), RollScreen.LooksIndex], [True, 1])
+		hair = second["Looks"]["Hair"]
+		_Click (RollScreen.LooksWindow, RollScreen.LooksWindow.GetControl (11))
+		_Check ("roll: a click on the doll's hair arrow steps the hair", second["Looks"]["Hair"] != hair or len (FunnelRoll.LookOptions (RollScreen._Tables (), second["Race"], second["Sex"], "Hair")) < 2, True)
+		RollScreen.CloseLooks ()
 	def look ():
 		_Shot ("looks", 0, 1)
 		RollScreen.CloseLooks ()
@@ -117,6 +136,7 @@ def _Run ():
 		yield
 	_Shot ("hall", 1)
 	_Shot ("hall_screen", 1, 1)
+	yield from _RosterClicks ()
 	seen = {"DL0101"}
 	for area, door, exit, to in ROUTE:
 		_Check ("in %s before %s" % (area, exit), _Areas (), [area])
@@ -139,6 +159,32 @@ def _Run ():
 		if to not in seen:
 			seen.add (to)
 			_Shot (NAMES[to], 1)
+
+def _Click (win, control, button = 1, mod = 0):
+	"""a real click on a control (GemRB.TestClick: through the windows as a player's would go)"""
+	outer, frame = win.GetFrame (), control.GetFrame ()
+	GemRB.TestClick (outer['x'] + frame['x'] + frame['w'] // 2, outer['y'] + frame['y'] + frame['h'] // 2, button, mod)
+
+def _ClickTile (slot, button = 1, mod = 0):
+	import Roster
+	_Click (Roster.RosterWindow, Roster.RosterWindow.GetControl (slot - 1), button, mod)
+
+def _RosterClicks ():
+	"""the roster's tiles by the mouse (U2): a click selects that one, shift-click and a right click add or
+	take one away"""
+	import Roster
+	_Check ("the roster is open", bool (Roster.RosterWindow), True)
+	GemRB.GameSelectPC (0, 1)
+	_ClickTile (5)
+	yield
+	_Check ("roster: a click on tile 5 selects only it", Roster.Selected (), [5])
+	_ClickTile (6, 1, GEM_MOD_SHIFT)
+	yield
+	_Check ("roster: shift-click adds tile 6", Roster.Selected (), [5, 6])
+	_ClickTile (5, GEM_MB_MENU)
+	yield
+	_Check ("roster: a right click takes tile 5 away", Roster.Selected (), [6])
+	_Check ("roster: tile 6 shows selected", Roster.Tiles[6]["Selected"], True)
 
 def OnGameStart ():
 	"""MessageWindow.OnLoad: start ticking once the game is up"""

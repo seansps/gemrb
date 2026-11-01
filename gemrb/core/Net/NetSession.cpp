@@ -1339,7 +1339,7 @@ struct NetSession::Impl {
 					entry.text = edit.text;
 					entry.player = info->slot;
 					cardEdits.push_back(std::move(entry));
-					Log(MESSAGE, "Net", "Slot {} ({}) changes card {}: {} '{}'.", info->slot, info->name, edit.partySlot, edit.field == NetCardEdit::Name ? "name" : "alignment", edit.text);
+					Log(MESSAGE, "Net", "Slot {} ({}) changes card {}: {} '{}'.", info->slot, info->name, edit.partySlot, NetCardEdit::FieldName(edit.field), edit.text);
 					return true;
 				}
 			default:
@@ -5331,7 +5331,7 @@ bool NetSession::EditCard(uint8_t partySlot, uint8_t field, const std::string& t
 	msg.text = text;
 	if (!partySlot || partySlot > NET_PARTY_SLOTS || field >= NetCardEdit::count) return false;
 	impl->Send(impl->server, msg);
-	Log(MESSAGE, "Net", "Asked the host to change card {}: {} '{}'.", partySlot, field == NetCardEdit::Name ? "name" : "alignment", text);
+	Log(MESSAGE, "Net", "Asked the host to change card {}: {} '{}'.", partySlot, NetCardEdit::FieldName(field), text);
 	return true;
 }
 

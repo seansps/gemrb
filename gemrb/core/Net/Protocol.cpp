@@ -957,6 +957,12 @@ bool NetDCCRecord::Read(NetReader& r)
 	return r.Ok();
 }
 
+const char* NetCardEdit::FieldName(uint8_t field)
+{
+	static const char* names[] = { "name", "alignment", "species", "sex", "look" };
+	return field < Field::count ? names[field] : "?";
+}
+
 void NetCardEdit::Write(NetWriter& w) const
 {
 	w.U8(partySlot);

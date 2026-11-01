@@ -31,7 +31,7 @@
 namespace GemRB {
 
 constexpr uint8_t NET_MAGIC = 0xE7;
-constexpr uint8_t NET_PROTOCOL_VERSION = 15;
+constexpr uint8_t NET_PROTOCOL_VERSION = 16;
 constexpr uint16_t NET_DEFAULT_PORT = 27015;
 constexpr size_t NET_HEADER_SIZE = 3;
 constexpr size_t NET_MAX_STRING = 1024;
@@ -693,8 +693,12 @@ struct GEM_EXPORT NetCardEdit {
 	enum Field : uint8_t {
 		Name, // text: the new name (at most NET_MAX_CARD_NAME bytes)
 		Alignment, // text: "1" lawful, "2" neutral, "3" chaotic
+		Species, // v16 (M3.5): text: the race, "1" human, "2" elf, "4" dwarf, "5" halfling
+		Sex, // v16: text: "1" male, "2" female
+		Look, // v16: text: "PART STEP", a look part (FunnelRoll.LOOK_PARTS' index) and -1 or 1
 		count
 	};
+	static const char* FieldName(uint8_t field);
 	uint8_t partySlot = 0; // the card's, 1-16
 	uint8_t field = Name;
 	std::string text;
