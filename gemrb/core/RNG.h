@@ -30,6 +30,22 @@ private:
 public:
 	static RNG& getInstance();
 
+	// a fixed seed, for reproducible runs (autotests)
+	void seed(uint32_t value) noexcept
+	{
+		engine.seed(value);
+	}
+	// FastForward: what drawing draws from the generator is put back, so a run is the same at
+	// any number of ticks per drawn frame
+	std::mt19937_64 GetState() const noexcept
+	{
+		return engine;
+	}
+	void SetState(const std::mt19937_64& state) noexcept
+	{
+		engine = state;
+	}
+
 	/**
 	 * It is possible to generate random numbers from [-min, +/-max].
 	 * It is only necessary that the upper bound is larger or equal to the lower bound - with the exception

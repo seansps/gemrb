@@ -229,12 +229,15 @@ constexpr const char* PARTY_AI_SCRIPT = "DCCPARTY";
 GEM_EXPORT const char* PartyAIName(PartyAI mode);
 
 // "CHAR" (M2.10): what didn't fit the CRE's DCC block. At run time these are the stats
-// IE_DCC_WEIGHT and IE_DCC_PARTYAI; the record only carries them through CREs and saves
-// (CREImporter moves them into the stats on load and back on save).
+// IE_DCC_WEIGHT and IE_DCC_PARTYAI (and since version 2, M2.11, IE_DCC_HAIR and IE_DCC_BEARD);
+// the record only carries them through CREs and saves (CREImporter moves them into the stats
+// on load and back on save).
 struct Body {
 	uint16_t weight = 0; // body weight in pounds, 0 not rolled
 	PartyAI partyAI = DEFAULT_PARTY_AI;
-	bool Empty() const { return !weight && partyAI == DEFAULT_PARTY_AI; }
+	uint8_t hair = 0; // the hair overlay's style id (dcchair.2da), 0 none
+	uint8_t beard = 0; // the beard overlay's style id, 0 none
+	bool Empty() const { return !weight && partyAI == DEFAULT_PARTY_AI && !hair && !beard; }
 };
 
 struct RawRecord {

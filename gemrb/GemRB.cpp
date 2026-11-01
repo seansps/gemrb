@@ -33,6 +33,8 @@ int main(int argc, char* argv[])
 	setenv("MALLOC_TRIM_THRESHOLD_", fmt::format("{}", 5 * pagesize), 1);
 #endif
 
+	// autotests: 0 passed, 1 failed, 2 timed out (see Interface::CheckAutotest)
+	int autotestStatus = 0;
 	try {
 		auto cfg = LoadFromArgs(argc, argv);
 
@@ -50,6 +52,7 @@ int main(int argc, char* argv[])
 
 		Interface gemrb(std::move(cfg));
 		gemrb.Main();
+		autotestStatus = gemrb.autotestStatus;
 	} catch (CoreInitializationException& cie) {
 		Log(FATAL, "Main", "Aborting due to fatal error... {}", cie);
 		return GEM_ERROR;
@@ -58,5 +61,5 @@ int main(int argc, char* argv[])
 	VideoDriver.reset();
 	PluginMgr::Get()->RunCleanup();
 
-	return GEM_OK;
+	return autotestStatus ? autotestStatus : GEM_OK;
 }

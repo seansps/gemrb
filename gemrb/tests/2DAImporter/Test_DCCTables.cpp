@@ -1051,6 +1051,39 @@ TEST(DCC_Tables, BodyWeight)
 	}
 }
 
+// M2.11: the hair and beard overlays (dcchair.2da), the walk speeds (moverate.2da) and the avatars
+TEST(DCC_Tables, Looks)
+{
+	auto table = Open2DA("dcchair");
+	ASSERT_TRUE(table);
+	HairTable hair;
+	ASSERT_TRUE(hair.Load(*table));
+	const HairStyle* parted = hair.Find(1, false);
+	ASSERT_NE(parted, nullptr);
+	EXPECT_EQ(HairOverlay(parted, false), "HP");
+	EXPECT_EQ(HairOverlay(parted, true), ""); // hidden under a helmet
+	const HairStyle* beard = hair.Find(1, true);
+	ASSERT_NE(beard, nullptr);
+	EXPECT_EQ(HairOverlay(beard, true), "BD"); // a beard shows under a helmet
+	EXPECT_EQ(hair.Find(0, false), nullptr);
+
+	auto rates = Open2DA("moverate");
+	ASSERT_TRUE(rates);
+	for (TableMgr::index_t row = 0; row < rates->GetRowCount(); ++row) {
+		EXPECT_EQ(rates->QueryFieldSigned<int>(row, 1), 9) << rates->QueryField(row, 0);
+	}
+	auto avatars = Open2DA("avatars");
+	ASSERT_TRUE(avatars);
+	std::set<std::string> ids;
+	for (TableMgr::index_t row = 0; row < avatars->GetRowCount(); ++row) {
+		ids.insert(avatars->GetRowName(row));
+		EXPECT_EQ(avatars->QueryField(row, 4), "0"); // TYPE 0, IE_ANI_CODE_MIRROR
+		EXPECT_NE(avatars->QueryField(row, 7), "*"); // a SIZE letter: overlays on
+	}
+	EXPECT_EQ(avatars->QueryField(avatars->GetRowIndex("0x6510"), 7), "F"); // the female rig's own overlays
+	EXPECT_EQ(ids, (std::set<std::string> { "0x6500", "0x6501", "0x6510" }));
+}
+
 // Phase 3: the formations for parties of 16 (formatio.2da): 20 places each, none shared
 TEST(DCC_Tables, Formations)
 {

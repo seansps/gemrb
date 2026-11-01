@@ -639,7 +639,10 @@ namespace GemRB {
 // funnel risks (M2.10), kept in the CRE extension's CHAR record
 #define IE_DCC_WEIGHT     320 // body weight in pounds (0: not rolled, the race's average stands in); the load limits
 #define IE_DCC_PARTYAI    321 // DCC::PartyAI: what the DCC party AI script (DCCPARTY) lets a party member do on its own
-#define IE_DCC_LAST       321
+// looks (M2.11), kept in the CHAR record too: the hair and beard overlays (DCC/Looks.h, dcchair.2da), 0 none
+#define IE_DCC_HAIR       322
+#define IE_DCC_BEARD      323
+#define IE_DCC_LAST       323
 
 }
 

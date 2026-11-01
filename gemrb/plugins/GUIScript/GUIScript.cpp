@@ -6958,6 +6958,15 @@ static PyObject* GemRB_GetDCCStats(PyObject* /*self*/, PyObject* args)
 	DictInt(dict, "WalkSpeed", actor->CalculateSpeed(false));
 	DictInt(dict, "PartyAI", actor->GetBase(IE_DCC_PARTYAI));
 	PyDict_SetItemString(dict, "PartyAIName", DecRef(PyString_FromString, DCC::PartyAIName(DCC::PartyAI(std::min<ieDword>(actor->GetBase(IE_DCC_PARTYAI), ieDword(DCC::PartyAI::count))))));
+	// M2.11: looks, the overlays drawn now (the style's, or the one under a helmet), the stance
+	DictInt(dict, "Hair", actor->GetBase(IE_DCC_HAIR));
+	DictInt(dict, "Beard", actor->GetBase(IE_DCC_BEARD));
+	const CharAnimations* looks = actor->GetAnims();
+	PyDict_SetItemString(dict, "HairOverlay", DecRef(PyString_FromString, looks ? looks->GetHairRef().c_str() : ""));
+	PyDict_SetItemString(dict, "BeardOverlay", DecRef(PyString_FromString, looks ? looks->GetBeardRef().c_str() : ""));
+	DictInt(dict, "Stance", actor->GetStance());
+	DictInt(dict, "Engaged", actor->DCCEngaged());
+	DictInt(dict, "GameTicks", core->GetGame()->GameTime); // for tests that time things in ticks
 
 	const DCC::LevelRow* row = rules->classes.Row(cls, level);
 	DictInt(dict, "SpellsKnown", row ? row->spellsKnown : 0);
@@ -7083,6 +7092,36 @@ static PyObject* GemRB_DCCLevelUp(PyObject* /*self*/, PyObject* args)
 	// co-op: the host rolls it for the owner (v12), the client gets the new numbers back
 	if (!NetForward(NetGuiOp::DCCLevelUp, { globalID, classID })) return PyLong_FromLong(-2);
 	return PyLong_FromLong(actor->DCCLevelUp(classID));
+}
+
+PyDoc_STRVAR(GemRB_SaveScreenshot__doc,
+	     "===== SaveScreenshot =====\n\
+\n\
+**Prototype:** GemRB.SaveScreenshot (path[, globalID])\n\
+\n\
+**Description:** Draws the game window (the area, without the GUI) and writes it to a BMP file, \n\
+so autotests can look at sprites and colours. For tests.\n\
+\n\
+**Parameters:**\n\
+  * path - the file to write\n\
+  * globalID - party ID or global ID of an actor to centre the view on first\n\
+\n\
+**Return value:** True if it was written");
+
+static PyObject* GemRB_SaveScreenshot(PyObject* /*self*/, PyObject* args)
+{
+	const char* cpath = nullptr;
+	int globalID = 0;
+	PARSE_ARGS(args, "s|i", &cpath, &globalID);
+	const Actor* center = nullptr;
+	const Game* game = core->GetGame();
+	if (globalID && game) {
+		center = globalID > 1000 ? game->GetActorByGlobalID(globalID) : game->FindPC(globalID);
+	}
+	if (!core->WriteScreenshot(path_t(cpath), center)) {
+		Py_RETURN_FALSE;
+	}
+	Py_RETURN_TRUE;
 }
 
 PyDoc_STRVAR(GemRB_DCCForceDice__doc,
@@ -7455,6 +7494,35 @@ static PyObject* GemRB_DCCSetBodyWeight(PyObject* /*self*/, PyObject* args)
 		return PyLong_FromLong(pounds);
 	}
 	return PyLong_FromLong(actor->DCCRollBodyWeight());
+}
+
+PyDoc_STRVAR(GemRB_DCCSetLooks__doc,
+	     "===== DCCSetLooks =====\n\
+\n\
+**Prototype:** GemRB.DCCSetLooks (globalID, hair, beard)\n\
+\n\
+**Description:** Sets a DCC character's hair and beard overlays (style ids of dcchair.2da, 0 none; \n\
+-1 keeps the current one). The host's (or single player's) call: the funnel's rolling screen and \n\
+tests; co-op clients get the stats.\n\
+\n\
+**Return value:** True if set, False if refused (a co-op client)\n\
+\n\
+**See also:** [GetDCCStats](GetDCCStats.md)");
+
+static PyObject* GemRB_DCCSetLooks(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int hair = -1;
+	int beard = -1;
+	PARSE_ARGS(args, "iii", &globalID, &hair, &beard);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	const NetSession* net = core->GetNetSession();
+	if (net && !net->IsHost()) Py_RETURN_FALSE;
+	if (hair >= 0) actor->SetBase(IE_DCC_HAIR, ieDword(std::min(hair, 0xff)));
+	if (beard >= 0) actor->SetBase(IE_DCC_BEARD, ieDword(std::min(beard, 0xff)));
+	actor->DCCUpdateLooks();
+	Py_RETURN_TRUE;
 }
 
 PyDoc_STRVAR(GemRB_DCCSetDeeds__doc,
@@ -15060,6 +15128,8 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(DCCRoll, METH_VARARGS),
 	METHOD(DCCLevelUp, METH_VARARGS),
 	METHOD(DCCForceDice, METH_VARARGS),
+	METHOD(SaveScreenshot, METH_VARARGS),
+	METHOD(DCCSetLooks, METH_VARARGS),
 	METHOD(DCCAttack, METH_VARARGS),
 	METHOD(GetDCCLastAttack, METH_VARARGS),
 	METHOD(GetDCCCombatLog, METH_VARARGS),

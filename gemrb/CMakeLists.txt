@@ -247,6 +247,7 @@ IF (BUILD_TESTING)
     tests/core/DCC/Test_Luck.cpp
     tests/core/DCC/Test_Magic.cpp
     tests/core/DCC/Test_Learning.cpp
+    tests/core/DCC/Test_Looks.cpp
     tests/core/Test_BucketPriorityQueue.cpp
     tests/core/Test_Map.cpp
     tests/core/Test_Movement.cpp

@@ -11,6 +11,7 @@
 #include "Palette.h"
 #include "RNG.h"
 
+#include "DCC/Looks.h"
 #include "Logging/Logging.h"
 
 namespace GemRB {
@@ -34,6 +35,26 @@ static const int zOrder_Mirror16[16][4] = {
 	{ 0, 3, 1, 2 },
 	{ 0, 3, 1, 2 },
 	{ 0, 3, 2, 1 }
+};
+
+// DCC (M2.11): the hair and beard overlays (parts 4 and 5) right over the body, under the helmet
+static const int zOrder_Mirror16DCC[16][6] = {
+	{ 0, 4, 5, 3, 2, 1 },
+	{ 0, 4, 5, 3, 2, 1 },
+	{ 0, 4, 5, 3, 1, 2 },
+	{ 0, 4, 5, 3, 1, 2 },
+	{ 1, 0, 4, 5, 3, 2 },
+	{ 1, 0, 4, 5, 3, 2 },
+	{ 1, 0, 4, 5, 3, 2 },
+	{ 1, 0, 4, 5, 3, 2 },
+	{ 1, 0, 4, 5, 3, 2 },
+	{ 1, 0, 4, 5, 3, 2 },
+	{ 1, 0, 4, 5, 3, 2 },
+	{ 1, 0, 4, 5, 3, 2 },
+	{ 1, 0, 4, 5, 3, 2 },
+	{ 0, 4, 5, 3, 1, 2 },
+	{ 0, 4, 5, 3, 1, 2 },
+	{ 0, 4, 5, 3, 2, 1 }
 };
 
 static const int zOrder_8[8][4] = {
@@ -339,6 +360,8 @@ int CharAnimations::GetTotalPartCount() const
 		case IE_ANI_FOUR_FILES_2:
 			return GetActorPartCount() + 1; // only weapon
 		case IE_ANI_CODE_MIRROR:
+			// DCC (M2.11): and the hair and beard overlays
+			if (core->HasFeature(GFFlags::RULES_DCC)) return GetActorPartCount() + 5;
 			return GetActorPartCount() + 3; // equipment
 		case IE_ANI_TWENTYTWO:
 			return GetActorPartCount() + 3; // equipment
@@ -434,6 +457,15 @@ void CharAnimations::SetOffhandRef(AnimRef ref)
 	DropAnims();
 	PartPalettes[PaletteType::OFFHAND] = nullptr;
 	ModPartPalettes[PaletteType::OFFHAND] = nullptr;
+}
+
+void CharAnimations::SetHairRefs(AnimRef hair, AnimRef beard)
+{
+	if (hair == HairRef && beard == BeardRef) return;
+	HairRef = hair;
+	BeardRef = beard;
+	// they take the body's palette, nothing of their own to drop
+	DropAnims();
 }
 
 void CharAnimations::LockPalette(const ieDword* gradients)
@@ -600,6 +632,7 @@ Holder<Palette> CharAnimations::GetPartPalette(int part) const
 		type = PaletteType::OFFHAND;
 	else if (part == actorPartCount + 2)
 		type = PaletteType::HELMET;
+	// DCC hair and beard overlays (part + 3, + 4) take the body's palette (MAIN)
 
 	if (ModPartPalettes[type])
 		return ModPartPalettes[type];
@@ -952,6 +985,13 @@ const CharAnimations::PartAnim* CharAnimations::GetAnimation(unsigned char stanc
 				if (HelmetRef[0] == 0) continue;
 				// helmet
 				GetEquipmentResRef(HelmetRef, false, NewResRef, Cycle, equipment);
+			} else if (part == actorPartCount + 3) {
+				// DCC (M2.11): hair, then the beard (already swapped for the style under a helmet)
+				if (HairRef[0] == 0) continue;
+				GetEquipmentResRef(HairRef, false, NewResRef, Cycle, equipment);
+			} else if (part == actorPartCount + 4) {
+				if (BeardRef[0] == 0) continue;
+				GetEquipmentResRef(BeardRef, false, NewResRef, Cycle, equipment);
 			}
 		}
 
@@ -1390,6 +1430,7 @@ const int* CharAnimations::GetZOrder(unsigned char Orient) const
 {
 	switch (GetAnimType()) {
 		case IE_ANI_CODE_MIRROR:
+			if (GetTotalPartCount() == GetActorPartCount() + 5) return zOrder_Mirror16DCC[Orient];
 			return zOrder_Mirror16[Orient];
 		case IE_ANI_TWENTYTWO:
 			return zOrder_8[Orient / 2];
@@ -2930,6 +2971,10 @@ Palette SetupGlobalRGBModification(const Holder<Palette>& src, const RGBModifier
 Palette SetupPaperdollColours(const ieDword* colors, unsigned int type) noexcept
 {
 	unsigned int s = Clamp<ieDword>(8 * type, 0, 8 * sizeof(ieDword) - 1);
+	// DCC (M2.11): the weapon, off-hand and helmet overlays take colour bytes 1-3, as in the IE games
+	if (core->HasFeature(GFFlags::RULES_DCC) && type >= UnderType(PaletteType::WEAPON)) {
+		s = 8 * DCC::OverlayColourByte(type);
+	}
 	constexpr uint8_t numCols = 12;
 	Palette pal;
 	Palette::Colors buffer;

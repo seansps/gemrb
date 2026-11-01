@@ -38,6 +38,7 @@
 #include "Strings/StringConversion.h"
 #include "Strings/StringMap.h"
 
+#include <list>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -362,7 +363,8 @@ private:
 	/** Next Script Name */
 	path_t nextScript;
 
-	std::deque<Timer> timers;
+	// a list: ending a timer keeps the others where they are (TextArea holds on to its history timer)
+	std::list<Timer> timers;
 	std::unique_ptr<KeyMap> keyMap;
 	std::unique_ptr<NetSession> netSession; // only set when networked co-op is enabled
 	std::unique_ptr<PromptManager> prompts; // "ask the owning player", single player and co-op
@@ -721,11 +723,24 @@ private:
 	void HandleGUIBehaviour(GameControl*);
 	/** Executes everything (non graphical) in the main game loop */
 	void GameLoop(void);
+	/** FastForward: what drawing a frame advances, for the ticks that aren't drawn */
+	void UpdateUndrawnFrame() const;
+	/** autotests: the scenario globals of a new or loaded game, the quit and the time limit */
+	void SetAutotestGlobals() const;
+	void CheckAutotest();
+
+public:
+	/** tests: draws the game window (the area, no GUI) and writes it to a BMP file */
+	bool WriteScreenshot(const path_t& path, const Actor* center = nullptr) const;
+
+private:
 	/** the internal (without cache) part of GetListFrom2DA */
 	std::vector<ieDword> GetListFrom2DAInternal(const ResRef& resref) const;
 
 public:
 	CoreSettings config;
+	// autotests: 0 passed (or none), 1 failed (AutotestQuit's global isn't 1), 2 timed out
+	int autotestStatus = 0;
 	ResRef GameNameResRef; // baldur / icewind / torment base name for GAM/SAV/BMP files in saves
 	ResRef GoldResRef; //MISC07.itm
 	ResRefMap<ItemList> RtRows;

@@ -21,6 +21,7 @@
 #include "DisplayMessage.h"
 #include "EffectQueue.h"
 #include "Factory.h"
+#include "ImageWriter.h"
 #include "FontManager.h"
 #include "KeyMap.h"
 #include "Map.h"
@@ -68,6 +69,7 @@ namespace GemRB {
 
 GEM_EXPORT PluginHolder<Video> VideoDriver;
 GEM_EXPORT Interface* core = nullptr;
+GEM_EXPORT std::atomic<tick_t> FixedClock { 0 };
 
 [[noreturn]]
 static void ThrowException(const std::string& msg)
@@ -301,6 +303,21 @@ Interface::Interface(CoreSettings&& cfg)
 
 	SetDebugMode(DebugMode(config.debugMode));
 
+	// autotests: a reproducible run
+	if (config.RandomSeed) {
+		RNG::getInstance().seed(config.RandomSeed);
+		Log(MESSAGE, "Core", "RNG seeded with {}.", config.RandomSeed);
+	}
+	if (config.FastForward && !config.NetMode.empty()) {
+		Log(WARNING, "Core", "FastForward is for single player autotests, ignored in co-op.");
+		config.FastForward = 0;
+	}
+	if (config.FastForward) {
+		// start from the same time every run
+		FixedClock = 1000000;
+		Log(MESSAGE, "Core", "Fast-forward: {} ticks per drawn frame on a fixed-step clock.", config.FastForward);
+	}
+
 #if defined(WIN32)
 	const uint32_t codepage = GetACP();
 	const char* iconvCode = GetIconvNameForCodepage(codepage);
@@ -474,7 +491,7 @@ Interface::Interface(CoreSettings&& cfg)
 				config.Bpp,
 				fullscreen,
 				config.GameName.c_str(),
-				config.CapFPS == 0);
+				config.CapFPS == 0 && !config.FastForward);
 
 		if (createDisplayResult == GEM_ERROR) {
 			ThrowException("Cannot initialize shaders.");
@@ -1051,46 +1068,68 @@ void Interface::Main()
 
 	double frames = 0.0;
 
+	const tick_t oneTick = 1000 / Time.ticksPerSec;
+	// autotests: FastForward ticks a frame, each a tick of the fixed-step clock
+	const int ticksPerFrame = std::max(1, config.FastForward);
 	do {
-		for (auto it = timers.begin(); it != timers.end();) {
-			if (it->IsRunning()) {
-				it->Update(time);
-				++it;
-			} else {
-				it = timers.erase(it);
+		for (int tick = 0; tick < ticksPerFrame && !(QuitFlag & QF_KILL); ++tick) {
+			if (config.FastForward) {
+				if (tick > 0) {
+					// what drawing the skipped frame would have advanced (animations, hibernation)
+					UpdateUndrawnFrame();
+				}
+				FixedClock += oneTick;
+			}
+
+			// the timers there were when the pass began: one an action adds waits for the next pass
+			size_t count = timers.size();
+			for (auto it = timers.begin(); count && it != timers.end(); --count) {
+				if (it->IsRunning()) {
+					it->Update(time);
+					++it;
+				} else {
+					it = timers.erase(it);
+				}
+			}
+
+			//don't change script when quitting is pending
+			while (QuitFlag && QuitFlag != QF_KILL) {
+				HandleFlags();
+			}
+
+			if (gamectrl) {
+				//eventflags are processed only when there is a game
+				if (EventFlag) {
+					HandleEvents();
+				}
+				HandleGUIBehaviour(gamectrl);
+			}
+
+			time = GetMilliseconds();
+
+			bool doGameStateUpdate = time - lastGameUpdate >= oneTick;
+			if (doGameStateUpdate) {
+				GameLoop();
+				// TODO: find other animations that need to be synchronized
+				// we can create a manager for them and everything can be updated at once
+				GlobalColorCycle.AdvanceTime(time);
+				lastGameUpdate = time;
+				CheckAutotest();
+			}
+			// co-op clients move actors between snapshots at the frame rate
+			if (netSession) {
+				netSession->Frame();
 			}
 		}
 
-		//don't change script when quitting is pending
-		while (QuitFlag && QuitFlag != QF_KILL) {
-			HandleFlags();
+		if (config.FastForward) {
+			// drawing (sparks, weather, random start frames) doesn't use up the game's dice
+			auto dice = RNG::getInstance().GetState();
+			winmgr->DrawWindows();
+			RNG::getInstance().SetState(dice);
+		} else {
+			winmgr->DrawWindows();
 		}
-
-		if (gamectrl) {
-			//eventflags are processed only when there is a game
-			if (EventFlag) {
-				HandleEvents();
-			}
-			HandleGUIBehaviour(gamectrl);
-		}
-
-		time = GetMilliseconds();
-
-		static const tick_t oneTick = 1000 / Time.ticksPerSec;
-		bool doGameStateUpdate = time - lastGameUpdate >= oneTick;
-		if (doGameStateUpdate) {
-			GameLoop();
-			// TODO: find other animations that need to be synchronized
-			// we can create a manager for them and everything can be updated at once
-			GlobalColorCycle.AdvanceTime(time);
-			lastGameUpdate = time;
-		}
-		// co-op clients move actors between snapshots at the frame rate
-		if (netSession) {
-			netSession->Frame();
-		}
-
-		winmgr->DrawWindows();
 		if (config.DrawFPS) {
 			frame++;
 			if (time - timebase > 1000) {
@@ -1996,6 +2035,72 @@ void Interface::GameLoop(void)
 	}
 }
 
+void Interface::UpdateUndrawnFrame() const
+{
+	// as WindowManager::DrawWindows and GameControl::DrawSelf
+	if (!gamectrl || !game || !winmgr->GetGameWindow()->IsVisible()) return;
+	Map* area = game->GetCurrentArea();
+	if (area) {
+		auto dice = RNG::getInstance().GetState();
+		area->UpdateDrawingStates();
+		RNG::getInstance().SetState(dice);
+	}
+}
+
+bool Interface::WriteScreenshot(const path_t& path, const Actor* center) const
+{
+	Window* gameWin = winmgr ? winmgr->GetGameWindow() : nullptr;
+	if (!gameWin) return false;
+	if (center && gamectrl) {
+		gamectrl->MoveViewportTo(center->Pos, true);
+	}
+	Holder<Sprite2D> shot = winmgr->GetScreenshot(gameWin);
+	PluginHolder<ImageWriter> writer = MakePluginHolder<ImageWriter>(PLUGIN_IMAGE_WRITER_BMP);
+	FileStream out;
+	if (!shot || !writer || !out.Create(path)) return false;
+	writer->PutImage(&out, std::move(shot));
+	Log(MESSAGE, "Core", "Screenshot written to {}.", path);
+	return true;
+}
+
+// AutotestScenario=fight,gate: AT_ONLY, AT_FIGHT and AT_GATE are set, which the autotests
+// (area scripts and GUIScripts) read; "all" (or none) runs everything
+void Interface::SetAutotestGlobals() const
+{
+	if (config.AutotestScenario.empty() || config.AutotestScenario == "all") return;
+	game->locals[ieVariable("AT_ONLY")] = 1;
+	for (const auto& name : Explode<std::string, std::string>(config.AutotestScenario, ',')) {
+		std::string trimmed = name;
+		TrimString(trimmed);
+		if (trimmed.empty()) continue;
+		std::transform(trimmed.begin(), trimmed.end(), trimmed.begin(), ::toupper);
+		ieVariable var;
+		var.Format("AT_{:.29}", trimmed);
+		game->locals[var] = 1;
+		Log(MESSAGE, "Core", "Autotest scenario: {} ({}).", trimmed, var);
+	}
+}
+
+void Interface::CheckAutotest()
+{
+	if (QuitFlag & QF_KILL) return;
+	static const tick_t started = GetMilliseconds();
+	if (game && !config.AutotestQuit.empty()) {
+		auto lookup = game->locals.find(ieVariable(config.AutotestQuit));
+		if (lookup != game->locals.end() && lookup->second) {
+			Log(MESSAGE, "Core", "Autotest: {} is {}, quitting after {:.1f} s of game clock.", config.AutotestQuit, lookup->second, (GetMilliseconds() - started) / 1000.0);
+			autotestStatus = lookup->second == 1 ? 0 : 1;
+			QuitFlag |= QF_EXITGAME;
+			return;
+		}
+	}
+	if (config.AutotestTimeout > 0 && GetMilliseconds() - started > tick_t(config.AutotestTimeout) * 1000) {
+		Log(ERROR, "Core", "Autotest: timed out after {} s, quitting.", config.AutotestTimeout);
+		autotestStatus = 2;
+		QuitFlag |= QF_EXITGAME;
+	}
+}
+
 /** handles hardcoded gui behaviour */
 void Interface::HandleGUIBehaviour(GameControl* gc)
 {
@@ -2694,6 +2799,7 @@ void Interface::LoadGame(Holder<SaveGame> sg, GAMVersion verOverride)
 	// Let's assume that now is everything loaded OK and swap the objects
 	game = std::move(newGame);
 	worldmap = std::move(newWorldmap);
+	SetAutotestGlobals();
 
 	strings->OpenAux();
 	LoadProgress(70);

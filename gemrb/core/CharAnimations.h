@@ -184,6 +184,8 @@ public:
 	void SetHelmetRef(AnimRef ref);
 	void SetWeaponRef(AnimRef ref);
 	void SetOffhandRef(AnimRef ref);
+	// DCC (M2.11): the hair and beard overlays' animation codes (empty: none), see DCC/Looks.h
+	void SetHairRefs(AnimRef hair, AnimRef beard);
 	void SetColors(const ieDword* Colors);
 	void CheckColorMod();
 	void SetupColors(PaletteType type);
@@ -291,6 +293,13 @@ private:
 	AnimRef HelmetRef;
 	AnimRef WeaponRef;
 	AnimRef OffhandRef;
+	AnimRef HairRef;
+	AnimRef BeardRef;
+
+public:
+	const AnimRef& GetHairRef() const { return HairRef; }
+	const AnimRef& GetBeardRef() const { return BeardRef; }
+	bool HasHelmet() const { return HelmetRef[0] != 0; }
 };
 
 GEM_EXPORT Palette SetupPaperdollColours(const ieDword* Colors, unsigned int type) noexcept;

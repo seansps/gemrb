@@ -22,6 +22,7 @@
 #include "Streams/DataStream.h"
 
 #include <algorithm>
+#include <atomic>
 #include <bitset>
 #include <chrono>
 #include <climits>
@@ -159,10 +160,20 @@ GEM_EXPORT bool Schedule(ieDword schedule, ieDword time);
 #define SCHEDULE_MASK(time) (1 << core->Time.GetHour(time - core->Time.hour_size / 2))
 
 using tick_t = unsigned long; // milliseconds
-inline tick_t GetMilliseconds()
+inline tick_t GetRealMilliseconds()
 {
 	using namespace std::chrono;
 	return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
+
+// autotests (FastForward): the game runs on a fixed-step clock that Interface::Main advances a
+// tick at a time, instead of the wall clock; 0 when off
+extern GEM_EXPORT std::atomic<tick_t> FixedClock;
+
+inline tick_t GetMilliseconds()
+{
+	tick_t fixed = FixedClock.load(std::memory_order_relaxed);
+	return fixed ? fixed : GetRealMilliseconds();
 }
 
 template<typename T>

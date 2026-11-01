@@ -429,6 +429,8 @@ IE_DCC_LOHMOD                   = 318 # lay on hands check modifier
 IE_DCC_MUTATION                 = 319 # mutation bits
 IE_DCC_WEIGHT                   = 320 # body weight in pounds (0: the race's average)
 IE_DCC_PARTYAI                  = 321 # the party AI mode (DCC_AI_*)
+IE_DCC_HAIR                     = 322 # the hair overlay's style id (dcchair.2da), 0 none (M2.11)
+IE_DCC_BEARD                    = 323 # the beard overlay's style id, 0 none
 
 # the DCC party AI modes (IE_DCC_PARTYAI, the DCCPARTY script) and loads (GetDCCStats "Load"), M2.10
 DCC_AI_DEFEND = 0

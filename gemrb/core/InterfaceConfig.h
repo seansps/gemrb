@@ -148,6 +148,14 @@ struct CoreSettings {
 	// test hook for prompts without a session (single player): "tick:order;..." as NetTestOrders'
 	// ask and prompt orders, see PromptManager::RunTestOrder
 	std::string TestPrompts;
+	// autotests: seed the RNG (0: from the time); FastForward runs this many logic ticks per drawn
+	// frame on a fixed-step clock (0: real time); the scenarios to run ("all" if empty, each sets the
+	// global AT_<name> and AT_ONLY); quit once this global is set; quit after this many seconds
+	unsigned int RandomSeed = 0;
+	int FastForward = 0;
+	std::string AutotestScenario;
+	std::string AutotestQuit;
+	int AutotestTimeout = 0;
 
 	variables_t vars;
 };

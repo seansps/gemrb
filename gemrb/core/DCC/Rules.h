@@ -23,6 +23,7 @@
 #include "DCC/CombatTables.h"
 #include "DCC/Deeds.h"
 #include "DCC/Body.h"
+#include "DCC/Looks.h"
 #include "DCC/Learning.h"
 #include "DCC/Magic.h"
 
@@ -83,6 +84,7 @@ public:
 	SpellLists spellLists; // Tables 5-8 and 5-9 (dccspls.2da), Phase 3's level-1 class pick
 	ClericSpellsTable clericSpells; // Table 1-5's spells known (dccclesp.2da)
 	BodyTable body; // M2.10: body weight by race and the load limits (dccbody.2da)
+	HairTable hair; // M2.11: the hair and beard overlays (dcchair.2da)
 
 	/** loads every table through gamedata; logs and returns false if one is missing or bad */
 	bool Load();

@@ -450,6 +450,137 @@ def _LineTravel ():
 	for i in range (2):
 		yield
 
+# --- M2.11: the peasant sprites in the engine -------------------------------------------------
+
+IE_ANI_AWAKE, IE_ANI_READY, IE_ANI_TWITCH = 1, 7, 9
+# script name -> (animation id, hair overlay, beard overlay) as funneltest's CREs give them (Rolf
+# wears a cap: his hair is hidden, his beard isn't)
+LOOKS = {
+	"protagon": (0x6500, "", ""), "fntbrin": (0x6501, "HP", "BD"), "fntodo": (0x6501, "HP", ""),
+	"fntpell": (0x6501, "", "BD"), "fntrolf": (0x6501, "", "BD"), "fntmira": (0x6510, "", ""),
+}
+
+def _Shot (name, center):
+	"""the game window as GemRB draws it, centred on an actor, next to the autotest's saves"""
+	path = GemRB.GetSystemVariable (SV_SAVEPATH) + "/sprites_%s.bmp" % name
+	_Check ("screenshot %s" % name, GemRB.SaveScreenshot (path, center), True)
+
+def _Stances (pcs):
+	return [GemRB.GetDCCStats (pc)["Stance"] for pc in pcs]
+
+def _Sprites ():
+	"""M2.11: the Ethren peasants: looks, the relaxed and combat stances, walk speed, recolouring,
+	the club overlay and its colour, a death; screenshots of each (sprites_*.bmp in the save path)"""
+	pcs = list (range (1, 17))
+	wasOn = GemRB.GetGUIFlags () & GS_PARTYAI
+	GemRB.GameSetScreenFlags (GS_PARTYAI, OP_NAND)
+	spots = _Block (pcs)
+	brin, gorm = _Slot ("fntbrin"), _Slot ("fntgorm")
+	yield
+	# a step south, so they face the camera
+	for pc in pcs:
+		GemRB.GameSelectPC (pc, 1)
+	GemRB.GameControlMoveSelected (BLOCK[0] + 72, BLOCK[1] + 140)
+	GemRB.GameSelectPC (0, 1)
+	yield from _Wait (lambda: not any (stance == 10 for stance in _Stances (pcs)), 40)
+	for name, (anim, hair, beard) in LOOKS.items ():
+		pc = _Slot (name)
+		stats = GemRB.GetDCCStats (pc)
+		_Check ("looks: %s's animation, hair and beard" % name, [GemRB.GetPlayerStat (pc, IE_ANIMATION_ID), stats["HairOverlay"], stats["BeardOverlay"]], [anim, hair, beard])
+	# relaxed: nobody fighting, everyone in the awake idle (G17) once the last fight is over
+	yield from _Wait (lambda: _Stances (pcs) == [IE_ANI_AWAKE] * 16, 60)
+	_Check ("stances: everyone relaxed (awake)", _Stances (pcs), [IE_ANI_AWAKE] * 16)
+	_Shot ("idle", brin)
+	# the looks side by side, facing the camera: CPM1 (baked in), hair and beard, hair, beard, a cap
+	# and a beard, the female (sprites_looks.bmp; they stand 60 px apart, Brin second)
+	row = [_Slot (name) for name in ("protagon", "fntbrin", "fntodo", "fntpell", "fntrolf", "fntmira")]
+	for i, pc in enumerate (row):
+		_Put (pc, BLOCK[0] - 330 + i * 60, BLOCK[1] + 60)
+	yield
+	for i, pc in enumerate (row):
+		GemRB.DCCWalk (pc, BLOCK[0] - 330 + i * 60, BLOCK[1] + 140)
+	yield
+	yield from _Wait (lambda: not any (stance == 10 for stance in _Stances (row)), 40)
+	_Shot ("looks", brin)
+
+	# the walk: rate 9 (moverate.2da), 2 x 566 x 9 / 1500 = 6.8 px a tick straight across
+	_Check ("walk: movement rate 9", GemRB.GetPlayerStat (brin, IE_MOVEMENTRATE), 9)
+	GemRB.ClearActions (brin)
+	here = GemRB.GetActorPosition (brin)
+	GemRB.DCCWalk (brin, here["X"] - 300, here["Y"])
+	yield
+	start, t0 = GemRB.GetActorPosition (brin), GemRB.GetDCCStats (brin)["GameTicks"]
+	yield
+	yield
+	end, t1 = GemRB.GetActorPosition (brin), GemRB.GetDCCStats (brin)["GameTicks"]
+	speed = (start["X"] - end["X"]) / max (1, t1 - t0)
+	_Log ("walk: %d px in %d ticks, %.2f px a tick" % (start["X"] - end["X"], t1 - t0, speed))
+	_Check ("walk: 6-7.6 px a tick (the feet don't slide at 7)", 6.0 <= speed <= 7.6, True)
+	spots = _Block (pcs)
+	yield
+	for pc in pcs:
+		GemRB.GameSelectPC (pc, 1)
+	GemRB.GameControlMoveSelected (BLOCK[0] - 260, BLOCK[1] + 60)
+	yield
+	_Shot ("walking", brin)
+	yield from _Wait (lambda: not any (GemRB.GetDCCStats (pc)["Stance"] == 10 for pc in pcs), 40)
+	GemRB.GameSelectPC (0, 1)
+
+	# recolouring: Brin's major colour madder -> woad blue, his hair black -> white (the hair overlay too)
+	before = [GemRB.GetPlayerStat (brin, stat, 1) for stat in (IE_MAJOR_COLOR, IE_HAIR_COLOR)]
+	GemRB.SetPlayerStat (brin, IE_MAJOR_COLOR, 19)
+	GemRB.SetPlayerStat (brin, IE_HAIR_COLOR, 45)
+	yield
+	_Check ("recolour: brin's colours", [GemRB.GetPlayerStat (brin, stat) & 0xff for stat in (IE_MAJOR_COLOR, IE_HAIR_COLOR)], [19, 45])
+	yield
+	_Shot ("recoloured", brin)
+
+	# a fight: a marauder (the bald male body) at Brin and a female one at Gorm, clubs on both sides.
+	# The club overlay takes byte 1 of the leather colour: the cudgel's equipping effect sets wood (51)
+	_Check ("club: the weapon colour byte (wood)", (GemRB.GetPlayerStat (brin, IE_LEATHER_COLOR) >> 8) & 0xff, 51)
+	spots = _Block (pcs)
+	yield
+	at = lambda pc, dx: (spots[pc][0] + dx, spots[pc][1])
+	male = GemRB.CreateCreature (1, "FNTGOB", *at (brin, -50))
+	female = GemRB.CreateCreature (1, "FNTGOBF", *at (gorm, -50))
+	for gob, pc in ((male, brin), (female, gorm)):
+		_Put (gob, *at (pc, -50))
+		GemRB.DCCForceDice (gob, [2] * 100)
+		GemRB.DCCForceDice (pc, [10] * 100)
+	GemRB.ExecuteString ('Attack("fntbrin")', male)
+	GemRB.ExecuteString ('Attack("fntgorm")', female)
+	# the party AI (defend) has them fight back
+	GemRB.GameSetScreenFlags (GS_PARTYAI, OP_OR)
+	yield from _Wait (lambda: GemRB.GetDCCStats (brin)["Engaged"], 30)
+	_Check ("fight: brin engaged", GemRB.GetDCCStats (brin)["Engaged"], 1)
+	# the rest of the party, not in reach, take the combat stance (G1) while the party fights
+	gobs = [at (brin, -50), at (gorm, -50)]
+	far = [pc for pc in pcs if min ((spots[pc][0] - x) ** 2 + (spots[pc][1] - y) ** 2 for x, y in gobs) > 100 ** 2]
+	_Log ("fight: %d of the party out of reach: %s" % (len (far), far))
+	yield from _Wait (lambda: all (stance == IE_ANI_READY for stance in _Stances (far)), 40)
+	_Check ("stances: the party in the combat stance (ready) in a fight", sorted (set (_Stances (far))), [IE_ANI_READY])
+	for i in range (3):
+		yield
+	_Shot ("combat", brin)
+
+	# both marauders die: the die animation, then the twitch (lying)
+	for gob in (male, female):
+		GemRB.ApplyEffect (gob, "Death", 0, 0)
+	yield from _Wait (lambda: [GemRB.GetDCCStats (gob)["Stance"] for gob in (male, female)] == [IE_ANI_TWITCH] * 2, 40)
+	_Check ("death: both marauders lying (twitch)", [GemRB.GetDCCStats (gob)["Stance"] for gob in (male, female)], [IE_ANI_TWITCH] * 2)
+	_Shot ("dead", brin)
+
+	# as it was: colours, no forced dice, the party AI, no orders
+	GemRB.SetPlayerStat (brin, IE_MAJOR_COLOR, before[0])
+	GemRB.SetPlayerStat (brin, IE_HAIR_COLOR, before[1])
+	for pc in pcs:
+		GemRB.DCCForceDice (pc, [])
+		GemRB.ClearActions (pc)
+	if not wasOn:
+		GemRB.GameSetScreenFlags (GS_PARTYAI, OP_NAND)
+	_Block (pcs)
+	yield
+
 def _ClassPicks ():
 	"""5: the level-1 class picks: spells by class and level, substitutes, open slots, choices"""
 	import DCCLearn
@@ -681,16 +812,51 @@ def _StepLoaded ():
 	_Check ("loaded: the roster", len (Roster.Shown), 16)
 	return "done"
 
+# Scenarios (scripts/run.sh funneltest-auto --scenario NAMES, default all): the engine sets AT_ONLY
+# and AT_<NAME> for the ones picked. Each runs with the ones it needs before it.
+SCENARIOS = (
+	("party", _Party), # 1-3: the sixteen, the roster, formation moves
+	("withdrawal", _Withdrawal), # 4
+	("partyai", _PartyAI), # a
+	("encumbrance", _Encumbrance), # b
+	("linetravel", _LineTravel), # c
+	("sprites", _Sprites), # M2.11: the peasant sprites, with screenshots
+	("classpicks", _ClassPicks), # 5
+	("prompts", _Prompts), # 6
+	("travel", _Travel), # 7
+	("save", None), # 8
+)
+NEEDS = {
+	"prompts": ["classpicks"], # the party settings panel's spellburn lines need the wizards
+	# the load checks what these left: the spells, Rolf's death, the party in the cave
+	"save": ["classpicks", "prompts", "travel"],
+}
+Picked = None
+
+def _PickScenarios ():
+	global Picked, Failures
+	names = [name for name, run in SCENARIOS]
+	if not GemRB.GetGameVar ("AT_ONLY"):
+		Picked = set (names)
+		return
+	asked = [name for name in names if GemRB.GetGameVar ("AT_" + name.upper ())]
+	if not asked:
+		Failures += 1
+		_Log ("FAIL no known scenario picked; they are: " + ", ".join (names))
+	Picked = set (asked)
+	for name in asked:
+		Picked.update (NEEDS.get (name, []))
+	_Log ("scenarios: %s (with what they need: %s)" % (", ".join (asked), ", ".join (n for n in names if n in Picked)))
+
+def _Wanted (name):
+	return Picked is None or name in Picked
+
 def _Run ():
-	yield from _Party ()
-	yield from _Withdrawal ()
-	yield from _PartyAI ()
-	yield from _Encumbrance ()
-	yield from _LineTravel ()
-	yield from _ClassPicks ()
-	yield from _Prompts ()
-	yield from _Travel ()
-	_Save ()
+	for name, run in SCENARIOS:
+		if run and _Wanted (name):
+			yield from run ()
+	if _Wanted ("save"):
+		_Save ()
 
 def _StepRun ():
 	global Steps
@@ -700,7 +866,7 @@ def _StepRun ():
 		next (Steps)
 		return "run"
 	except StopIteration:
-		return "save"
+		return "save" if _Wanted ("save") else "done"
 
 StepTable = {
 	"run": _StepRun,
@@ -716,6 +882,7 @@ def _Tick (token):
 		if Step == "wait":
 			if GemRB.GetGameVar ("FNT_AUTOTEST") == 1:
 				_Log ("autotest start")
+				_PickScenarios ()
 				Step = "run"
 			return
 		if Step == "done":

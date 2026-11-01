@@ -331,10 +331,14 @@ std::vector<uint8_t> WriteExtension(const CharacterExt& ext)
 		++records;
 	}
 	if (!ext.body.Empty()) {
-		size_t at = BeginRecord(out, TAG_CHARACTER, 1);
+		size_t at = BeginRecord(out, TAG_CHARACTER, 2);
 		out.U16(ext.body.weight);
 		out.U8(uint8_t(ext.body.partyAI));
 		out.U8(0);
+		// version 2 (M2.11): the hair and beard overlays
+		out.U8(ext.body.hair);
+		out.U8(ext.body.beard);
+		out.U16(0);
 		EndRecord(out, at);
 		++records;
 	}
@@ -430,6 +434,11 @@ bool ReadExtension(const uint8_t* data, size_t size, CharacterExt& out)
 			ext.body.weight = body.U16();
 			ext.body.partyAI = PartyAI(std::min<uint8_t>(body.U8(), uint8_t(PartyAI::count) - 1));
 			body.U8();
+			if (recordVersion >= 2) {
+				ext.body.hair = body.U8();
+				ext.body.beard = body.U8();
+				body.U16();
+			}
 			if (!body.Ok()) return false;
 		} else {
 			RawRecord raw;

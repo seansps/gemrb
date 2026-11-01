@@ -69,6 +69,8 @@ static void DefaultDCCSettings(Actor* act)
 	act->BaseStats[IE_DCC_COMBATOPT] = 0;
 	act->BaseStats[IE_DCC_WEIGHT] = 0;
 	act->BaseStats[IE_DCC_PARTYAI] = static_cast<ieDword>(DCC::DEFAULT_PARTY_AI);
+	act->BaseStats[IE_DCC_HAIR] = 0;
+	act->BaseStats[IE_DCC_BEARD] = 0;
 }
 
 // returns whether a DCC extension follows the effects
@@ -1966,6 +1968,8 @@ void CREImporter::ReadDCCExtension(Actor* act)
 	// the CHAR record lives in stats at run time
 	act->BaseStats[IE_DCC_WEIGHT] = act->dccExt.body.weight;
 	act->BaseStats[IE_DCC_PARTYAI] = static_cast<ieDword>(act->dccExt.body.partyAI);
+	act->BaseStats[IE_DCC_HAIR] = act->dccExt.body.hair;
+	act->BaseStats[IE_DCC_BEARD] = act->dccExt.body.beard;
 	act->dccExt.body = DCC::Body();
 }
 
@@ -1978,6 +1982,8 @@ int CREImporter::GetStoredFileSize(const Actor* actor)
 		DCC::CharacterExt ext = actor->dccExt;
 		ext.body.weight = static_cast<uint16_t>(std::min<ieDword>(actor->BaseStats[IE_DCC_WEIGHT], 0xffff));
 		ext.body.partyAI = DCC::PartyAI(std::min<ieDword>(actor->BaseStats[IE_DCC_PARTYAI], ieDword(DCC::PartyAI::count) - 1));
+		ext.body.hair = static_cast<uint8_t>(std::min<ieDword>(actor->BaseStats[IE_DCC_HAIR], 0xff));
+		ext.body.beard = static_cast<uint8_t>(std::min<ieDword>(actor->BaseStats[IE_DCC_BEARD], 0xff));
 		if (!ext.Empty()) {
 			dccExtension = DCC::WriteExtension(ext);
 			headersize += int(dccExtension.size());
