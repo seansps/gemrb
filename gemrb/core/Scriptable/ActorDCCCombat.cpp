@@ -40,6 +40,9 @@
 #include "Map.h"
 #include "Prompts.h"
 #include "RNG.h"
+#include "Spell.h"
+#include "TableMgr.h"
+#include "WorldMap.h"
 
 #include "DCC/Combat.h"
 #include "DCC/CombatTables.h"
@@ -51,6 +54,7 @@
 #include "GameScript/GSUtils.h"
 #include "Logging/Logging.h"
 #include "Scriptable/Actor.h"
+#include "Strings/StringConversion.h"
 
 #include <cmath>
 #include <deque>
@@ -726,8 +730,15 @@ void Actor::DCCApplySwingDamage(Actor* target, const DCCSwing& swing, int damage
 	fx->Target = FX_TARGET_PRESET;
 	// a subdual blow that takes the target to 0 hp knocks it out (DCCStartBleeding)
 	target->dccSubdualHit = swing.subdual;
+	// the funnel's cause of death (M3.2): the weapon (a missile's ammunition), nothing for fists
+	ResRef hitBefore = target->dccHitSource;
+	ieDword hitByBefore = target->dccHitBy;
+	if (!swing.bash && swing.wi && swing.wi->item && !inventory.FistsEquipped()) target->dccHitSource = swing.wi->item->Name;
+	target->dccHitBy = GetGlobalID();
 	core->ApplyEffect(std::move(fx), target, this);
 	target->dccSubdualHit = false;
+	target->dccHitSource = hitBefore;
+	target->dccHitBy = hitByBefore;
 }
 
 // what a burn would do for a swing: why, by how much it falls short, whether it would crit
@@ -2084,10 +2095,69 @@ void Actor::DCCCountdownOver(CombatEffect kind)
 {
 	if ((InternalFlags & IF_REALLYDIED) || (Modified[IE_STATE_ID] & STATE_DEAD)) return;
 	Feedback(Name(this) + (kind == CombatEffect::Bleed ? u" bleeds out" : u" succumbs to the wound"), FT_COMBAT);
+	dccDeathNote = kind == CombatEffect::Bleed ? "bled out" : "a festering wound";
 	Die(nullptr);
+	dccDeathNote.clear();
 }
 
-void Actor::DCCOnDeath()
+// the funnel's graveyard (M3.2): the name of what harmed it, an item's or a spell's
+static std::string HarmName(const ResRef& source)
+{
+	if (source.IsEmpty()) return {};
+	String name;
+	bool isItem = gamedata->Exists(source, IE_ITM_CLASS_ID, true);
+	if (isItem) {
+		const Item* item = gamedata->GetItem(source, true);
+		if (item) {
+			name = core->GetString(item->GetItemName(true));
+			gamedata->FreeItem(item, source, false);
+		}
+	} else if (gamedata->Exists(source, IE_SPL_CLASS_ID, true)) {
+		const Spell* spell = gamedata->GetSpell(source, true);
+		if (spell) {
+			name = core->GetString(spell->SpellName);
+			gamedata->FreeSpell(spell, source, false);
+		}
+	}
+	std::string text = name.empty() ? std::string() : MBStringFromString(name);
+	// a weapon is a common noun in the graveyard's line ("crossbow bolt"); a spell keeps its name
+	if (isItem && text.size() > 1 && std::isupper(static_cast<unsigned char>(text[0])) && std::islower(static_cast<unsigned char>(text[1]))) {
+		text[0] = char(std::tolower(static_cast<unsigned char>(text[0])));
+	}
+	if (text.empty()) {
+		text = source.c_str();
+		std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+	}
+	return text;
+}
+
+// the area's name for the graveyard: dccarea.2da (underscores for spaces), else the world map's
+// caption, else its resref
+static std::string FunnelPlace(const Map* map)
+{
+	if (!map) return {};
+	const ResRef& area = map->GetScriptRef();
+	AutoTable table = gamedata->LoadTable("dccarea", true);
+	if (table) {
+		TableMgr::index_t row = table->GetRowIndex(area);
+		if (row != TableMgr::npos) {
+			std::string name = table->QueryField(row, 0);
+			std::replace(name.begin(), name.end(), '_', ' ');
+			if (!name.empty() && name != "*") return name;
+		}
+	}
+	const WorldMap* worldmap = core->GetWorldMap(area);
+	const WMPAreaEntry* entry = worldmap ? worldmap->GetArea(area) : nullptr;
+	if (entry && entry->LocCaptionName != ieStrRef::INVALID) {
+		std::string caption = MBStringFromString(core->GetString(entry->LocCaptionName));
+		if (!caption.empty()) return caption;
+	}
+	std::string name = area.c_str();
+	std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+	return name;
+}
+
+void Actor::DCCOnDeath(const Scriptable* killer)
 {
 	const Game* game = core->GetGame();
 	dccDiedTime = game ? std::max<ieDword>(game->GameTime, 1) : 1;
@@ -2104,6 +2174,21 @@ void Actor::DCCOnDeath()
 		std::string area = map ? std::string(map->GetScriptRef().c_str()) : std::string();
 		std::transform(area.begin(), area.end(), area.begin(), [](unsigned char c) { return char(std::tolower(c)); });
 		dccExt.funnel.diedIn = area;
+		// M3.2: the cause, for the graveyard: who, with what, where
+		const Actor* by = Scriptable::As<Actor>(killer);
+		// a death at 0 hp comes from the hit points changing, with no killer: who struck the blow
+		if (!by && dccHitBy && game) by = game->GetActorByGlobalID(dccHitBy);
+		DCC::Funnel& funnel = dccExt.funnel;
+		funnel.killer = by && by != this ? MBStringFromString(by->GetName()) : std::string();
+		funnel.cause = HarmName(dccHitSource);
+		if (funnel.cause.empty() && by && by != this) {
+			// a weapon in its hand, else bare hands or claws
+			int slot = 0;
+			const CREItem* weapon = by->inventory.GetUsedWeapon(false, slot);
+			if (weapon && !by->inventory.FistsEquipped()) funnel.cause = HarmName(weapon->ItemResRef);
+		}
+		if (funnel.cause.empty()) funnel.cause = dccDeathNote;
+		funnel.place = FunnelPlace(map);
 	}
 }
 

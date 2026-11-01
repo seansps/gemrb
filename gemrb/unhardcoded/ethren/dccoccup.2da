@@ -1,0 +1,90 @@
+2DA V1.0
+*
+# ethren (M3.1): Table 1-3, the 0-level occupations (docs/rules/funnel.md), for the funnel's rolling screen
+# (GUIScripts/ethren/FunnelRoll.py). Rows by the occupation id, the row's lowest d100 number (the OCCU
+# record's id, M2.9); LOW-HIGH the d100 range. RACE is race.ids (1 human, 2 elf, 4 dwarf, 5 halfling). WEAPON
+# and GOOD are rows of dccoccit.2da (the item, its name, ammunition, money). SUB is the row's sub-roll: FARMER
+# the farmer's crop (1d8) and a duplicate's animal, ANIMAL a duplicate's animal (1d6), CART the pushcart's
+# contents (1d6). SKILLS are the skill tags (funnel.md, "Suggested tags per occupation"), | between them.
+# NAME uses _ for spaces.
+     LOW  HIGH RACE WEAPON      GOOD        SUB     SKILLS                              NAME
+1    1    1    1    STAFF       OIL         *       ALCHEMY|LORE_ARCANE|APPRAISAL       Alchemist
+2    2    2    1    CLUB        PONY        *       ANIMALS|PERFORMANCE                 Animal_trainer
+3    3    3    1    HAMMER      IRONHELM    *       SMITHING|MILITARY|APPRAISAL         Armorer
+4    4    4    1    DAGGER      SPYGLASS    *       LORE_STARS|LETTERS|LORE_ARCANE      Astrologer
+5    5    5    1    RAZOR       SCISSORS    *       MEDICINE|HAGGLE                     Barber
+6    6    6    1    STAFF       HOLYSYMB    *       LORE_RELIGION|LETTERS               Beadle
+7    7    7    1    STAFF       HONEY       *       ANIMALS|FARMING|COOKING             Beekeeper
+8    8    8    1    HAMMER      TONGS       *       SMITHING|APPRAISAL                  Blacksmith
+9    9    9    1    CLEAVER     BEEF        *       BUTCHERY|ANIMALS|COOKING            Butcher
+10   10   10   1    SHORTSWORD  LINEN       *       MILITARY|OUTDOORS|ANIMALS           Caravan_guard
+11   11   11   1    CUDGEL      CHEESE      *       COOKING|HAGGLE                      Cheesemaker
+12   12   12   1    AWL         SHOEHORN    *       CRAFT_FINE|HAGGLE                   Cobbler
+13   13   13   1    DAGGER      CLOAK       *       DECEPTION|STEALTH_STREET|HAGGLE     Confidence_artist
+14   14   14   1    CROWBAR     BARREL      *       CARPENTRY                           Cooper
+15   15   15   1    KNIFE       FRUIT       *       HAGGLE|APPRAISAL                    Costermonger
+16   16   16   1    DAGGER      CHEST       *       STEALTH_STREET|LOCKS                Cutpurse
+17   17   17   1    SHOVEL      DIRT        *       DIGGING|MASONRY                     Ditch_digger
+18   18   18   1    POLE        RPGBOOK     *       SEA|ROPE|CLIMB                      Dock_worker
+19   19   19   4    CUDGEL      VIAL        *       ALCHEMY|HERBALISM|MEDICINE          Dwarven_apothecarist
+20   20   20   4    HAMMER      MITHRIL     *       SMITHING|MINING|APPRAISAL           Dwarven_blacksmith
+21   21   21   4    CHISEL      WOOD        *       CARPENTRY|LOCKS                     Dwarven_chest-maker
+22   22   22   4    STAFF       SOW         ANIMAL  ANIMALS|OUTDOORS                    Dwarven_herder
+23   23   24   4    PICK        LANTERN     *       MINING|MASONRY|DIGGING              Dwarven_miner
+25   25   25   4    SHOVEL      SACK        *       FARMING|HERBALISM|MINING            Dwarven_mushroom-farmer
+26   26   26   4    CLUB        NET         *       ANIMALS|FILTH|OUTDOORS              Dwarven_rat-catcher
+27   27   28   4    WARHAMMER   STONE       *       MASONRY|MINING                      Dwarven_stonemason
+29   29   29   2    STAFF       CLAY        *       CRAFT_FINE|APPRAISAL                Elven_artisan
+30   30   30   2    QUILL       BOOK        *       LETTERS|NOBILITY|DECEPTION          Elven_barrister
+31   31   31   2    SCISSORS    CANDLES     *       CRAFT_FINE|ALCHEMY                  Elven_chandler
+32   32   32   2    DAGGER      FALCON      *       ANIMALS|OUTDOORS                    Elven_falconer
+33   33   34   2    STAFF       HERBS       *       OUTDOORS|HERBALISM|CLIMB            Elven_forester
+35   35   35   2    HAMMER      BEADS       *       CRAFT_FINE|ALCHEMY                  Elven_glassblower
+36   36   36   2    SHORTBOW    SPYGLASS    *       SEA|LORE_STARS                      Elven_navigator
+37   37   38   2    DAGGER      PARCHQUIL   *       LETTERS|LORE_ARCANE|LORE_RELIGION   Elven_sage
+39   39   47   1    PITCHFORK   HEN         FARMER  FARMING|ANIMALS|OUTDOORS            Farmer
+48   48   48   1    DAGGER      TAROT       *       LORE_STARS|DECEPTION|PERFORMANCE    Fortune-teller
+49   49   49   1    CLUB        DICE        *       DECEPTION|HAGGLE                    Gambler
+50   50   50   1    TROWEL      NIGHTSOIL   *       FILTH|DIGGING                       Gongfarmer
+51   51   52   1    SHOVEL      TROWEL      *       DIGGING|LORE_RELIGION               Grave_digger
+53   53   54   1    SLING       CRUTCHES    *       STEALTH_STREET|DECEPTION            Guild_beggar
+55   55   55   5    HANDAXE     CHICKEN     *       BUTCHERY|ANIMALS|COOKING            Halfling_chicken_butcher
+56   56   57   5    STAFF       FABRIC      *       CRAFT_FINE|HERBALISM                Halfling_dyer
+58   58   58   5    AWL         GLOVES      *       CRAFT_FINE|HAGGLE                   Halfling_glovemaker
+59   59   59   5    SLING       HEXDOLL     *       DECEPTION|PERFORMANCE|LORE_STARS    Halfling_gypsy
+60   60   60   5    SCISSORS    SUITS       *       CRAFT_FINE|NOBILITY                 Halfling_haberdasher
+61   61   61   5    KNIFE       SAILCLOTH   *       SEA|ROPE|CLIMB                      Halfling_mariner
+62   62   62   5    SHORTSWORD  MONEY62     *       HAGGLE|APPRAISAL|LETTERS            Halfling_moneylender
+63   63   63   5    SHORTSWORD  MONEY63     *       HAGGLE|APPRAISAL                    Halfling_trader
+64   64   64   5    CLUB        BOWL        *       STEALTH_STREET|OUTDOORS             Halfling_vagrant
+65   65   65   1    CLUB        HOLYWATER   *       MEDICINE|HERBALISM|LORE_RELIGION    Healer
+66   66   66   1    CLUB        HERBS       *       HERBALISM|MEDICINE                  Herbalist
+67   67   67   1    STAFF       DOG         ANIMAL  ANIMALS|OUTDOORS                    Herder
+68   68   69   1    SHORTBOW    DEERPELT    *       OUTDOORS|BUTCHERY|ANIMALS           Hunter
+70   70   70   1    STAFF       LOCKET      *       COOKING|NOBILITY                    Indentured_servant
+71   71   71   1    DART        SILK        *       PERFORMANCE|DECEPTION|NOBILITY      Jester
+72   72   72   1    DAGGER      GEM         *       APPRAISAL|CRAFT_FINE                Jeweler
+73   73   73   1    DAGGER      TOOLS       *       LOCKS|SMITHING                      Locksmith
+74   74   74   1    CLUB        CHEESEDIP   *       LORE_RELIGION|DECEPTION             Mendicant
+75   75   75   1    LONGSWORD   HIDEARMOR   *       MILITARY|OUTDOORS                   Mercenary
+76   76   76   1    DAGGER      MONEY76     *       HAGGLE|APPRAISAL|LETTERS            Merchant
+77   77   77   1    CLUB        FLOUR       *       COOKING|FARMING|CARPENTRY           Miller/baker
+78   78   78   1    DAGGER      UKULELE     *       PERFORMANCE|NOBILITY                Minstrel
+79   79   79   1    LONGSWORD   RING        *       NOBILITY|LETTERS|MILITARY           Noble
+80   80   80   1    CLUB        RAGDOLL     *       STEALTH_STREET                      Orphan
+81   81   81   1    STAFF       BRIDLE      *       ANIMALS                             Ostler
+82   82   82   1    SHORTSWORD  LEATHER     *       OUTDOORS|STEALTH_STREET|MILITARY    Outlaw
+83   83   83   1    KNIFE       ROPE        *       ROPE|CLIMB                          Rope_maker
+84   84   84   1    DART        PARCHMENT   *       LETTERS|LORE_ARCANE                 Scribe
+85   85   85   1    MACE        HERBS       *       LORE_RELIGION|HERBALISM|LORE_ARCANE Shaman
+86   86   86   1    CLUB        ROCK        *       DIGGING|COOKING                     Slave
+87   87   87   1    SLING       WATERSACK   *       SEA|DECEPTION|STEALTH_STREET        Smuggler
+88   88   88   1    SPEAR       SHIELD      *       MILITARY                            Soldier
+89   89   90   1    LONGSWORD   STEELHELM   *       MILITARY|NOBILITY|ANIMALS           Squire
+91   91   91   1    LONGSWORD   MONEY91     *       LETTERS|HAGGLE|NOBILITY             Tax_collector
+92   92   93   1    SLING       BADGERPELT  *       OUTDOORS|ANIMALS|BUTCHERY           Trapper
+94   94   94   1    STICK       BOWL        *       STEALTH_STREET|CLIMB                Urchin
+95   95   95   1    CLUB        PUSHCART    CART    CARPENTRY|ANIMALS                   Wainwright
+96   96   96   1    DAGGER      FINESUIT    *       CRAFT_FINE                          Weaver
+97   97   97   1    DAGGER      GRIMOIRE    *       LORE_ARCANE|LETTERS|ALCHEMY         Wizard's_apprentice
+98   98   100  1    HANDAXE     WOOD        *       OUTDOORS|CLIMB|CARPENTRY            Woodcutter

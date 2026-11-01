@@ -50,6 +50,16 @@ public:
 			U8(i < name.size() ? uint8_t(name[i]) : 0);
 		}
 	}
+	// u8 length + UTF-8, cut at 255 bytes (on a character boundary)
+	void Text(const std::string& text)
+	{
+		size_t length = std::min(text.size(), FUNNEL_TEXT_MAX);
+		while (length < text.size() && length && (uint8_t(text[length]) & 0xc0) == 0x80) {
+			--length;
+		}
+		U8(uint8_t(length));
+		bytes.insert(bytes.end(), text.begin(), text.begin() + length);
+	}
 	void Patch32(size_t at, uint32_t v)
 	{
 		for (int i = 0; i < 4; ++i) {
@@ -91,6 +101,15 @@ public:
 			if (c) name.push_back(char(std::tolower(static_cast<unsigned char>(c))));
 		}
 		return name;
+	}
+	std::string Text()
+	{
+		uint8_t length = U8();
+		std::string text;
+		if (!Need(length)) return text;
+		text.assign(reinterpret_cast<const char*>(data + pos), length);
+		pos += length;
+		return text;
 	}
 	bool Ok() const { return ok; }
 	bool AtEnd() const { return ok && pos == size; }
@@ -319,14 +338,21 @@ std::vector<uint8_t> WriteExtension(const CharacterExt& ext)
 		++records;
 	}
 	if (!ext.funnel.Empty()) {
-		size_t at = BeginRecord(out, TAG_FUNNEL, 1);
 		const Funnel& funnel = ext.funnel;
+		// version 2 (M3.2) only when there is a cause of death, so other records stay as they were
+		bool cause = !funnel.killer.empty() || !funnel.cause.empty() || !funnel.place.empty();
+		size_t at = BeginRecord(out, TAG_FUNNEL, cause ? 2 : 1);
 		out.U8(uint8_t(funnel.status));
 		out.U8(funnel.order);
 		out.U8(funnel.player);
 		out.U8(funnel.flags);
 		out.U32(funnel.diedAt);
 		out.ResRef(funnel.diedIn);
+		if (cause) {
+			out.Text(funnel.killer);
+			out.Text(funnel.cause);
+			out.Text(funnel.place);
+		}
 		EndRecord(out, at);
 		++records;
 	}
@@ -429,6 +455,11 @@ bool ReadExtension(const uint8_t* data, size_t size, CharacterExt& out)
 			funnel.flags = body.U8();
 			funnel.diedAt = body.U32();
 			funnel.diedIn = body.ResRef();
+			if (recordVersion >= 2) {
+				funnel.killer = body.Text();
+				funnel.cause = body.Text();
+				funnel.place = body.Text();
+			}
 			if (!body.Ok()) return false;
 		} else if (std::memcmp(tag.data(), TAG_CHARACTER, 4) == 0 && recordVersion >= 1) {
 			ext.body.weight = body.U16();

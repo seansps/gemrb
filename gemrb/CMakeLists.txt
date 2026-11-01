@@ -286,6 +286,12 @@ IF (BUILD_TESTING)
     )
   ENDIF()
 
+  # ethren (M3.1): the funnel's rolls (GUIScripts/ethren/FunnelRoll.py) need no engine, only a Python
+  FIND_PROGRAM(GEMRB_TEST_PYTHON NAMES python3 python)
+  IF (GEMRB_TEST_PYTHON)
+    ADD_TEST(NAME Test_FunnelRoll COMMAND ${GEMRB_TEST_PYTHON} ${CMAKE_SOURCE_DIR}/gemrb/tests/GUIScripts/test_funnelroll.py)
+  ENDIF()
+
   ADD_CUSTOM_COMMAND(TARGET Test_gemrb_core POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:gemrb_core>/tests/resources
       && ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/gemrb/tests/resources $<TARGET_FILE_DIR:gemrb_core>/tests/resources

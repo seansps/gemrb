@@ -730,8 +730,9 @@ private:
 	void CheckAutotest();
 
 public:
-	/** tests: draws the game window (the area, no GUI) and writes it to a BMP file */
-	bool WriteScreenshot(const path_t& path, const Actor* center = nullptr) const;
+	/** tests: draws the game window (the area, no GUI), or with screen every window, and writes
+	 * it to a BMP file */
+	bool WriteScreenshot(const path_t& path, const Actor* center = nullptr, bool screen = false) const;
 
 private:
 	/** the internal (without cache) part of GetListFrom2DA */

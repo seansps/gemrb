@@ -31,7 +31,7 @@
 namespace GemRB {
 
 constexpr uint8_t NET_MAGIC = 0xE7;
-constexpr uint8_t NET_PROTOCOL_VERSION = 13;
+constexpr uint8_t NET_PROTOCOL_VERSION = 14;
 constexpr uint16_t NET_DEFAULT_PORT = 27015;
 constexpr size_t NET_HEADER_SIZE = 3;
 constexpr size_t NET_MAX_STRING = 1024;
@@ -787,6 +787,9 @@ struct NetLobbySlot {
 	uint8_t owner = 0; // the player it is assigned to
 	uint8_t controller = 0; // who controls it now: the owner, or the host while the owner is away
 	std::string name; // empty until the game runs
+	// v14 (M3.1): the funnel's rolling screen, before the game runs: the card the host rolled for
+	// this slot (GUI text, opaque to the engine; empty otherwise), so every player sees the deal
+	std::string card;
 };
 
 struct GEM_EXPORT NetLobbyState {

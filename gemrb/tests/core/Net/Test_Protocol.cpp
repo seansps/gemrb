@@ -793,8 +793,8 @@ TEST(NetProtocolTest, LobbyAndIdentityRoundTrip)
 	lobby.phase = NetPhase::Game;
 	lobby.players.push_back(NetLobbyPlayer { 0, NetLobbyPlayer::CONNECTED | NetLobbyPlayer::READY, 0, "host", 0x7e });
 	lobby.players.push_back(NetLobbyPlayer { 2, 0, 35, "gone", 0x02 });
-	lobby.party.push_back(NetLobbySlot { 1, 0, 0, "Jora" });
-	lobby.party.push_back(NetLobbySlot { 2, 2, 0, "" });
+	lobby.party.push_back(NetLobbySlot { 1, 0, 0, "Jora", "" });
+	lobby.party.push_back(NetLobbySlot { 2, 2, 0, "", "" });
 	NetLobbyState lobby2;
 	data = NetEncode(lobby);
 	ASSERT_TRUE(NetDecode(data.data(), data.size(), lobby2));
@@ -822,12 +822,25 @@ TEST(NetProtocolTest, LobbyAndIdentityRoundTrip)
 	NetLobbyState big = lobby;
 	big.party.clear();
 	for (uint8_t slot = 1; slot <= NET_PARTY_SLOTS; ++slot) {
-		big.party.push_back(NetLobbySlot { slot, uint8_t(slot % 4 == 0 ? 0 : slot % 4 > 2 ? 2 : 1), 0, "Peasant" });
+		big.party.push_back(NetLobbySlot { slot, uint8_t(slot % 4 == 0 ? 0 : slot % 4 > 2 ? 2 : 1), 0, "Peasant", "" });
 	}
 	data = NetEncode(big);
 	ASSERT_TRUE(NetDecode(data.data(), data.size(), lobby2));
 	ASSERT_EQ(lobby2.party.size(), 16U);
 	EXPECT_EQ(lobby2.party[15].partySlot, 16);
+	// v14 (M3.1): the rolling screen's sixteen cards travel with the lobby, each up to the string cap
+	std::string card(900, 'x');
+	card.replace(0, 23, "Gristle\ncordwainer\nÆ ok");
+	for (auto& slot : big.party) {
+		slot.card = card;
+	}
+	big.party[3].card.clear();
+	data = NetEncode(big);
+	ASSERT_TRUE(NetDecode(data.data(), data.size(), lobby2));
+	EXPECT_EQ(lobby2.party[0].card, card);
+	EXPECT_EQ(lobby2.party[15].card, card);
+	EXPECT_TRUE(lobby2.party[3].card.empty());
+	EXPECT_EQ(lobby2.party[2].name, "Peasant");
 	lobby.players[1].slot = NET_MAX_PEERS + 1;
 	data = NetEncode(lobby);
 	EXPECT_FALSE(NetDecode(data.data(), data.size(), lobby2));

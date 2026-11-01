@@ -210,8 +210,14 @@ struct Funnel {
 	uint8_t flags = FUNNEL_NONE;
 	uint32_t diedAt = 0; // game time of its death, 0 alive
 	std::string diedIn; // the area it died in ("" alive)
-	bool Empty() const { return status == FunnelStatus::None && !order && player == FUNNEL_NO_PLAYER && !flags && !diedAt && diedIn.empty(); }
+	// M3.2, the graveyard (record version 2): how it died, as text written at the death (UTF-8,
+	// at most FUNNEL_TEXT_MAX bytes each), so the page needs nothing else later
+	std::string killer; // who or what killed it ("Marauder"; "" unknown, eg. bleeding out)
+	std::string cause; // the weapon or the effect ("crossbow bolt", "Slay"; "" unknown)
+	std::string place; // the area's name ("the wooded trail"; dccarea.2da, else the area's resref)
+	bool Empty() const { return status == FunnelStatus::None && !order && player == FUNNEL_NO_PLAYER && !flags && !diedAt && diedIn.empty() && killer.empty() && cause.empty() && place.empty(); }
 };
+constexpr size_t FUNNEL_TEXT_MAX = 255;
 
 // what a party member does on its own, by the DCC party AI script (DCCPARTY, M2.10). The
 // game-wide party AI toggle (the AI button, CS_PARTY_AI) still turns every party script off.

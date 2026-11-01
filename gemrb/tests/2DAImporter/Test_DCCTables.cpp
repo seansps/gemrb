@@ -7,6 +7,7 @@
 // read through the real 2DA importer and the DCC loaders.
 
 #include "../../core/DCC/Deeds.h"
+#include "../../core/DCC/Extension.h"
 #include "../../core/DCC/Rules.h"
 #include "../../core/Streams/FileStream.h"
 #include "../../plugins/2DAImporter/2DAImporter.h"
@@ -1101,5 +1102,62 @@ TEST(DCC_Tables, Formations)
 	}
 }
 
+
+// M3.1/M3.2: the funnel's rolling screen reads these through the engine (FunnelRoll.py); the importer must
+// take them as written (names with _ / and ', the ranges, the empty area list)
+static std::string Field(const std::unique_ptr<p2DAImporter>& table, const std::string& row, const std::string& column)
+{
+	return table->QueryField(table->GetRowIndex(row), table->GetColumnIndex(column));
+}
+
+TEST(DCC_Tables, FunnelRolling)
+{
+	auto occupations = Open2DA("dccoccup");
+	auto items = Open2DA("dccoccit");
+	ASSERT_TRUE(occupations && items);
+	EXPECT_EQ(occupations->GetRowCount(), 80);
+	int covered = 0;
+	for (TableMgr::index_t row = 0; row < occupations->GetRowCount(); ++row) {
+		int low = atoi(occupations->QueryField(row, occupations->GetColumnIndex("LOW")).c_str());
+		int high = atoi(occupations->QueryField(row, occupations->GetColumnIndex("HIGH")).c_str());
+		EXPECT_EQ(low, covered + 1) << occupations->GetRowName(row);
+		EXPECT_EQ(atoi(occupations->GetRowName(row).c_str()), low);
+		covered = high;
+		for (const char* column : { "WEAPON", "GOOD" }) {
+			const std::string& key = occupations->QueryField(row, occupations->GetColumnIndex(std::string(column)));
+			EXPECT_NE(items->GetRowIndex(key), TableMgr::npos) << key;
+		}
+		std::string skills = occupations->QueryField(row, occupations->GetColumnIndex("SKILLS"));
+		size_t start = 0;
+		while (start <= skills.size()) {
+			size_t bar = skills.find('|', start);
+			std::string tag = skills.substr(start, bar == std::string::npos ? std::string::npos : bar - start);
+			EXPECT_NE(OccupationSkillBit(tag), 0u) << tag;
+			if (bar == std::string::npos) break;
+			start = bar + 1;
+		}
+	}
+	EXPECT_EQ(covered, 100);
+	EXPECT_EQ(Field(occupations, "97", "NAME"), "Wizard's_apprentice");
+	EXPECT_EQ(Field(occupations, "77", "NAME"), "Miller/baker");
+	EXPECT_EQ(Field(items, "MONEY76", "CP"), "567");
+
+	auto looks = Open2DA("dcclooks");
+	auto avatars = Open2DA("avatars");
+	ASSERT_TRUE(looks && avatars);
+	for (TableMgr::index_t row = 0; row < looks->GetRowCount(); ++row) {
+		int anim = atoi(looks->QueryField(row, looks->GetColumnIndex("ANIM")).c_str());
+		EXPECT_NE(avatars->GetRowIndex(fmt::format("0x{:X}", anim)), TableMgr::npos) << anim;
+	}
+	auto names = Open2DA("dccnames");
+	ASSERT_TRUE(names);
+	EXPECT_GE(names->GetRowCount(), 32);
+	auto start = Open2DA("dccstart");
+	ASSERT_TRUE(start);
+	EXPECT_EQ(Field(start, "PARTY", "VALUE"), "16");
+	auto areas = Open2DA("dccarea");
+	ASSERT_TRUE(areas);
+	EXPECT_EQ(areas->GetRowCount(), 0);
+}
 }
 }

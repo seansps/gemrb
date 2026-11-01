@@ -341,6 +341,7 @@ struct NetSession::Impl {
 	NetPhase phase = NetPhase::Game;
 	NetLobbyState lobby;
 	uint32_t lobbyRevision = 1;
+	std::vector<std::string> lobbyCards; // host: the rolling screen's cards (M3.1)
 	std::deque<NetChat> chatLines; // what our player saw, the newest NET_CHAT_HISTORY
 	std::vector<std::string> chatLog; // the same as plain text, for the lobby
 	int lastWhisperer = -1; // for /r
@@ -2572,6 +2573,8 @@ struct NetSession::Impl {
 			entry.controller = NetSlotController(entry.partySlot, assigned, roster);
 			const Actor* pc = game ? game->FindPC(slot) : nullptr;
 			if (pc) entry.name = Utf8(pc->GetShortName());
+			// the rolling screen's cards, until the game runs (M3.1)
+			if (phase == NetPhase::Lobby && size_t(slot) <= lobbyCards.size()) entry.card = lobbyCards[slot - 1];
 			state.party.push_back(std::move(entry));
 		}
 		return state;
@@ -2613,6 +2616,16 @@ struct NetSession::Impl {
 		if (mode != Mode::Host || !partySlot || partySlot > NET_PARTY_SLOTS || playerSlot > NET_MAX_PEERS) return false;
 		assigned[partySlot] = playerSlot;
 		Log(MESSAGE, "Net", "Party slot {} assigned to player slot {}.", partySlot, playerSlot);
+		SendLobby();
+		return true;
+	}
+
+	bool SetLobbyCards(const std::vector<std::string>& cards)
+	{
+		if (mode != Mode::Host) return false;
+		lobbyCards = cards;
+		if (lobbyCards.size() > NET_PARTY_SLOTS) lobbyCards.resize(NET_PARTY_SLOTS);
+		Log(MESSAGE, "Net", "Rolling screen: {} card(s) for the lobby.", lobbyCards.size());
 		SendLobby();
 		return true;
 	}
@@ -5209,6 +5222,11 @@ bool NetSession::Assign(uint8_t partySlot, uint8_t playerSlot)
 	return impl->Assign(partySlot, playerSlot);
 }
 
+bool NetSession::SetLobbyCards(const std::vector<std::string>& cards)
+{
+	return impl->SetLobbyCards(cards);
+}
+
 bool NetSession::SetPermission(uint8_t slot, NetPermission perm, bool allowed)
 {
 	return impl->SetPermission(slot, perm, allowed);
@@ -5427,6 +5445,11 @@ bool NetSession::Allowed(NetPermission) const
 void NetSession::SetReady(bool) {}
 
 bool NetSession::Assign(uint8_t, uint8_t)
+{
+	return false;
+}
+
+bool NetSession::SetLobbyCards(const std::vector<std::string>&)
 {
 	return false;
 }

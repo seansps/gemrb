@@ -1,0 +1,7 @@
+2DA V1.0
+*
+# ethren (M3.2): the names areas go by in the funnel's graveyard ("Gristle, cordwainer: crossbow bolt, the
+# wooded trail"), by area resref; _ for spaces. The engine writes the name into a peasant's funnel record
+# when it dies (DCC::Funnel::place); an area without a row goes by its world map caption, else its resref.
+# Ethren's own areas come with Phase 4; the test games ship their own copy.
+           NAME

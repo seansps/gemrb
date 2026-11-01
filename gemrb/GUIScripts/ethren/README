@@ -26,10 +26,18 @@ Modules here so far:
   unholy; plus the record sheet's magic lines.
 - DCCAutotest.py: the DCC checks of testdata/dcctest's autotest; idle unless
   the DCC_AUTOTEST global is 1.
-- Roster.py (M2.9): the party roster for up to 16 (the funnel), since the demo
-  GUI has no portrait window: two columns of eight on the right edge, a click
-  selects one, a right click adds or removes one, plus everyone, the formation
-  and the party settings. Refreshes on a timer.
+- Roster.py (M2.9, the real one in M3.2): the funnel's roster panel, since the
+  demo GUI has no portrait window: the summary ("Alive 12 of 16, 2 dying, 2
+  dead"), the prompts waiting, select all and mine, Block and Column on the
+  selection, the party settings, groups 1-9 (Ctrl+N saves, Alt+N selects),
+  sixteen tiles (name, occupation, worst status, HP bar, owner colour, hover
+  line; the dying flash, the dead stay greyed), and the graveyard page.
+- FunnelRoll.py (M3.1): the rolls of the funnel's peasants, with no GUI and no
+  GemRB import at module level (tested by tests/GUIScripts/test_funnelroll.py).
+- RollScreen.py (M3.1): the rolling screen, sixteen cards, renaming, reroll
+  all, the house rules, Accept; the co-op host deals the cards, clients watch.
+- Start.py, SetupGame.py (M3.1): the demo's, with the rolling screen before a
+  new game (dccstart.2da ROLL 1) and the sixteen made from the cards.
 - DCCParty.py (M2.9): the party settings: Luck policy, pause on key rolls,
   spellburn and corruption Luck for every character this player controls, and
   the host's prompt options (auto-resolve after N seconds, level-0 prompts).

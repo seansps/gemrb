@@ -1267,7 +1267,23 @@ int EffectQueue::ApplyEffect(Actor* target, Effect* fx, ieDword first_apply, ieD
 		// skip execution, but keept it around
 		res = FX_APPLIED;
 	} else {
+		// DCC (M3.2): the spell or item harming the target, for the funnel's cause of death
+		ResRef hitBefore;
+		ieDword hitByBefore = 0;
+		bool dccHit = target && !fx->SourceRef.IsEmpty() && core->HasFeature(GFFlags::RULES_DCC);
+		if (dccHit) {
+			hitBefore = target->dccHitSource;
+			hitByBefore = target->dccHitBy;
+			if (hitBefore.IsEmpty()) {
+				target->dccHitSource = fx->SourceRef;
+				target->dccHitBy = fx->CasterID;
+			}
+		}
 		res = ed(Owner, target, fx);
+		if (dccHit) {
+			target->dccHitSource = hitBefore;
+			target->dccHitBy = hitByBefore;
+		}
 		fx->FirstApply = 0;
 	}
 

@@ -128,6 +128,55 @@ TEST(DCC_Extension, FunnelRecords)
 	EXPECT_STREQ(FunnelStatusName(FunnelStatus::Reserve), "reserve");
 }
 
+TEST(DCC_Extension, FunnelCauseOfDeath)
+{
+	// M3.2, the graveyard: who, with what, where, as text (record version 2)
+	CharacterExt ext;
+	ext.funnel.status = FunnelStatus::Dead;
+	ext.funnel.order = 7;
+	ext.funnel.diedAt = 4500;
+	ext.funnel.diedIn = "fnt01";
+	std::vector<uint8_t> v1 = WriteExtension(ext);
+	// without a cause the record stays version 1, 16 bytes
+	EXPECT_EQ(v1.size(), EXT_HEADER_SIZE + 12 + 16);
+	EXPECT_EQ(v1[EXT_HEADER_SIZE + 4], 1);
+	ext.funnel.killer = "Marauder";
+	ext.funnel.cause = "crossbow bolt";
+	ext.funnel.place = "the wooded trail";
+	EXPECT_FALSE(ext.Empty());
+	std::vector<uint8_t> bytes = WriteExtension(ext);
+	EXPECT_EQ(bytes[EXT_HEADER_SIZE + 4], 2);
+	EXPECT_EQ(bytes.size(), v1.size() + 3 + 8 + 13 + 16);
+	CharacterExt back;
+	ASSERT_TRUE(ReadExtension(bytes.data(), bytes.size(), back));
+	EXPECT_EQ(back, ext);
+	EXPECT_EQ(back.funnel.killer, "Marauder");
+	EXPECT_EQ(back.funnel.cause, "crossbow bolt");
+	EXPECT_EQ(back.funnel.place, "the wooded trail");
+	EXPECT_EQ(back.funnel.diedIn, "fnt01");
+	// only a place (bled out alone): still kept
+	CharacterExt alone;
+	alone.funnel.status = FunnelStatus::Dead;
+	alone.funnel.cause = "bled out";
+	bytes = WriteExtension(alone);
+	ASSERT_TRUE(ReadExtension(bytes.data(), bytes.size(), back));
+	EXPECT_EQ(back.funnel.cause, "bled out");
+	EXPECT_TRUE(back.funnel.killer.empty());
+	// long texts are cut at 255 bytes on a character boundary (UTF-8)
+	CharacterExt longer;
+	longer.funnel.status = FunnelStatus::Dead;
+	longer.funnel.killer = std::string(254, 'a') + "\xc3\xa6"; // ends with a 2-byte character across the cut
+	bytes = WriteExtension(longer);
+	ASSERT_TRUE(ReadExtension(bytes.data(), bytes.size(), back));
+	EXPECT_EQ(back.funnel.killer, std::string(254, 'a'));
+	// a truncated text is refused
+	bytes = WriteExtension(ext);
+	bytes.resize(bytes.size() - 4);
+	bytes[8] = uint8_t(bytes.size() & 0xff);
+	bytes[9] = uint8_t(bytes.size() >> 8);
+	EXPECT_FALSE(ReadExtension(bytes.data(), bytes.size(), back));
+}
+
 TEST(DCC_Extension, EmptyAndDefaults)
 {
 	CharacterExt ext;
