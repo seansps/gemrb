@@ -284,6 +284,11 @@ int UntrainedSteps(bool character, int level, bool trained)
 	return character && level > 0 && !trained ? -1 : 0;
 }
 
+bool HalflingTwoWeapons(bool halfling, int level, bool primaryTrained, bool offTrained)
+{
+	return halfling && level > 0 && primaryTrained && offTrained;
+}
+
 uint32_t MoraleTriggers(const MoraleGroup& group, uint32_t done)
 {
 	uint32_t triggers = MORALE_NONE;

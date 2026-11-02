@@ -7,6 +7,7 @@
 // (Table 4-3, with the halfling exception). The shipped 2DAs are checked
 // against the spec in tests/2DAImporter/Test_DCCTables.cpp.
 
+#include "../../../core/DCC/Combat.h"
 #include "../../../core/DCC/CombatTables.h"
 
 #include <gtest/gtest.h>
@@ -219,6 +220,29 @@ TEST(DCC_CombatTables, TwoWeaponHalfling)
 	dice = table.Lookup(18, true);
 	EXPECT_EQ(AttackDie(20, dice.primarySteps), 20);
 	EXPECT_EQ(dice.primaryCrit, CritRule::Normal);
+}
+
+TEST(DCC_CombatTables, TwoWeaponHalflingTrained)
+{
+	// S5: the halfling rules need a level 1+ halfling with two weapons it is trained in
+	EXPECT_TRUE(HalflingTwoWeapons(true, 1, true, true));
+	EXPECT_TRUE(HalflingTwoWeapons(true, 6, true, true));
+	EXPECT_FALSE(HalflingTwoWeapons(true, 1, false, true)); // an untrained primary weapon
+	EXPECT_FALSE(HalflingTwoWeapons(true, 1, true, false)); // an untrained off-hand weapon
+	EXPECT_FALSE(HalflingTwoWeapons(true, 0, true, true)); // a halfling peasant: the general rule
+	EXPECT_FALSE(HalflingTwoWeapons(false, 3, true, true)); // not a halfling
+	// otherwise the row for its own Agility: Agi 9 is d14/d12 with no crits, not d16/d16
+	TwoWeaponTable table = Table43();
+	TwoWeaponDice dice = table.Lookup(9, HalflingTwoWeapons(true, 1, true, false));
+	EXPECT_EQ(AttackDie(20, dice.primarySteps), 14);
+	EXPECT_EQ(AttackDie(20, dice.offSteps), 12);
+	EXPECT_EQ(dice.primaryCrit, CritRule::None);
+	EXPECT_EQ(dice.offCrit, CritRule::None);
+	// and the untrained weapon's own -1d on top (Table 4-1): d14 -> d12
+	EXPECT_EQ(AttackDie(20, dice.primarySteps + UntrainedSteps(true, 1, false)), 12);
+	dice = table.Lookup(9, HalflingTwoWeapons(true, 1, true, true));
+	EXPECT_EQ(AttackDie(20, dice.primarySteps), 16);
+	EXPECT_EQ(dice.offCrit, CritRule::MaxAutoHit);
 }
 
 TEST(DCC_CombatTables, ArmorFumbleDice)

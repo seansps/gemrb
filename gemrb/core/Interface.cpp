@@ -3212,6 +3212,7 @@ int Interface::CanUseItemType(int slottype, const Item* item, const Actor* actor
 
 int Interface::CheckItemType(const Item* item, int slotType) const
 {
+	if (item->ItemType >= ItemTypes) return 0; // a type past itemtype.2da
 	return slotmatrix[item->ItemType] & slotType;
 }
 

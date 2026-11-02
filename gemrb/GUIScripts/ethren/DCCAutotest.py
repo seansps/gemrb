@@ -18,8 +18,9 @@
 #   8. fights (M2.3): goblins and a few DCC fighters outside the party attack with forced
 #      dice (GemRB.DCCForceDice): hits, misses, crits on Table III and the next-lower
 #      fallback, a monster's crit, fumbles by armor, two weapons for a thief and a halfling,
-#      cursed by fortune, a real Attack action with initiative, bleeding out (healed, and
-#      dead then recovered by rolling the body over) and a level 0 death
+#      what the off hand may hold and the halfling's untrained pair (S5), cursed by fortune,
+#      a real Attack action with initiative, bleeding out (healed, and dead then recovered by
+#      rolling the body over) and a level 0 death
 #   9. Luck burn and Mighty Deeds (M2.4): burn policies on checks and saves (step 2), the
 #      settings and burned Luck through the save and load (step 4), a thief's nightly
 #      recovery and a warrior's lack of it (step 5); in the fight a policy burn that turns a
@@ -864,6 +865,74 @@ def _FightDemons ():
 	_Check ("log: the demon's corruption", _Logged ("Mord is corrupted"), True)
 	yield
 
+SLOT_SHIELD, SLOT_WEAPON, SLOT_INVENTORY = 4, 256, 32768 # ie_slots
+
+def _OffHandDrop (pc, ref):
+	"""an item from the pack dropped on the off hand, as the inventory screen does: the result
+	(ASI_*) and whether it's held then; a refused or swapped-out item is thrown away (GetSlotItem
+	needs a PC)"""
+	off = GemRB.GetSlots (pc, SLOT_SHIELD, 0)[0]
+	pack = GemRB.GetSlots (pc, SLOT_INVENTORY, -1)[0]
+	GemRB.CreateItem (pc, ref, pack)
+	GemRB.DragItem (pc, pack, "")
+	res = GemRB.DropDraggedItem (pc, off)
+	if GemRB.IsDraggingItem ():
+		GemRB.DropDraggedItem (pc, pack)
+	GemRB.RemoveItem (pc, pack)
+	return [res, GemRB.FindItem (pc, ref) >= 0]
+
+DICE_CHAIN = (3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 20, 24, 30)
+
+def _Steps (die, steps):
+	return DICE_CHAIN[max (0, min (len (DICE_CHAIN) - 1, DICE_CHAIN.index (die) + steps))]
+
+def _OffHand (vex, pip, gob2):
+	"""S5: what the off hand may hold (dccweap.2da OFFHAND), and the halfling's two-weapon rules
+	needing trained weapons in both hands. Run last: the item moves roll dice of their own, which
+	the seeded scenarios after them would feel. The dice are counted from a one-weapon swing at the
+	same target, as by now it may be asleep (+1d)"""
+	vexOff = GemRB.GetSlots (vex, SLOT_SHIELD, 0)[0]
+	pipOff = GemRB.GetSlots (pip, SLOT_SHIELD, 0)[0]
+	pipMain = [s for s in GemRB.GetSlots (pip, SLOT_WEAPON, 0) if s != pipOff][0]
+	# the inventory screen: a thief swaps a short sword in, but not a hand axe or a longsword; a level 1
+	# halfling may take the hand axe (the club, type 44, lies past the demo's itemtype.2da, so no drop
+	# can take it: the stock "wrong item type")
+	_Check ("vex drops a short sword in the off hand (swapped)", _OffHandDrop (vex, "DCTSSWD") + [GemRB.IsDualWielding (vex)], [3, True, 1])
+	GemRB.CreateItem (vex, "DCTDAGR", vexOff)
+	_Check ("vex can't drop a hand axe in the off hand", _OffHandDrop (vex, "DCTHAXE") + [GemRB.IsDualWielding (vex)], [0, False, 1])
+	_Check ("vex can't drop a longsword in the off hand", _OffHandDrop (vex, "DCTLSWD") + [GemRB.IsDualWielding (vex)], [0, False, 1])
+	_Check ("pip drops a hand axe in the off hand (swapped)", _OffHandDrop (pip, "DCTHAXE") + [GemRB.IsDualWielding (pip)], [3, True, 1])
+	# a CRE's or an old save's off-hand weapon: a thief's club or longsword stays there unused, one
+	# attack with the main weapon (both level 1, d20: the baseline below)
+	GemRB.CreateItem (vex, "DCTCLUB", vexOff)
+	yield
+	_Check ("vex's club in the off hand isn't a second weapon", GemRB.IsDualWielding (vex), 0)
+	GemRB.CreateItem (vex, "DCTLSWD", vexOff)
+	yield
+	_Check ("vex's longsword in the off hand isn't a second weapon", GemRB.IsDualWielding (vex), 0)
+	r = _Attack (vex, gob2, [2])
+	_Check ("vex attacks once", len (r), 1)
+	base = r[0]["Die"] if r else 20
+	GemRB.CreateItem (vex, "DCTDAGR", vexOff)
+	# ... and pip's club is a second weapon, trained: the halfling's -1d and -1d (d16 and d16)
+	GemRB.CreateItem (pip, "DCTCLUB", pipOff)
+	yield
+	_Check ("pip's club in the off hand is a second weapon", GemRB.IsDualWielding (pip), 1)
+	r = _Attack (pip, gob2, [2, 2])
+	_Check ("pip short sword + club: -1d and -1d (d16 and d16)", [x["Die"] for x in r], [_Steps (base, -1)] * 2)
+	GemRB.CreateItem (pip, "DCTSSWD", pipOff)
+	# an untrained longsword in pip's hand: Table 4-3 by its Agi 12 (-1d/-2d), the longsword a die lower
+	GemRB.CreateItem (pip, "DCTLSWD", pipMain)
+	GemRB.SetEquippedQuickSlot (pip, 0) # the weapon's cached numbers
+	yield
+	r = _Attack (pip, gob2, [2, 2])
+	_Check ("pip untrained longsword + short sword: -2d and -2d (d14 and d14)", [x["Die"] for x in r], [_Steps (base, -2)] * 2)
+	GemRB.CreateItem (pip, "DCTSSWD", pipMain)
+	GemRB.SetEquippedQuickSlot (pip, 0)
+	yield
+	r = _Attack (pip, gob2, [2, 2])
+	_Check ("pip trained again: -1d and -1d", [x["Die"] for x in r], [_Steps (base, -1)] * 2)
+
 def _Fight ():
 	"""M2.3: attacks, crits and fumbles with forced dice, bleeding out, a real attack action"""
 	korg, vex, pip, eda, brun, peas = [_ID (n) for n in ("dctkorg", "dctvex", "dctpip", "dcteda", "dctbrun", "dctpeas")]
@@ -1054,6 +1123,8 @@ def _Fights ():
 		_Log ("combat: " + line)
 	if _Wanted ("magic"):
 		yield from _Magic_ ()
+	if _Wanted ("combat"):
+		yield from _OffHand (_ID ("dctvex"), _ID ("dctpip"), _ID ("dctgob2"))
 
 
 # --- M2.5 spellcasting ----------------------------------------------------------

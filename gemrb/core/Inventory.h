@@ -319,7 +319,8 @@ public:
 	/** returns any HCStrings objection to using the shield slot */
 	HCStrings CanUseShieldSlot(int slot, bool ranged) const;
 	/** returns the strref for the reason why the item cannot be equipped */
-	HCStrings WhyCantEquip(int slot, int twohanded, bool ranged = false) const;
+	/** item: the one to equip, if known (DCC: what the off hand may hold) */
+	HCStrings WhyCantEquip(int slot, int twohanded, bool ranged = false, const CREItem* item = nullptr) const;
 	/** returns a slot that has a stealable item */
 	int FindStealableItem();
 	/** checks if any equipped item provides critical hit aversion */

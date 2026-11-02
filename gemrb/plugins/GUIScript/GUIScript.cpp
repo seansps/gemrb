@@ -12691,7 +12691,7 @@ static PyObject* GemRB_DropDraggedItem(PyObject* /*self*/, PyObject* args)
 		//couldn't place item there, try swapping (only if slot is explicit)
 	} else if (Slot >= 0) {
 		//swapping won't cure this
-		HCStrings msg = actor->inventory.WhyCantEquip(Slot, slotitem->Flags & IE_INV_ITEM_TWOHANDED, ranged);
+		HCStrings msg = actor->inventory.WhyCantEquip(Slot, slotitem->Flags & IE_INV_ITEM_TWOHANDED, ranged, slotitem);
 		if (msg != HCStrings::count) {
 			displaymsg->DisplayConstantString(msg, GUIColors::WHITE);
 			return PyLong_FromLong(ASI_FAILED);
