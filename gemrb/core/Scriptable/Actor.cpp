@@ -6453,6 +6453,11 @@ int Actor::IsDualWielding() const
 	//if the item is usable in weapon slot, then it is weapon
 	int weapon = core->CheckItemType(itm, SLOT_WEAPON);
 	gamedata->FreeItem(itm, wield->ItemResRef, false);
+	// DCC: the weapons dccweap.2da knows too; one the off hand may not hold (an old save, a CRE)
+	// stays there unused (combat.md, S5)
+	if (core->HasFeature(GFFlags::RULES_DCC)) {
+		return DCCIsWeapon(wield) && DCCOffHandAllowed(wield) ? 1 : 0;
+	}
 	//is just weapon>0 ok?
 	return (weapon > 0) ? 1 : 0;
 }

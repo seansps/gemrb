@@ -229,10 +229,7 @@ void Actor::RefreshDCCStats(const stats_t& previous)
 	// ascending AC from the stock AC (natural, armor, shield and magic; no dex or wisdom here)
 	int armor = IsReverseToHit() ? BonusFromIEAC(AC.GetTotal()) : AC.GetTotal() - 10;
 	// a severed shield arm: a shield in hand gives nothing (its +1, Table 3-3)
-	if (InjuryBlocksShield(Modified[IE_DCC_INJURY]) && !IsDualWielding()) {
-		int shieldSlot = inventory.GetShieldSlot();
-		if (shieldSlot >= 0 && inventory.GetSlotItem(shieldSlot)) armor -= 1;
-	}
+	if (InjuryBlocksShield(Modified[IE_DCC_INJURY]) && DCCShieldInHand()) armor -= 1;
 	Modified[IE_DCC_AC] = Signed(Modified[IE_DCC_AC]) + DCC::ArmorClass(armor, mod(Ability::Agi), GetDCCAugurBonus(AugurRoll::ArmorClass));
 
 	int warriorLevel = BaseStats[IE_CLASS] == static_cast<ieDword>(ClassID::Warrior) ? Signed(BaseStats[IE_LEVEL]) : 0;
@@ -256,8 +253,7 @@ void Actor::RefreshDCCStats(const stats_t& previous)
 			}
 			armorPenalty += rules->combat.armorFumbles.ArmorCheck(armorItem->ItemResRef.c_str(), animation);
 		}
-		int shieldSlot = IsDualWielding() ? -1 : inventory.GetShieldSlot();
-		const CREItem* shieldItem = shieldSlot >= 0 ? inventory.GetSlotItem(shieldSlot) : nullptr;
+		const CREItem* shieldItem = DCCShieldInHand();
 		if (shieldItem) armorPenalty += rules->combat.armorFumbles.ShieldCheck(shieldItem->ItemResRef.c_str());
 	}
 	Modified[IE_DCC_ARMORPEN] = Signed(Modified[IE_DCC_ARMORPEN]) + armorPenalty;

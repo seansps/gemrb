@@ -12,6 +12,7 @@
 #include "../../core/DCC/Rules.h"
 #include "../../core/DCC/Skills.h"
 #include "../../core/Streams/FileStream.h"
+#include "../../core/Streams/MemoryStream.h"
 #include "../../plugins/2DAImporter/2DAImporter.h"
 
 #include <gtest/gtest.h>
@@ -721,6 +722,70 @@ TEST(DCC_Tables, Weapons)
 	EXPECT_EQ(weapons.Lookup("DCCBJACK", 44, false)->key, "BLACKJACK");
 	EXPECT_EQ(weapons.Lookup("FIST", 28, false)->key, "UNARMED");
 	EXPECT_EQ(weapons.Lookup("WHATEVER", 99, false), nullptr);
+}
+
+// what the off hand may hold (combat.md "Two-weapon fighting", S5)
+TEST(DCC_Tables, WeaponsOffHand)
+{
+	auto table = Open2DA("dccweap");
+	ASSERT_TRUE(table);
+	WeaponTable weapons;
+	ASSERT_TRUE(weapons.Load(*table));
+	EXPECT_TRUE(weapons.HasOffHandRule());
+	// by row: the dagger and the short sword for anyone, the club and the hand axe for halflings
+	const std::map<std::string, OffHandUse> allowed = { { "DAGGER", OffHandUse::Anyone }, { "SHORT_SWORD", OffHandUse::Anyone }, { "CLUB", OffHandUse::Halfling }, { "HANDAXE", OffHandUse::Halfling } };
+	for (TableMgr::index_t row = 0; row < table->GetRowCount(); ++row) {
+		std::string key = table->GetRowName(row);
+		auto found = allowed.find(key);
+		EXPECT_EQ(weapons.Find(key)->offHand, found == allowed.end() ? OffHandUse::Never : found->second) << key;
+	}
+	// by item (resref, IE type, two-handed): the knife, awl, chisel, razor, scissors and trowel fight as daggers (16)
+	auto offHand = [&weapons](const char* resref, int type, bool twoHanded, bool halfling) {
+		return weapons.OffHandAllowed(true, resref, type, twoHanded, halfling);
+	};
+	for (bool halfling : { false, true }) {
+		EXPECT_TRUE(offHand("DAGGER", 16, false, halfling));
+		EXPECT_TRUE(offHand("KNIFE", 16, false, halfling));
+		EXPECT_TRUE(offHand("SSWORD", 19, false, halfling));
+		EXPECT_FALSE(offHand("LSWORD", 20, false, halfling));
+		EXPECT_FALSE(offHand("MACE", 17, false, halfling));
+		EXPECT_FALSE(offHand("SPEAR", 29, false, halfling));
+		EXPECT_FALSE(offHand("BAXE", 25, true, halfling)); // the battleaxe, an axe in both hands
+		EXPECT_FALSE(offHand("DCCBJACK", 44, false, halfling)); // the blackjack isn't a club
+		EXPECT_FALSE(offHand("WHATEVER", 99, false, halfling)); // a weapon the table doesn't know
+		// a shield isn't a weapon: always allowed
+		EXPECT_TRUE(weapons.OffHandAllowed(false, "SHIELD", 12, false, halfling));
+	}
+	// a level 1+ halfling's club (and the stick, hammer...: 44) and hand axe (and the cleaver: 25)
+	EXPECT_FALSE(offHand("CLUB", 44, false, false));
+	EXPECT_TRUE(offHand("CLUB", 44, false, true));
+	EXPECT_FALSE(offHand("HAXE", 25, false, false));
+	EXPECT_TRUE(offHand("HAXE", 25, false, true));
+}
+
+static std::unique_ptr<p2DAImporter> Parse2DA(const std::string& text)
+{
+	void* data = malloc(text.size());
+	memcpy(data, text.data(), text.size());
+	auto importer = std::make_unique<p2DAImporter>();
+	if (!importer->Open(std::make_unique<MemoryStream>("test.2da", data, strpos_t(text.size())))) return nullptr;
+	return importer;
+}
+
+// a game's own older copy of dccweap.2da without the OFFHAND column: any weapon, as before
+TEST(DCC_Tables, WeaponsWithoutOffHandColumn)
+{
+	const std::string header = "2DA V1.0\n*\n          ITEMTYPE HANDS SUBDUAL BACKSTAB WIZARD WARRIOR THIEF DWARF ELF HALFLING CLERIC_L CLERIC_N CLERIC_C";
+	auto old = Parse2DA(header + "\nLONGSWORD 20 1 YES * 1 1 1 1 1 0 0 1 0\n");
+	ASSERT_TRUE(old);
+	WeaponTable weapons;
+	ASSERT_TRUE(weapons.Load(*old));
+	EXPECT_FALSE(weapons.HasOffHandRule());
+	EXPECT_TRUE(weapons.OffHandAllowed(true, "LSWORD", 20, false, false));
+	// with the column, an unknown value is an error
+	auto bad = Parse2DA("2DA V1.0\n*\n          ITEMTYPE HANDS SUBDUAL BACKSTAB OFFHAND WIZARD WARRIOR THIEF DWARF ELF HALFLING CLERIC_L CLERIC_N CLERIC_C\nLONGSWORD 20 1 YES * MAYBE 1 1 1 1 1 0 0 1 0\n");
+	ASSERT_TRUE(bad);
+	EXPECT_FALSE(weapons.Load(*bad));
 }
 
 TEST(DCC_Tables, MonsterCritMatrix)

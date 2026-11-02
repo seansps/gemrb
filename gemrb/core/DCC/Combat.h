@@ -213,6 +213,9 @@ GEM_EXPORT bool SubdualBlow(Subdual kind, bool chosen, bool trained);
 
 // untrained weapons (classes.md "Weapon training", funnel.md): -1d from level 1 up, characters only
 GEM_EXPORT int UntrainedSteps(bool character, int level, bool trained);
+/** whether the halfling's two-weapon rules apply (classes.md: Agi 16 minimum, the natural 16, the
+ * double-1 fumble): a level 1+ halfling with two weapons it is trained in (S5); else Table 4-3 */
+GEM_EXPORT bool HalflingTwoWeapons(bool halfling, int level, bool primaryTrained, bool offTrained);
 
 // morale (combat.md "Morale"): monsters and NPCs, never the party
 enum MoraleTrigger : uint32_t {

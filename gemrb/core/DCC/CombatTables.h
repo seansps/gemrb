@@ -242,7 +242,8 @@ GEM_EXPORT bool ParseCritRule(const std::string& text, CritRule& rule);
 // weapons (M2.3b, dccweap.2da): training by class (classes.md), subdual damage and backstab dice
 // (equipment.md Table 3-1). A row per DCC weapon: ITEMTYPE (the IE item type, or a resref for an
 // item of its own, * none), HANDS (1, 2 or * either), SUBDUAL (NO, YES, ALWAYS), BACKSTAB (the
-// thief's backstab damage, or *) and a column per class (1 trained), the cleric's by alignment
+// thief's backstab damage, or *), OFFHAND (S5: who may hold it in the off hand, ANY, HALFLING
+// or * nobody) and a column per class (1 trained), the cleric's by alignment
 enum class WeaponClass : uint8_t {
 	Wizard,
 	Warrior,
@@ -260,6 +261,14 @@ GEM_EXPORT const char* WeaponClassKey(WeaponClass which);
 /** the column of a class (a cleric's by alignment); count for level 0 and monsters */
 GEM_EXPORT WeaponClass WeaponClassFor(ClassID classID, Alignment alignment);
 
+// what may go in the off hand (combat.md "Two-weapon fighting", S5): the light weapons for anyone,
+// a level 1+ halfling's own one-handed ones too (classes.md), nothing else; shields aren't weapons
+enum class OffHandUse : uint8_t {
+	Never,
+	Anyone, // the dagger and the short sword
+	Halfling // the club and the hand axe: a level 1+ halfling only
+};
+
 struct WeaponRow {
 	std::string key; // BATTLEAXE, ...
 	int itemType = -1;
@@ -267,6 +276,7 @@ struct WeaponRow {
 	int hands = 0; // 0 either
 	Subdual subdual = Subdual::Never;
 	DiceExpr backstab; // none: the normal damage
+	OffHandUse offHand = OffHandUse::Never;
 	std::array<bool, WEAPON_CLASS_COUNT> trained {};
 	bool Trained(WeaponClass which) const { return which < WeaponClass::count && trained[static_cast<size_t>(which)]; }
 };
@@ -279,9 +289,15 @@ public:
 	/** the row of an item: by resref first, then the first row of its IE item type and hands */
 	const WeaponRow* Lookup(const std::string& resref, int itemType, bool twoHanded) const;
 	const WeaponRow* Find(const std::string& key) const;
+	/** whether an item may go in the off hand (S5): anything but a weapon (a shield); a weapon by
+	 * its row (Lookup), ANY or, for a level 1+ halfling, HALFLING, and one the table doesn't know
+	 * is refused. Any weapon may when the table has no OFFHAND column */
+	bool OffHandAllowed(bool weapon, const std::string& resref, int itemType, bool twoHanded, bool halfling) const;
+	bool HasOffHandRule() const { return offHandRule; }
 
 private:
 	std::vector<WeaponRow> rows;
+	bool offHandRule = true; // false: a table without the OFFHAND column (an older game copy)
 };
 
 // everything the combat code reads (RulesData::combat)

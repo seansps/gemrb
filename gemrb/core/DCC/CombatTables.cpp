@@ -504,6 +504,7 @@ WeaponClass WeaponClassFor(ClassID classID, Alignment alignment)
 bool WeaponTable::SetRows(std::vector<WeaponRow> newRows)
 {
 	rows = std::move(newRows);
+	offHandRule = true;
 	return !rows.empty();
 }
 
@@ -515,6 +516,9 @@ bool WeaponTable::Load(const TableMgr& table)
 	auto subdualCol = table.GetColumnIndex("SUBDUAL");
 	auto backstabCol = table.GetColumnIndex("BACKSTAB");
 	if (typeCol == TableMgr::npos || handsCol == TableMgr::npos || subdualCol == TableMgr::npos || backstabCol == TableMgr::npos) return false;
+	// optional: a game's own older copy of the table may not have it yet, and then the off hand
+	// takes any one-handed weapon as before
+	auto offHandCol = table.GetColumnIndex("OFFHAND");
 	std::array<TableMgr::index_t, WEAPON_CLASS_COUNT> classCols {};
 	for (int i = 0; i < WEAPON_CLASS_COUNT; ++i) {
 		classCols[i] = table.GetColumnIndex(std::string(weaponClassKeys[i]));
@@ -540,12 +544,27 @@ bool WeaponTable::Load(const TableMgr& table)
 			return false;
 		}
 		if (!ParseDice(table.QueryField(row, backstabCol), entry.backstab)) return false;
+		if (offHandCol != TableMgr::npos) {
+			std::string offHand = Upper(table.QueryField(row, offHandCol));
+			if (offHand == "ANY") {
+				entry.offHand = OffHandUse::Anyone;
+			} else if (offHand == "HALFLING") {
+				entry.offHand = OffHandUse::Halfling;
+			} else if (offHand != "*") {
+				return false;
+			}
+		}
 		for (int i = 0; i < WEAPON_CLASS_COUNT; ++i) {
 			entry.trained[i] = table.QueryField(row, classCols[i]) == "1";
 		}
 		newRows.push_back(entry);
 	}
-	return SetRows(std::move(newRows));
+	bool loaded = SetRows(std::move(newRows));
+	if (offHandCol == TableMgr::npos) {
+		offHandRule = false;
+		Log(WARNING, "DCC", "dccweap.2da has no OFFHAND column: any one-handed weapon may go in the off hand");
+	}
+	return loaded;
 }
 
 const WeaponRow* WeaponTable::Lookup(const std::string& resref, int itemType, bool twoHanded) const
@@ -569,6 +588,14 @@ const WeaponRow* WeaponTable::Find(const std::string& key) const
 		if (row.key == upper) return &row;
 	}
 	return nullptr;
+}
+
+bool WeaponTable::OffHandAllowed(bool weapon, const std::string& resref, int itemType, bool twoHanded, bool halfling) const
+{
+	if (!weapon || !offHandRule) return true;
+	const WeaponRow* row = Lookup(resref, itemType, twoHanded);
+	if (!row) return false;
+	return row->offHand == OffHandUse::Anyone || (halfling && row->offHand == OffHandUse::Halfling);
 }
 
 const ResultTable* CombatTables::Crit(CritTableID id) const

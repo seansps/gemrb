@@ -11963,7 +11963,8 @@ static PyObject* GemRB_GetSlotItem(PyObject* /*self*/, PyObject* args)
 		GET_ACTOR_GLOBAL();
 
 		auto slot = translated ? idx : core->QuerySlot(idx);
-		header = actor->PCStats->GetHeaderForSlot(slot);
+		// creatures outside the party have no PCStats (no quick slots)
+		header = actor->PCStats ? actor->PCStats->GetHeaderForSlot(slot) : -1;
 		si = actor->inventory.GetSlotItem(slot);
 		launcherSlot = actor->inventory.FindSlotRangedWeapon(slot);
 		if (launcherSlot == Inventory::GetFistSlot()) {
@@ -12691,7 +12692,7 @@ static PyObject* GemRB_DropDraggedItem(PyObject* /*self*/, PyObject* args)
 		//couldn't place item there, try swapping (only if slot is explicit)
 	} else if (Slot >= 0) {
 		//swapping won't cure this
-		HCStrings msg = actor->inventory.WhyCantEquip(Slot, slotitem->Flags & IE_INV_ITEM_TWOHANDED, ranged);
+		HCStrings msg = actor->inventory.WhyCantEquip(Slot, slotitem->Flags & IE_INV_ITEM_TWOHANDED, ranged, slotitem);
 		if (msg != HCStrings::count) {
 			displaymsg->DisplayConstantString(msg, GUIColors::WHITE);
 			return PyLong_FromLong(ASI_FAILED);

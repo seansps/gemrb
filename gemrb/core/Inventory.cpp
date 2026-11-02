@@ -619,7 +619,7 @@ int Inventory::AddSlotItem(CREItem* item, int slot, int slottype, bool ranged)
 		}
 
 		//check for equipping weapons
-		if (WhyCantEquip(slot, twohanded, ranged) != HCStrings::count) {
+		if (WhyCantEquip(slot, twohanded, ranged, item) != HCStrings::count) {
 			return ASI_FAILED;
 		}
 
@@ -1990,9 +1990,11 @@ void Inventory::UpdateWeaponAnimation()
 		const DCC::RulesData* rules = core->GetDCCRules();
 		bool held = rules && rules->held.BothHands(Slot->ItemResRef.c_str(), AnimationType.c_str());
 		DCC::OffHand offHand = DCC::OffHand::Empty;
-		if (WeaponType == IE_ANI_WEAPON_2W) {
+		const CREItem* offItem = GetShieldSlot() > 0 ? GetSlotItem(GetShieldSlot()) : nullptr;
+		// Ethren's own weapon types (the club...) lie past itemtype.2da: DCCIsWeapon knows them
+		if (WeaponType == IE_ANI_WEAPON_2W || (offItem && Owner->DCCIsWeapon(offItem))) {
 			offHand = DCC::OffHand::Weapon;
-		} else if (GetShieldSlot() > 0 && !IsSlotEmpty(GetShieldSlot())) {
+		} else if (offItem) {
 			offHand = DCC::OffHand::Shield;
 		}
 		WeaponType = DCC::WeaponAnimType(Slot->Flags & IE_INV_ITEM_TWOHANDED, held, offHand);
@@ -2033,7 +2035,7 @@ inline HCStrings Inventory::CanUseShieldSlot(int slot, bool ranged) const
 	return HCStrings::count;
 }
 
-HCStrings Inventory::WhyCantEquip(int slot, int twohanded, bool ranged) const
+HCStrings Inventory::WhyCantEquip(int slot, int twohanded, bool ranged, const CREItem* item) const
 {
 	// check only for hand slots
 	if (IWD2) {
@@ -2065,6 +2067,11 @@ HCStrings Inventory::WhyCantEquip(int slot, int twohanded, bool ranged) const
 		if (shieldSlotUsable != HCStrings::count) {
 			return shieldSlotUsable;
 		}
+	}
+
+	// DCC: of the weapons, only the light ones go in the off hand (and a halfling's own, combat.md S5)
+	if (item && !IWD2 && slot == SLOT_LEFT && Owner && core->HasFeature(GFFlags::RULES_DCC) && !Owner->DCCOffHandAllowed(item)) {
+		return HCStrings::NotInOffhand;
 	}
 
 	if (twohanded) {

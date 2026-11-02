@@ -288,13 +288,6 @@ static bool HasWeapon(const Actor* actor, bool droppable)
 	return !droppable || !(item->Flags & IE_INV_ITEM_UNDROPPABLE);
 }
 
-static const CREItem* ShieldItem(const Actor* actor)
-{
-	if (actor->IsDualWielding()) return nullptr;
-	int slot = actor->inventory.GetShieldSlot();
-	return slot < 0 ? nullptr : actor->inventory.GetSlotItem(slot);
-}
-
 // a weapon or shield broken by a crit or fumble: gone, and the best other weapon comes out.
 // Not Inventory::BreakItemSlot, which also drops the item from the resource cache while
 // other creatures may still wield the same item
@@ -428,6 +421,41 @@ bool Actor::DCCTrainedWith(const WeaponInfo& wi) const
 	const WeaponRow* row = WeaponRowFor(this, wi);
 	// weapons the table doesn't know count as trained (Ethren decision)
 	return !row || column == WeaponClass::count || row->Trained(column);
+}
+
+bool Actor::DCCIsWeapon(const CREItem* item) const
+{
+	if (!item) return false;
+	const Item* itm = gamedata->GetItem(item->ItemResRef, true);
+	if (!itm) return false;
+	// the stock item types' weapons, or one dccweap.2da knows: Ethren's own types (the club 44, the
+	// greatsword 57, the bastard sword 69) lie past the stock itemtype.2da
+	bool weapon = core->CheckItemType(itm, SLOT_WEAPON) > 0;
+	const RulesData* rules = Rules();
+	if (!weapon && rules) weapon = rules->combat.weapons.Lookup(item->ItemResRef.c_str(), itm->ItemType, item->Flags & IE_INV_ITEM_TWOHANDED);
+	gamedata->FreeItem(itm, item->ItemResRef, false);
+	return weapon;
+}
+
+bool Actor::DCCOffHandAllowed(const CREItem* item) const
+{
+	const RulesData* rules = Rules();
+	if (!rules || !item) return true;
+	const Item* itm = gamedata->GetItem(item->ItemResRef, true);
+	if (!itm) return true;
+	int type = itm->ItemType;
+	gamedata->FreeItem(itm, item->ItemResRef, false);
+	// anything but a weapon is the stock slot's business (a shield); see WeaponTable::OffHandAllowed
+	bool halfling = IsDCCCharacter() && BaseStats[IE_CLASS] == static_cast<ieDword>(ClassID::Halfling) && BaseStats[IE_LEVEL] > 0;
+	return rules->combat.weapons.OffHandAllowed(DCCIsWeapon(item), item->ItemResRef.c_str(), type, item->Flags & IE_INV_ITEM_TWOHANDED, halfling);
+}
+
+const CREItem* Actor::DCCShieldInHand() const
+{
+	int shieldSlot = inventory.GetShieldSlot();
+	const CREItem* item = shieldSlot >= 0 ? inventory.GetSlotItem(shieldSlot) : nullptr;
+	// a weapon there isn't a shield, used as a second weapon or not (one the off hand may not hold)
+	return item && !DCCIsWeapon(item) ? item : nullptr;
 }
 
 void Actor::DCCSyncEquippedQuickSlot() const
@@ -570,7 +598,9 @@ void Actor::DCCAttack(Actor* target, bool viaProjectile)
 
 	bool character = IsDCCCharacter();
 	bool twoWeapons = IsDualWielding() && weaponInfo[1].extHeader && !InjuryBlocksTwoWeapons(injuries);
-	bool halfling = character && BaseStats[IE_CLASS] == static_cast<ieDword>(ClassID::Halfling) && BaseStats[IE_LEVEL] > 0;
+	// the halfling's rules need two weapons it is trained in; with another the general Table 4-3 (S5)
+	bool halflingClass = character && BaseStats[IE_CLASS] == static_cast<ieDword>(ClassID::Halfling);
+	bool halfling = twoWeapons && HalflingTwoWeapons(halflingClass, Signed(BaseStats[IE_LEVEL]), DCCTrainedWith(weaponInfo[0]), DCCTrainedWith(weaponInfo[1]));
 	int index = viaProjectile ? std::max(0, int(attacksperround) - int(attackcount) - 1) : 0;
 	TwoWeaponDice twoDice;
 	if (twoWeapons) twoDice = rules->combat.twoWeapons.Lookup(Signed(GetStat(IE_DEX)), halfling);
@@ -642,7 +672,7 @@ void Actor::DCCAttack(Actor* target, bool viaProjectile)
 
 	// the dwarf's shield bash: one a round on top of the action dice, d14 + deed die, 1d3
 	bool dwarf = character && BaseStats[IE_CLASS] == static_cast<ieDword>(ClassID::Dwarf) && BaseStats[IE_LEVEL] > 0;
-	if (dwarf && melee && ShieldItem(this) && !InjuryBlocksShield(injuries) && (!viaProjectile || index == 0)) {
+	if (dwarf && melee && DCCShieldInHand() && !InjuryBlocksShield(injuries) && (!viaProjectile || index == 0)) {
 		DCCSwing bash;
 		if (DCCBuildSwing(bash, 2, target, 0, true)) swings.push_back(bash);
 	}
@@ -923,7 +953,7 @@ static bool ConditionHolds(const std::string& condition, const RowContext& ctx)
 	if (condition.empty()) return true;
 	const Actor* who = ctx.subject;
 	if (condition == "NOHELM") return !who->inventory.GetSlotItem(Inventory::GetHeadSlot());
-	if (condition == "NOSHIELD") return !ShieldItem(who);
+	if (condition == "NOSHIELD") return !who->DCCShieldInHand();
 	if (condition == "ARMORED") return ArmorItem(who) != nullptr;
 	if (condition == "HASWEAPON") return HasWeapon(who, false);
 	return false;
@@ -937,7 +967,7 @@ static bool TermApplies(const TableTerm& term, const RowContext& ctx)
 	if (key == "DISARM" || key == "SUNDER") return HasWeapon(ctx.target, true);
 	if (key == "WEAPONDMG") return HasWeapon(ctx.target, false) && ctx.target->weaponInfo[0].extHeader;
 	if (key == "DISARMSELF" || key == "SUNDERSELF") return HasWeapon(ctx.attacker, true);
-	if (key == "SHIELD") return ShieldItem(ctx.target) != nullptr;
+	if (key == "SHIELD") return ctx.target->DCCShieldInHand() != nullptr;
 	return true;
 }
 
@@ -1333,7 +1363,7 @@ static void ApplyTerm(const TableTerm& term, RowContext& ctx, const WeaponInfo& 
 			note = fmt::format(u"{}'s weapon breaks", Name(holder));
 		}
 	} else if (key == "SHIELD") {
-		if (!ShieldItem(ctx.target)) return;
+		if (!ctx.target->DCCShieldInHand()) return;
 		DestroySlotItem(ctx.target, ctx.target->inventory.GetShieldSlot());
 		note = fmt::format(u"{}'s shield is destroyed", Name(ctx.target));
 	} else if (key == "WEAPONDMG") {
@@ -1882,7 +1912,7 @@ void Actor::DCCResolveSwing(DCCSwing& swing, Actor* target, int depth, DCCAttack
 			Feedback(fmt::format(u"Fumble: {} misses", Name(this)), FT_COMBAT);
 		} else {
 			const CREItem* armor = ArmorItem(this);
-			const CREItem* shield = ShieldItem(this);
+			const CREItem* shield = DCCShieldInHand();
 			std::string animation;
 			if (armor) {
 				const Item* itm = gamedata->GetItem(armor->ItemResRef, true);

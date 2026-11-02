@@ -851,6 +851,13 @@ public:
 	void SetDCCCombatOptions(uint32_t options, int rage);
 	/** whether this weapon slot is one the character is trained in (classes.md; level 0 always) */
 	bool DCCTrainedWith(const WeaponInfo& wi) const;
+	/** whether an item is a weapon: the stock item types', or one dccweap.2da knows (types past itemtype.2da) */
+	bool DCCIsWeapon(const CREItem* item) const;
+	/** whether an item may be held in the off hand (combat.md, S5): shields and the like always; of
+	 * the weapons the light ones, and a level 1+ halfling's club and hand axe (dccweap.2da OFFHAND) */
+	bool DCCOffHandAllowed(const CREItem* item) const;
+	/** the shield in the off hand; nullptr if it's empty or holds a weapon, used or not */
+	const CREItem* DCCShieldInHand() const;
 	/** points the equipped quick weapon slot at the weapon really equipped, when it still names
 	 * another slot (the fists of a character made in the game): Actor::SetMap maps through it */
 	void DCCSyncEquippedQuickSlot() const;
