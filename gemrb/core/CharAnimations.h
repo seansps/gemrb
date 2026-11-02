@@ -302,6 +302,8 @@ private:
 public:
 	const AnimRef& GetHairRef() const { return HairRef; }
 	const AnimRef& GetBeardRef() const { return BeardRef; }
+	const AnimRef& GetWeaponRef() const { return WeaponRef; }
+	const AnimRef& GetOffhandRef() const { return OffhandRef; }
 	bool HasHelmet() const { return HelmetRef[0] != 0; }
 };
 

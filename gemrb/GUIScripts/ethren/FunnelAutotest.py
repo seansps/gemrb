@@ -56,8 +56,9 @@
 #   i. looks2: mannequins (FNTLOOKM/F, the bald bodies) with every funnel weapon class on both rigs, ready, attacking
 #      from four facings (the spear's thrust A6, A5 behind a shield; bows, crossbow and sling shooting) and lying dead;
 #      the spear from the five drawn facings; every hair style and beard on its rig; each helmet over long and short
-#      hair; the ten hair colours; the items' own colours on their overlays; the stance files and colour bytes
-#      checked, screenshots looks2_*.bmp
+#      hair; the ten hair colours; the items' own colours on their overlays; two weapons (S5) on all 8 rigs and the
+#      halflings' club and hand axe, attacking from four facings; the stance files and colour bytes checked,
+#      screenshots looks2_*.bmp
 # Phase 4 (areas), only when asked (--scenario area):
 #   j. area: Delmord's western edge (DL0100, tools/area_builder): the party moves there; peasants behind and in
 #      front of the hall and two oaks; the hall door opened; night (the night tiles); screenshots area_*.bmp
@@ -639,14 +640,21 @@ LOADOUTS = [
 	("sling", [("weapon", "FNTSLGS"), ("quiver", "FNTBULL")], (0, "G1", "G1", None)),
 ]
 RANGED = ("bow", "crossbow", "sling")
+TWO_WEAPON_RIGS = (0x6501, 0x6511, 0x6520, 0x6530, 0x6540, 0x6550, 0x6560, 0x6570) # avatars.2da: the bald bodies
 SEQ_ATTACK, SEQ_DIE, SEQ_SHOOT, SEQ_JAB = 0, 5, 8, 13 # stances (IE_ANI_ATTACK: picked by the weapon's weights)
 Mannequins = []
 
-def _Mannequin (female, column, row, hair = 0, beard = 0, items = (), face = 0, hairColour = None):
-	"""a dressed-up mannequin (FNTLOOKM: the bald male body CPM2, FNTLOOKF: the bald female CPF2)"""
+def _Mannequin (female, column, row, hair = 0, beard = 0, items = (), face = 0, hairColour = None, anim = None, level = None):
+	"""a dressed-up mannequin (FNTLOOKM: the bald male body CPM2, FNTLOOKF: the bald female CPF2); anim another
+	body (avatars.2da), level (class, level) before the items go in (what the off hand may hold)"""
 	x, y = LOOKS_AT[0] + column * LOOKS_DX, LOOKS_AT[1] + row * LOOKS_DY
 	gid = GemRB.CreateCreature (1, "FNTLOOKF" if female else "FNTLOOKM", x, y)
 	_Put (gid, x, y)
+	if anim is not None:
+		GemRB.SetPlayerStat (gid, IE_ANIMATION_ID, anim)
+	if level is not None:
+		GemRB.SetPlayerStat (gid, IE_CLASS, level[0])
+		GemRB.SetPlayerStat (gid, IE_LEVEL, level[1])
 	GemRB.DCCSetLooks (gid, hair, beard)
 	if hairColour is not None:
 		GemRB.SetPlayerStat (gid, IE_HAIR_COLOR, hairColour)
@@ -847,6 +855,33 @@ def _Looks2 ():
 	_Play (worn, IE_ANI_READY)
 	yield
 	_LooksShot ("itemcolours", worn[2])
+	_Clear ()
+	yield
+
+	# 6. S5: two weapons on all 8 rigs, a dagger in each hand; and the level-1 halflings' trained pair, a club and a
+	# hand axe (dccweap.2da OFFHAND): the off-hand overlays (WQ<size><code>O*) and the two-weapon attacks A7-A9
+	daggers = [("weapon", "FNTDAGR"), ("shield", "FNTDAGR")]
+	pair = [("weapon", "FNTCLUB"), ("shield", "FNTHAXE")]
+	gids = [_Mannequin (anim & 0x10 != 0, column, 0, items = daggers, anim = anim) for column, anim in enumerate (TWO_WEAPON_RIGS)]
+	gids += [_Mannequin (anim & 0x10 != 0, column + 3, 1, items = pair, anim = anim, level = (7, 1)) for column, anim in enumerate ((0x6560, 0x6570))] # DCC::ClassID::Halfling
+	yield
+	yield
+	_Check ("looks2: two weapons in hand (IsDualWielding) on every rig and the halflings' club and hand axe", [GemRB.IsDualWielding (gid) for gid in gids], [1] * len (gids))
+	_Check ("looks2: the weapon and off-hand overlays", [(GemRB.GetDCCStats (gid)["WeaponOverlay"].upper (), GemRB.GetDCCStats (gid)["OffhandOverlay"].upper ()) for gid in gids], [("KN", "KN")] * 8 + [("CL", "AX")] * 2)
+	files = [GemRB.GetDCCStats (gid)["StanceFiles"] for gid in gids]
+	got = [(GemRB.GetDCCStats (gid)["WeaponAnim"], f["Ready"][1].upper (), sorted (f[s][0][4:].upper () for s in ("Overhand", "Backhand", "Thrust"))) for gid, f in zip (gids, files)]
+	_Check ("looks2: the two-weapon animation (2), ready overlay G1, attacks A7-A9", got, [(2, "G1", ["A7", "A8", "A9"])] * len (gids))
+	_Play (gids, IE_ANI_READY)
+	yield
+	_LooksShot ("twoweapons_ready", gids[3])
+	for face, label in ((0, "s"), (4, "w"), (8, "n"), (12, "e")):
+		_Face (gids, face)
+		yield
+		_Play (gids, SEQ_ATTACK)
+		yield
+		_LooksShot ("twoweapons_attack_%s" % label, gids[3])
+		yield
+		yield
 	_Clear ()
 	yield
 
