@@ -11963,7 +11963,8 @@ static PyObject* GemRB_GetSlotItem(PyObject* /*self*/, PyObject* args)
 		GET_ACTOR_GLOBAL();
 
 		auto slot = translated ? idx : core->QuerySlot(idx);
-		header = actor->PCStats->GetHeaderForSlot(slot);
+		// creatures outside the party have no PCStats (no quick slots)
+		header = actor->PCStats ? actor->PCStats->GetHeaderForSlot(slot) : -1;
 		si = actor->inventory.GetSlotItem(slot);
 		launcherSlot = actor->inventory.FindSlotRangedWeapon(slot);
 		if (launcherSlot == Inventory::GetFistSlot()) {

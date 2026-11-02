@@ -914,6 +914,8 @@ def _OffHand (vex, pip, gob2):
 	_Check ("vex attacks once", len (r), 1)
 	base = r[0]["Die"] if r else 20
 	GemRB.CreateItem (vex, "DCTDAGR", vexOff)
+	# GetSlotItem on a creature outside the party (no PCStats) used to crash
+	_Check ("vex's dagger back in the off hand (GetSlotItem, no PCStats)", _Pick (GemRB.GetSlotItem (vex, vexOff), ["ItemResRef", "Header"]), ["DCTDAGR", -1])
 	# ... and pip's club is a second weapon, trained: the halfling's -1d and -1d (d16 and d16)
 	GemRB.CreateItem (pip, "DCTCLUB", pipOff)
 	yield
