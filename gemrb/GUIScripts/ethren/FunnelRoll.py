@@ -236,8 +236,9 @@ def RollLooks (die, tables, race, sex):
 	"""M2.11's looks by species and sex: animation, hair and beard overlays, the seven colours
 	(metal, minor, major, skin, leather, armor, hair as rows of pal16). dcclooks.2da's row gives the
 	bald body (ANIM) and the styles that are rendered on its rig (S4: hair 1-7 and the beards on the
-	male, 8-13 on the female), so a style never lands on a body it wasn't drawn for. The dice: the style,
-	d100 for no hair (BALD), d100 for a beard (BEARD) and its style, then the colours"""
+	male, 8-13 on the female), so a style never lands on a body it wasn't drawn for; halflings are drawn
+	with the dwarves' bodies, and a dwarf man always has a beard (BEARD 100), a halfling man never. The
+	dice: the style, d100 for no hair (BALD), d100 for a beard (BEARD) and its style, then the colours"""
 	looks = tables["dcclooks"]
 	row = "%s_%s" % (LOOK_ROWS.get (race, "HUMAN"), "F" if sex == 2 else "M")
 	if row not in looks.rows:
@@ -343,12 +344,15 @@ def _LookRow (tables, race, sex):
 	return looks, row if row in looks.rows else ("HUMAN_F" if sex == 2 else "HUMAN_M")
 
 def LookOptions (tables, race, sex, part):
-	"""what a look part may be on this species and sex: style ids (0 none) or pal16 rows"""
+	"""what a look part may be on this species and sex: style ids (0 none) or pal16 rows. A beard that
+	always comes (BEARD 100: a dwarf man's, what tells him from a halfling man) is never 0"""
 	looks, row = _LookRow (tables, race, sex)
 	name, slot, column, fallback = [p for p in LOOK_PARTS if p[0] == part][0]
 	if slot is None:
-		styles = [int (s) for s in (looks.Get (row, column) or "0").split ("|") if s]
-		return [0] + sorted (set (s for s in styles if s))
+		styles = sorted (set (int (s) for s in (looks.Get (row, column) or "0").split ("|") if s and int (s)))
+		if part == "Beard" and styles and looks.Int (row, "BEARD") >= 100:
+			return styles
+		return [0] + styles
 	low, high = ParseRange (looks.Get (row, column), *fallback)
 	return list (range (low, high + 1))
 

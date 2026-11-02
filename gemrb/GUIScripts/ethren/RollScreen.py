@@ -339,11 +339,12 @@ def _ShowLooks (parsed = None):
 		options = FunnelRoll.LookOptions (_Tables (), card["Race"], card["Sex"], part)
 		value = FunnelRoll.LookValue (card, part)
 		if slot is None:
-			text = styles.get ((part.upper (), value), str (value)) if len (options) > 1 and value else "none"
+			text = styles.get ((part.upper (), value), str (value)) if value and value in options else "none"
 		else:
 			text = "%d of %d" % (options.index (value) + 1 if value in options else 0, len (options))
 		LooksWindow.GetControl (0x10000020 + i).SetText (text)
-		# a woman's rig has no beards: nothing to step through
+		# a woman's rig has no beards (nor a halfling man's): nothing to step through; a dwarf man's beard
+		# steps through the dwarven ones, never to none
 		for id in (10 + 2 * i, 11 + 2 * i):
 			LooksWindow.GetControl (id).SetState (IE_GUI_BUTTON_ENABLED if editable and len (options) > 1 else IE_GUI_BUTTON_LOCKED)
 	LooksWindow.GetControl (30).SetText ("Species: " + FunnelRoll.SpeciesName (card["Race"]))

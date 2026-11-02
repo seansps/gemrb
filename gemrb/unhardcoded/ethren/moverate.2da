@@ -4,7 +4,8 @@
 # count is the rate). The engine moves an actor 2 x 566 x rate / 1500 px a tick across the screen; the
 # peasants' 10-frame walk (15 fps, a frame a tick) plants a foot that slides 7 px a frame, so rate 9
 # (6.8 px a tick) keeps the feet still. See docs/architecture/art-pipeline.md, "Walk speed". S6: each
-# demihuman's from its own stride ("Demihumans (S6)"): dwarves 6, elves 10, halflings 5.
+# demihuman's from its own stride ("Demihumans (S6)"): dwarves 6, elves 10; halflings walk the dwarves' walk
+# (their bodies, avatars.2da), so at the dwarves' 6.
     ANIMID    SPEED  CREATURE
 1   0x6500    9      human_male_peasant
 2   0x6501    9      human_male_bald
@@ -14,5 +15,5 @@
 6   0x6530    6      dwarf_female
 7   0x6540    10     elf_male
 8   0x6550    10     elf_female
-9   0x6560    5      halfling_male
-10  0x6570    5      halfling_female
+9   0x6560    6      halfling_male
+10  0x6570    6      halfling_female

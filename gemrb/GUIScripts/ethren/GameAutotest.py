@@ -6,8 +6,8 @@
 # exists, which only the game's autotest variant ships (game/src/tables/autotest, a ModPath of the -auto run).
 # Then:
 #   1. the rolling screen opens as for a player; the second card's buttons are clicked (GemRB.TestClick);
-#      the first card is made a dwarf, its looks stepped in the
-#      paper doll (M3.5); both are screenshotted and the cards accepted by themselves (BeforeRoll);
+#      the first card is made a dwarf man, its looks stepped in the paper doll (M3.5; his beard never steps
+#      to none); both are screenshotted and the cards accepted by themselves (BeforeRoll);
 #   2. the funnel starts in Delmord's town hall (DL0101) with sixteen peasants on walkable ground;
 #   3. the party walks every way Delmord has, through the doors and along the road, and back to the hall:
 #      hall -> western edge -> village east -> tavern -> east -> smithy -> east -> shrine -> east -> western
@@ -90,6 +90,8 @@ def BeforeRoll ():
 		RollScreen.OpenLooks (0)
 		Chosen["Hair"] = RollScreen.StepLook (0, "Hair", 1)
 		Chosen["Beard"] = RollScreen.StepLook (0, "Beard", 1)
+		# a dwarf man always has a beard (what tells him from a halfling man): it steps through the dwarven ones
+		_Check ("roll: a dwarf man's beard steps to another dwarven one, never none", Chosen["Beard"] in (4, 5, 6), True)
 		Chosen["Major"] = RollScreen.StepLook (0, "Tunic", 1)
 		RollScreen._Turn (-2)
 		GemRB.SetTimer (look, 800, 0)

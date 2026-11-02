@@ -56,8 +56,8 @@
 #   i. looks2: mannequins (FNTLOOKM/F, the bald bodies) with every funnel weapon class on both rigs, ready, attacking
 #      from four facings (the spear's thrust A6, A5 behind a shield; bows, crossbow and sling shooting) and lying dead;
 #      the spear from the five drawn facings; every hair style and beard on its rig; each helmet over long and short
-#      hair; the ten hair colours; the items' own colours on their overlays; two weapons (S5) on all 8 rigs and the
-#      halflings' club and hand axe, attacking from four facings; the stance files and colour bytes checked,
+#      hair; the ten hair colours; the items' own colours on their overlays; two weapons (S5) on all 8 bodies (the
+#      halflings' drawn with the dwarves') and the halflings' club and hand axe, attacking from four facings; the stance files and colour bytes checked,
 #      screenshots looks2_*.bmp
 # Phase 4 (areas), only when asked (--scenario area):
 #   j. area: Delmord's western edge (DL0100, tools/area_builder): the party moves there; peasants behind and in
@@ -641,6 +641,8 @@ LOADOUTS = [
 ]
 RANGED = ("bow", "crossbow", "sling")
 TWO_WEAPON_RIGS = (0x6501, 0x6511, 0x6520, 0x6530, 0x6540, 0x6550, 0x6560, 0x6570) # avatars.2da: the bald bodies
+# the body files they draw: the halflings (0x6560, 0x6570) on the dwarves' bodies and overlays
+TWO_WEAPON_BODIES = ("CPM2", "CPF2", "CDM2", "CDF2", "CEM2", "CEF2", "CDM2", "CDF2")
 SEQ_ATTACK, SEQ_DIE, SEQ_SHOOT, SEQ_JAB = 0, 5, 8, 13 # stances (IE_ANI_ATTACK: picked by the weapon's weights)
 Mannequins = []
 
@@ -858,8 +860,9 @@ def _Looks2 ():
 	_Clear ()
 	yield
 
-	# 6. S5: two weapons on all 8 rigs, a dagger in each hand; and the level-1 halflings' trained pair, a club and a
-	# hand axe (dccweap.2da OFFHAND): the off-hand overlays (WQ<size><code>O*) and the two-weapon attacks A7-A9
+	# 6. S5: two weapons on all 8 bodies (the halflings' are the dwarves'), a dagger in each hand; and the level-1
+	# halflings' trained pair, a club and a hand axe (dccweap.2da OFFHAND): the off-hand overlays (WQ<size><code>O*)
+	# and the two-weapon attacks A7-A9. The dwarf rigs have no club or hand axe off-hand layers yet: nothing drawn
 	daggers = [("weapon", "FNTDAGR"), ("shield", "FNTDAGR")]
 	pair = [("weapon", "FNTCLUB"), ("shield", "FNTHAXE")]
 	gids = [_Mannequin (anim & 0x10 != 0, column, 0, items = daggers, anim = anim) for column, anim in enumerate (TWO_WEAPON_RIGS)]
@@ -869,6 +872,7 @@ def _Looks2 ():
 	_Check ("looks2: two weapons in hand (IsDualWielding) on every rig and the halflings' club and hand axe", [GemRB.IsDualWielding (gid) for gid in gids], [1] * len (gids))
 	_Check ("looks2: the weapon and off-hand overlays", [(GemRB.GetDCCStats (gid)["WeaponOverlay"].upper (), GemRB.GetDCCStats (gid)["OffhandOverlay"].upper ()) for gid in gids], [("KN", "KN")] * 8 + [("CL", "AX")] * 2)
 	files = [GemRB.GetDCCStats (gid)["StanceFiles"] for gid in gids]
+	_Check ("looks2: the bodies drawn (the halflings with the dwarves')", [f["Ready"][0][:4].upper () for f in files], list (TWO_WEAPON_BODIES) + ["CDM2", "CDF2"])
 	got = [(GemRB.GetDCCStats (gid)["WeaponAnim"], f["Ready"][1].upper (), sorted (f[s][0][4:].upper () for s in ("Overhand", "Backhand", "Thrust"))) for gid, f in zip (gids, files)]
 	_Check ("looks2: the two-weapon animation (2), ready overlay G1, attacks A7-A9", got, [(2, "G1", ["A7", "A8", "A9"])] * len (gids))
 	_Play (gids, IE_ANI_READY)

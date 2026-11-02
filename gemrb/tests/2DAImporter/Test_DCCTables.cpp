@@ -17,6 +17,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <map>
 #include <set>
 
@@ -1224,9 +1225,10 @@ TEST(DCC_Tables, Looks)
 
 	auto rates = Open2DA("moverate");
 	ASSERT_TRUE(rates);
-	// S6: each species walks at its own stride's rate: humans 9, dwarves 6, elves 10, halflings 5
+	// S6: each species walks at its own stride's rate: humans 9, dwarves 6, elves 10; halflings walk the
+	// dwarves' walk (their bodies), at 6 too
 	const std::map<std::string, int> speeds { { "0x6500", 9 }, { "0x6501", 9 }, { "0x6510", 9 }, { "0x6511", 9 },
-		{ "0x6520", 6 }, { "0x6530", 6 }, { "0x6540", 10 }, { "0x6550", 10 }, { "0x6560", 5 }, { "0x6570", 5 } };
+		{ "0x6520", 6 }, { "0x6530", 6 }, { "0x6540", 10 }, { "0x6550", 10 }, { "0x6560", 6 }, { "0x6570", 6 } };
 	ASSERT_EQ(rates->GetRowCount(), speeds.size());
 	for (TableMgr::index_t row = 0; row < rates->GetRowCount(); ++row) {
 		const std::string& id = rates->QueryField(row, 0);
@@ -1244,11 +1246,21 @@ TEST(DCC_Tables, Looks)
 	EXPECT_EQ(avatars->QueryField(avatars->GetRowIndex("0x6510"), 7), "F"); // the female rig's own overlays
 	EXPECT_EQ(avatars->QueryField(avatars->GetRowIndex("0x6511"), 7), "F"); // the bald female body: her rig's hair
 	EXPECT_EQ(avatars->QueryField(avatars->GetRowIndex("0x6511"), 0), "CPF2");
-	// S6: the demihumans' bald bodies, each with its own rig's overlays
-	const std::map<std::string, std::string> sizes { { "0x6520", "D" }, { "0x6530", "W" }, { "0x6540", "E" },
-		{ "0x6550", "V" }, { "0x6560", "H" }, { "0x6570", "N" } };
-	for (const auto& [id, size] : sizes) {
-		EXPECT_EQ(avatars->QueryField(avatars->GetRowIndex(id), 7), size) << id;
+	// S6: the demihumans' bald bodies, each with its own rig's overlays; the halflings have none of their own:
+	// they are drawn with the dwarves' bodies and overlays (the ids stay apart for the CREs and saves)
+	const std::map<std::string, std::pair<std::string, std::string>> bodyFiles { { "0x6520", { "CDM2", "D" } },
+		{ "0x6530", { "CDF2", "W" } }, { "0x6540", { "CEM2", "E" } }, { "0x6550", { "CEF2", "V" } },
+		{ "0x6560", { "CDM2", "D" } }, { "0x6570", { "CDF2", "W" } } };
+	for (const auto& [id, body] : bodyFiles) {
+		TableMgr::index_t row = avatars->GetRowIndex(id);
+		for (TableMgr::index_t col = 0; col < 4; ++col) {
+			EXPECT_EQ(avatars->QueryField(row, col), body.first) << id << " " << col;
+		}
+		EXPECT_EQ(avatars->QueryField(row, 7), body.second) << id;
+	}
+	for (TableMgr::index_t col = 0; col < avatars->GetColumnCount(); ++col) {
+		EXPECT_EQ(avatars->QueryField(avatars->GetRowIndex("0x6560"), col), avatars->QueryField(avatars->GetRowIndex("0x6520"), col)) << col;
+		EXPECT_EQ(avatars->QueryField(avatars->GetRowIndex("0x6570"), col), avatars->QueryField(avatars->GetRowIndex("0x6530"), col)) << col;
 	}
 	EXPECT_EQ(ids, (std::set<std::string> { "0x6500", "0x6501", "0x6510", "0x6511", "0x6520", "0x6530", "0x6540", "0x6550", "0x6560", "0x6570" }));
 
@@ -1289,6 +1301,21 @@ TEST(DCC_Tables, Looks)
 			EXPECT_TRUE(name == "DWARF_M" ? id >= 4 && id <= 6 : name == "HUMAN_M" && id >= 1 && id <= 3) << name << " " << id;
 		}
 	}
+	// halflings are drawn on the dwarves' bodies, so they take only the dwarf rigs' hair; a dwarf man always
+	// has a beard (BEARD 100) and a halfling man never: all that tells the two men apart
+	auto row = [&](const std::string& name) { return looks->GetRowIndex(name); };
+	auto field = [&](const std::string& name, const std::string& column) {
+		return looks->QueryField(row(name), looks->GetColumnIndex(column));
+	};
+	for (const auto& [halfling, dwarf] : { std::pair<std::string, std::string> { "HALFLING_M", "DWARF_M" }, { "HALFLING_F", "DWARF_F" } }) {
+		std::set<int> hairs = styles(row(halfling), "HAIR");
+		std::set<int> dwarfHairs = styles(row(dwarf), "HAIR");
+		EXPECT_TRUE(std::includes(dwarfHairs.begin(), dwarfHairs.end(), hairs.begin(), hairs.end())) << halfling;
+	}
+	EXPECT_EQ(field("DWARF_M", "BEARD"), "100");
+	EXPECT_EQ(styles(row("DWARF_M"), "BEARDS"), (std::set<int> { 4, 5, 6 }));
+	EXPECT_EQ(field("HALFLING_M", "BEARD"), "0");
+	EXPECT_TRUE(styles(row("HALFLING_M"), "BEARDS").empty());
 }
 
 // Phase 3: the formations for parties of 16 (formatio.2da): 20 places each, none shared

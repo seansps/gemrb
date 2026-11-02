@@ -168,9 +168,21 @@ class FunnelRollTest (unittest.TestCase):
 		self.assertEqual (sorted (values), hair)
 		self.assertEqual (FunnelRoll.LookOptions (TABLES, 1, 1, "Skin"), list (range (28, 36)))
 		FunnelRoll.SetSex (card, 1, die, TABLES)
-		# S6: a dwarf man's beards are the dwarven ones (4-6); elves and halflings have none
-		self.assertEqual (FunnelRoll.LookOptions (TABLES, 4, 1, "Beard"), [0, 4, 5, 6])
+		# S6: a dwarf man's beards are the dwarven ones (4-6), and he always has one (no "none": it is what
+		# tells him from a halfling man, on the same body); elves and halflings have none
+		self.assertEqual (FunnelRoll.LookOptions (TABLES, 4, 1, "Beard"), [4, 5, 6])
 		self.assertEqual ([FunnelRoll.LookOptions (TABLES, race, 1, "Beard") for race in (2, 5)], [[0], [0]])
+		FunnelRoll.SetSpecies (card, 4, die, TABLES)
+		self.assertEqual ([card["Sex"], card["Looks"]["Animation"]], [1, 0x6520])
+		self.assertIn (card["Looks"]["Beard"], (4, 5, 6))
+		beards = [FunnelRoll.StepLook (card, TABLES, "Beard", step) for step in (1, 1, 1, -1, -1, -1, -1)]
+		self.assertEqual (sorted (set (beards)), [4, 5, 6])
+		# a halfling man: the dwarf man's body, no beard (halflings and dwarves share the dwarves' sprites)
+		FunnelRoll.SetSpecies (card, 5, die, TABLES)
+		self.assertEqual ([card["Looks"]["Animation"], card["Looks"]["Beard"]], [0x6560, 0])
+		self.assertEqual (FunnelRoll.StepLook (card, TABLES, "Beard", 1), 0)
+		FunnelRoll.SetSpecies (card, 4, die, TABLES)
+		self.assertIn (card["Looks"]["Beard"], (4, 5, 6))
 
 	def test_species_odds (self):
 		"""a species' occupation is drawn at Table 1-3's odds among that species' rows"""
@@ -273,6 +285,13 @@ class FunnelRollTest (unittest.TestCase):
 						seen[anim][1].add (looks["Beard"])
 		self.assertEqual (seen, rigs)
 		self.assertTrue (all (bald[anim] > 0 for anim in rigs if anim != 0x6550), bald) # elf women are never bald
+		# halflings are drawn with the dwarves' bodies (avatars.2da), so they take only the dwarf rigs' styles;
+		# a dwarf man always has a beard and a halfling man never (all that tells the two men apart)
+		for sex in (1, 2):
+			self.assertTrue (set (FunnelRoll.LookOptions (TABLES, 5, sex, "Hair")) <= set (FunnelRoll.LookOptions (TABLES, 4, sex, "Hair")), sex)
+		for i in range (400):
+			self.assertIn (FunnelRoll.RollLooks (die, TABLES, 4, 1)["Beard"], (4, 5, 6))
+			self.assertEqual (FunnelRoll.RollLooks (die, TABLES, 5, 1)["Beard"], 0)
 		# the same dice, the same looks
 		self.assertEqual (FunnelRoll.RollLooks (Seeded (4), TABLES, 1, 2), FunnelRoll.RollLooks (Seeded (4), TABLES, 1, 2))
 
