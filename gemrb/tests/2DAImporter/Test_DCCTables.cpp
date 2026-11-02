@@ -16,6 +16,7 @@
 
 #include <gtest/gtest.h>
 
+#include <map>
 #include <set>
 
 namespace GemRB {
@@ -1145,10 +1146,12 @@ TEST(DCC_Tables, Looks)
 		EXPECT_NE(hair.Find(id, false), nullptr) << id;
 	}
 	EXPECT_EQ(hair.Find(14, false), nullptr);
-	for (int id = 1; id <= 3; ++id) {
+	// S6: the dwarven beards (4-6) after the human ones
+	for (int id = 1; id <= 6; ++id) {
 		ASSERT_NE(hair.Find(id, true), nullptr) << id;
 		EXPECT_EQ(HairOverlay(hair.Find(id, true), true), HairOverlay(hair.Find(id, true), false)) << id;
 	}
+	EXPECT_EQ(hair.Find(7, true), nullptr);
 	EXPECT_EQ(HairOverlay(hair.Find(6, false), true), "XT"); // the ponytail hangs below a helmet
 	EXPECT_EQ(HairOverlay(hair.Find(12, false), false), "HR");
 	EXPECT_EQ(HairOverlay(hair.Find(12, false), true), "XR");
@@ -1156,8 +1159,14 @@ TEST(DCC_Tables, Looks)
 
 	auto rates = Open2DA("moverate");
 	ASSERT_TRUE(rates);
+	// S6: each species walks at its own stride's rate: humans 9, dwarves 6, elves 10, halflings 5
+	const std::map<std::string, int> speeds { { "0x6500", 9 }, { "0x6501", 9 }, { "0x6510", 9 }, { "0x6511", 9 },
+		{ "0x6520", 6 }, { "0x6530", 6 }, { "0x6540", 10 }, { "0x6550", 10 }, { "0x6560", 5 }, { "0x6570", 5 } };
+	ASSERT_EQ(rates->GetRowCount(), speeds.size());
 	for (TableMgr::index_t row = 0; row < rates->GetRowCount(); ++row) {
-		EXPECT_EQ(rates->QueryFieldSigned<int>(row, 1), 9) << rates->QueryField(row, 0);
+		const std::string& id = rates->QueryField(row, 0);
+		ASSERT_EQ(speeds.count(id), 1U) << id;
+		EXPECT_EQ(rates->QueryFieldSigned<int>(row, 1), speeds.at(id)) << id;
 	}
 	auto avatars = Open2DA("avatars");
 	ASSERT_TRUE(avatars);
@@ -1170,10 +1179,18 @@ TEST(DCC_Tables, Looks)
 	EXPECT_EQ(avatars->QueryField(avatars->GetRowIndex("0x6510"), 7), "F"); // the female rig's own overlays
 	EXPECT_EQ(avatars->QueryField(avatars->GetRowIndex("0x6511"), 7), "F"); // the bald female body: her rig's hair
 	EXPECT_EQ(avatars->QueryField(avatars->GetRowIndex("0x6511"), 0), "CPF2");
-	EXPECT_EQ(ids, (std::set<std::string> { "0x6500", "0x6501", "0x6510", "0x6511" }));
+	// S6: the demihumans' bald bodies, each with its own rig's overlays
+	const std::map<std::string, std::string> sizes { { "0x6520", "D" }, { "0x6530", "W" }, { "0x6540", "E" },
+		{ "0x6550", "V" }, { "0x6560", "H" }, { "0x6570", "N" } };
+	for (const auto& [id, size] : sizes) {
+		EXPECT_EQ(avatars->QueryField(avatars->GetRowIndex(id), 7), size) << id;
+	}
+	EXPECT_EQ(ids, (std::set<std::string> { "0x6500", "0x6501", "0x6510", "0x6511", "0x6520", "0x6530", "0x6540", "0x6550", "0x6560", "0x6570" }));
 
-	// the looks roll (dcclooks.2da) only gives a body the styles rendered on its rig: hair 1-7 and the
-	// beards on the male (CPM2, L), hair 8-13 on the female (CPF2, F)
+	// the looks roll (dcclooks.2da) only gives a body the styles rendered on its rig: hair 1-7 on the men,
+	// 8-13 on the women; the beards 1-3 on human men, 4-6 on dwarf men (S6: each species its own body)
+	const std::map<std::string, int> bodies { { "HUMAN_M", 0x6501 }, { "HUMAN_F", 0x6511 }, { "DWARF_M", 0x6520 },
+		{ "DWARF_F", 0x6530 }, { "ELF_M", 0x6540 }, { "ELF_F", 0x6550 }, { "HALFLING_M", 0x6560 }, { "HALFLING_F", 0x6570 } };
 	auto looks = Open2DA("dcclooks");
 	ASSERT_TRUE(looks);
 	auto styles = [&](TableMgr::index_t row, const std::string& column) {
@@ -1193,7 +1210,8 @@ TEST(DCC_Tables, Looks)
 		const std::string& name = looks->GetRowName(row);
 		bool female = name.back() == 'F';
 		int anim = atoi(looks->QueryField(row, looks->GetColumnIndex("ANIM")).c_str());
-		EXPECT_EQ(anim, female ? 0x6511 : 0x6501) << name;
+		ASSERT_EQ(bodies.count(name), 1U) << name;
+		EXPECT_EQ(anim, bodies.at(name)) << name;
 		std::set<int> hairs = styles(row, "HAIR");
 		EXPECT_FALSE(hairs.empty()) << name;
 		for (int id : hairs) {
@@ -1203,6 +1221,7 @@ TEST(DCC_Tables, Looks)
 		for (int id : styles(row, "BEARDS")) {
 			EXPECT_FALSE(female) << name;
 			EXPECT_NE(hair.Find(id, true), nullptr) << name << " " << id;
+			EXPECT_TRUE(name == "DWARF_M" ? id >= 4 && id <= 6 : name == "HUMAN_M" && id >= 1 && id <= 3) << name << " " << id;
 		}
 	}
 }
