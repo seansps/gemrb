@@ -247,12 +247,12 @@ def StepLook (index, part, step):
 	return value
 
 def _StyleNames ():
-	"""dcchair.2da's style ids -> names, for the paper doll's labels"""
-	names = {0: "none"}
+	"""dcchair.2da's (KIND, ID) -> names, for the paper doll's labels (hair and beards share ids)"""
+	names = {}
 	table = GemRB.LoadTable ("dcchair", True)
 	if table:
 		for row in range (table.GetRowCount ()):
-			names[table.GetValue (row, 0)] = table.GetRowName (row).replace ("_", " ").capitalize ()
+			names[(table.GetValue (row, 1), table.GetValue (row, 0))] = table.GetRowName (row).replace ("_", " ").capitalize ()
 	return names
 
 def OpenLooks (index):
@@ -339,7 +339,7 @@ def _ShowLooks (parsed = None):
 		options = FunnelRoll.LookOptions (_Tables (), card["Race"], card["Sex"], part)
 		value = FunnelRoll.LookValue (card, part)
 		if slot is None:
-			text = styles.get (value, str (value)) if len (options) > 1 else "none"
+			text = styles.get ((part.upper (), value), str (value)) if len (options) > 1 and value else "none"
 		else:
 			text = "%d of %d" % (options.index (value) + 1 if value in options else 0, len (options))
 		LooksWindow.GetControl (0x10000020 + i).SetText (text)
