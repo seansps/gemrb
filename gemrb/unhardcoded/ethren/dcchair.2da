@@ -8,7 +8,8 @@
 # what hangs below still shows), the style itself (beards), or * for nothing (short styles).
 # Each style is rendered on one rig only, so it draws only on that rig's bodies (the size letter): hair 1-7
 # and the beards on the male (L: CPM2), hair 8-13 on the female (F: CPF2). The looks roll (dcclooks.2da)
-# picks them by sex; elsewhere the file is missing and nothing is drawn.
+# picks them by sex; elsewhere the file is missing and nothing is drawn. S6: every hair style is rendered on
+# each demihuman rig of its sex too (D W E V H N); the dwarven beards 4-6 on the dwarf man (D) only.
                ID   KIND   CODE  HELMET
 SIMPLE_PARTED  1    HAIR   HP    *
 BALDING        2    HAIR   HA    *
@@ -26,3 +27,6 @@ PONYTAIL_F     13   HAIR   HQ    XQ
 FULL_BEARD     1    BEARD  BD    BD
 MOUSTACHE      2    BEARD  BM    BM
 MUTTON_CHOPS   3    BEARD  BC    BC
+DWARF_LONG     4    BEARD  BL    BL
+DWARF_FORKED   5    BEARD  BF    BF
+DWARF_SPADE    6    BEARD  BS    BS

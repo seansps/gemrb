@@ -168,7 +168,9 @@ class FunnelRollTest (unittest.TestCase):
 		self.assertEqual (sorted (values), hair)
 		self.assertEqual (FunnelRoll.LookOptions (TABLES, 1, 1, "Skin"), list (range (28, 36)))
 		FunnelRoll.SetSex (card, 1, die, TABLES)
-		self.assertEqual (FunnelRoll.LookOptions (TABLES, 4, 1, "Beard"), [0, 1, 2, 3])
+		# S6: a dwarf man's beards are the dwarven ones (4-6); elves and halflings have none
+		self.assertEqual (FunnelRoll.LookOptions (TABLES, 4, 1, "Beard"), [0, 4, 5, 6])
+		self.assertEqual ([FunnelRoll.LookOptions (TABLES, race, 1, "Beard") for race in (2, 5)], [[0], [0]])
 
 	def test_species_odds (self):
 		"""a species' occupation is drawn at Table 1-3's odds among that species' rows"""
@@ -237,24 +239,27 @@ class FunnelRollTest (unittest.TestCase):
 		self.assertEqual (FunnelRoll.RollAbility (dice, True), 6)
 
 	def test_looks_by_sex (self):
-		# S4: each hair and beard style is rendered on one rig only (art/_cache/sprites/.../engine_rows.md):
-		# hair 1-7 and the beards on the male (CPM2, WQL..), hair 8-13 on the female (CPF2, WQF..). Every
-		# species and sex only rolls the styles of its body's rig, each of them comes up, and a bald woman
-		# keeps the bald female body
+		# S4: hair 1-7 and the beards are rendered on the male rigs, hair 8-13 on the female ones; S6: each species
+		# and sex has its own bald body (0x6501 human man ... 0x6570 halfling woman), the human beards 1-3 on the
+		# human man, the dwarven 4-6 on the dwarf man, none on the others. Every species and sex only rolls the
+		# styles of its body's rig, each of them comes up, and a bald one keeps its bald body
 		hair = FunnelRoll.ParseTwoDA (open (os.path.join (GEMRB, "unhardcoded", "ethren", "dcchair.2da")).read ())
 		kinds = {}
 		for row in hair.order:
 			kinds[(hair.Get (row, "KIND"), hair.Int (row, "ID"))] = row
-		rigs = {0x6501: (set (range (1, 8)), {1, 2, 3}), 0x6511: (set (range (8, 14)), set ())}
+		male, female = set (range (1, 8)), set (range (8, 14))
+		bodies = {(1, 1): 0x6501, (1, 2): 0x6511, (4, 1): 0x6520, (4, 2): 0x6530, (2, 1): 0x6540, (2, 2): 0x6550, (5, 1): 0x6560, (5, 2): 0x6570}
+		rigs = {0x6501: (male, {1, 2, 3}), 0x6511: (female, set ()), 0x6520: (male, {4, 5, 6}), 0x6530: (female, set ()),
+			0x6540: (male - {2}, set ()), 0x6550: (female, set ()), 0x6560: (male, set ()), 0x6570: (female, set ())}
 		die = Seeded (11)
-		seen = {0x6501: (set (), set ()), 0x6511: (set (), set ())}
-		bald = {0x6501: 0, 0x6511: 0}
+		seen = dict ((anim, (set (), set ())) for anim in rigs)
+		bald = dict ((anim, 0) for anim in rigs)
 		for race in (1, 2, 4, 5):
 			for sex in (1, 2):
 				for i in range (400):
 					looks = FunnelRoll.RollLooks (die, TABLES, race, sex)
 					anim = looks["Animation"]
-					self.assertEqual (anim, 0x6511 if sex == 2 else 0x6501)
+					self.assertEqual (anim, bodies[(race, sex)])
 					styles, beards = rigs[anim]
 					if looks["Hair"]:
 						self.assertIn (looks["Hair"], styles, (race, sex))
@@ -266,9 +271,8 @@ class FunnelRollTest (unittest.TestCase):
 						self.assertIn (looks["Beard"], beards, (race, sex))
 						self.assertIn (("BEARD", looks["Beard"]), kinds)
 						seen[anim][1].add (looks["Beard"])
-		self.assertEqual (seen[0x6501], rigs[0x6501])
-		self.assertEqual (seen[0x6511], rigs[0x6511])
-		self.assertTrue (bald[0x6501] > 0 and bald[0x6511] > 0, bald)
+		self.assertEqual (seen, rigs)
+		self.assertTrue (all (bald[anim] > 0 for anim in rigs if anim != 0x6550), bald) # elf women are never bald
 		# the same dice, the same looks
 		self.assertEqual (FunnelRoll.RollLooks (Seeded (4), TABLES, 1, 2), FunnelRoll.RollLooks (Seeded (4), TABLES, 1, 2))
 
@@ -286,7 +290,7 @@ class FunnelRollTest (unittest.TestCase):
 			self.assertTrue (1 <= card["Augur"] <= 30 and card["AugurName"])
 			colors = card["Looks"]["Colors"]
 			self.assertTrue (28 <= colors[3] <= 35 and 36 <= colors[6] <= 45 and 7 <= colors[1] <= 27)
-			self.assertEqual (card["Looks"]["Animation"], 0x6511 if card["Sex"] == 2 else 0x6501)
+			self.assertEqual (card["Looks"]["Animation"], {1: 0x6501, 4: 0x6520, 2: 0x6540, 5: 0x6560}[card["Race"]] + (0x10 if card["Sex"] == 2 else 0))
 			text = FunnelRoll.CardText (card)
 			self.assertEqual (len (text.split ("\n")), 7)
 			self.assertTrue (len (text.encode ("utf-8")) < 1024) # NetSetLobbyCards' limit

@@ -5,6 +5,12 @@
 0x6501     CPM2       CPM2       CPM2       CPM2       0          2          0          L
 0x6510     CPF1       CPF1       CPF1       CPF1       0          2          0          F
 0x6511     CPF2       CPF2       CPF2       CPF2       0          2          0          F
+0x6520     CDM2       CDM2       CDM2       CDM2       0          2          0          D
+0x6530     CDF2       CDF2       CDF2       CDF2       0          2          0          W
+0x6540     CEM2       CEM2       CEM2       CEM2       0          2          0          E
+0x6550     CEF2       CEF2       CEF2       CEF2       0          2          0          V
+0x6560     CLM2       CLM2       CLM2       CLM2       0          2          0          H
+0x6570     CLF2       CLF2       CLF2       CLF2       0          2          0          N
 # ethren (M2.11): our character animations (tools/sprite_render writes the rows; the test games merge
 # them into the demo's table). The engine uses the row with the largest id not above the CRE's, so each
 # body owns a block of 16 ids (variants, outfits) and each species and gender a block of 0x10 bodies:
@@ -15,3 +21,6 @@
 # CPF2 the female body bald, for her hair layers (S4). TYPE 0 (IE_ANI_CODE_MIRROR),
 # SPACE 2, PALETTE 0 (recoloured from the CRE's colours). SIZE is the overlays' letter (WQ<size><code>):
 # weapons, helmets and hair are rendered on one rig, so each body has its own (L the male, F the female).
+# S6: the demihumans' bald bodies, hair and beards always overlays: 0x6520 CDM2 the dwarf man (D), 0x6530 CDF2
+# the dwarf woman (W), 0x6540 CEM2 the elf man (E), 0x6550 CEF2 the elf woman (V), 0x6560 CLM2 the halfling man
+# (H), 0x6570 CLF2 the halfling woman (N).
