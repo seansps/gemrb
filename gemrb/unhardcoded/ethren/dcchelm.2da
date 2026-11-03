@@ -1,0 +1,11 @@
+2DA V1.0
+*
+# ethren (S5): the helmet overlays (art/sprites/overlays.json "helmets") and whether each is closed (DCC/Looks.h).
+# Rows by the helmet's 2-letter animation code (ITM 0x22). An open helmet draws the hair's crop at its rim
+# (dcchair.2da HELMET); a closed one covers the head down to the neck, so the open crop would poke out of it:
+# it draws the hair's CLOSED crop instead. CLOSED 1: closed, 0: open; a helmet not listed is open.
+      CLOSED
+LC    0
+KH    0
+NH    0
+FH    1

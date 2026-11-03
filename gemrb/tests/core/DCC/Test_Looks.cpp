@@ -19,9 +19,9 @@ TEST(DCC_Looks, HairStyles)
 {
 	HairTable table;
 	EXPECT_TRUE(table.Empty());
-	table.Set({ 1, false, "HP", "" });
-	table.Set({ 2, false, "HL", "HC" }); // a long style, cropped under a helmet
-	table.Set({ 1, true, "BD", "BD" });
+	table.Set({ 1, false, "HP", "", "" });
+	table.Set({ 2, false, "HL", "HC", "HK" }); // a long style, cropped under a helmet (S5: a closed one its own crop)
+	table.Set({ 1, true, "BD", "BD", "ZD" });
 	EXPECT_FALSE(table.Empty());
 	// hair and beards have ids of their own
 	ASSERT_NE(table.Find(1, false), nullptr);
@@ -30,15 +30,37 @@ TEST(DCC_Looks, HairStyles)
 	EXPECT_EQ(table.Find(2, true), nullptr);
 	EXPECT_EQ(table.Find(0, false), nullptr);
 	EXPECT_EQ(table.Find(-1, false), nullptr);
-	// what is drawn, without and with a helmet
-	EXPECT_EQ(HairOverlay(table.Find(1, false), false), "HP");
-	EXPECT_EQ(HairOverlay(table.Find(1, false), true), "");
-	EXPECT_EQ(HairOverlay(table.Find(2, false), true), "HC");
-	EXPECT_EQ(HairOverlay(table.Find(1, true), true), "BD");
-	EXPECT_EQ(HairOverlay(nullptr, false), "");
+	// what is drawn, without a helmet, under an open one and under a closed one
+	EXPECT_EQ(HairOverlay(table.Find(1, false), Helmet::None), "HP");
+	EXPECT_EQ(HairOverlay(table.Find(1, false), Helmet::Open), "");
+	EXPECT_EQ(HairOverlay(table.Find(1, false), Helmet::Closed), "");
+	EXPECT_EQ(HairOverlay(table.Find(2, false), Helmet::Open), "HC");
+	EXPECT_EQ(HairOverlay(table.Find(2, false), Helmet::Closed), "HK");
+	EXPECT_EQ(HairOverlay(table.Find(1, true), Helmet::Open), "BD");
+	EXPECT_EQ(HairOverlay(table.Find(1, true), Helmet::Closed), "ZD");
+	EXPECT_EQ(HairOverlay(nullptr, Helmet::None), "");
+	EXPECT_EQ(HairOverlay(nullptr, Helmet::Closed), "");
 	// a row again replaces it
-	table.Set({ 1, false, "HS", "" });
-	EXPECT_EQ(HairOverlay(table.Find(1, false), false), "HS");
+	table.Set({ 1, false, "HS", "", "" });
+	EXPECT_EQ(HairOverlay(table.Find(1, false), Helmet::None), "HS");
+}
+
+// S5: which helmets are closed, by the helmet overlay's code; one not listed is open, none worn is none
+TEST(DCC_Looks, ClosedHelmets)
+{
+	HelmetTable table;
+	EXPECT_TRUE(table.Empty());
+	EXPECT_EQ(table.Worn("FH"), Helmet::Open);
+	table.Set("fh", true);
+	table.Set("NH", false);
+	EXPECT_FALSE(table.Empty());
+	EXPECT_EQ(table.Worn("FH"), Helmet::Closed);
+	EXPECT_EQ(table.Worn("fh"), Helmet::Closed);
+	EXPECT_EQ(table.Worn("NH"), Helmet::Open);
+	EXPECT_EQ(table.Worn("KH"), Helmet::Open);
+	EXPECT_EQ(table.Worn(""), Helmet::None);
+	table.Set("FH", false); // a row again replaces it
+	EXPECT_EQ(table.Worn("FH"), Helmet::Open);
 }
 
 TEST(DCC_Looks, OverlayColourBytes)

@@ -172,6 +172,10 @@ class FunnelRollTest (unittest.TestCase):
 		# tells him from a halfling man, on the same body); elves and halflings have none
 		self.assertEqual (FunnelRoll.LookOptions (TABLES, 4, 1, "Beard"), [4, 5, 6])
 		self.assertEqual ([FunnelRoll.LookOptions (TABLES, race, 1, "Beard") for race in (2, 5)], [[0], [0]])
+		# S5: a bald elf is style 14 (dcclooks.2da BARE: the pointed ears alone), so an elf's hair never steps to none
+		self.assertEqual (FunnelRoll.LookOptions (TABLES, 2, 1, "Hair"), [14, 1, 3, 4, 5, 6, 7])
+		self.assertEqual (FunnelRoll.LookOptions (TABLES, 2, 2, "Hair"), [14, 8, 9, 10, 11, 12, 13])
+		self.assertEqual ([FunnelRoll.LookOptions (TABLES, race, 1, "Hair")[0] for race in (1, 4, 5)], [0, 0, 0])
 		FunnelRoll.SetSpecies (card, 4, die, TABLES)
 		self.assertEqual ([card["Sex"], card["Looks"]["Animation"]], [1, 0x6520])
 		self.assertIn (card["Looks"]["Beard"], (4, 5, 6))
@@ -254,7 +258,8 @@ class FunnelRollTest (unittest.TestCase):
 		# S4: hair 1-7 and the beards are rendered on the male rigs, hair 8-13 on the female ones; S6: each species
 		# and sex has its own bald body (0x6501 human man ... 0x6570 halfling woman), the human beards 1-3 on the
 		# human man, the dwarven 4-6 on the dwarf man, none on the others. Every species and sex only rolls the
-		# styles of its body's rig, each of them comes up, and a bald one keeps its bald body
+		# styles of its body's rig, each of them comes up, and a bald one keeps its bald body; S5: but a bald elf
+		# takes style 14, the elves' pointed ears alone (their bodies have human ears)
 		hair = FunnelRoll.ParseTwoDA (open (os.path.join (GEMRB, "unhardcoded", "ethren", "dcchair.2da")).read ())
 		kinds = {}
 		for row in hair.order:
@@ -266,6 +271,7 @@ class FunnelRollTest (unittest.TestCase):
 		die = Seeded (11)
 		seen = dict ((anim, (set (), set ())) for anim in rigs)
 		bald = dict ((anim, 0) for anim in rigs)
+		bare = dict ((anim, 14 if anim in (0x6540, 0x6550) else 0) for anim in rigs)
 		for race in (1, 2, 4, 5):
 			for sex in (1, 2):
 				for i in range (400):
@@ -273,18 +279,23 @@ class FunnelRollTest (unittest.TestCase):
 					anim = looks["Animation"]
 					self.assertEqual (anim, bodies[(race, sex)])
 					styles, beards = rigs[anim]
-					if looks["Hair"]:
+					if looks["Hair"] == bare[anim]:
+						bald[anim] += 1
+						if looks["Hair"]:
+							self.assertIn (("HAIR", looks["Hair"]), kinds)
+					elif looks["Hair"]:
 						self.assertIn (looks["Hair"], styles, (race, sex))
 						self.assertIn (("HAIR", looks["Hair"]), kinds)
 						seen[anim][0].add (looks["Hair"])
 					else:
-						bald[anim] += 1
+						self.fail ((race, sex, looks["Hair"])) # never bare (0) where the row's BARE is a style
 					if looks["Beard"]:
 						self.assertIn (looks["Beard"], beards, (race, sex))
 						self.assertIn (("BEARD", looks["Beard"]), kinds)
 						seen[anim][1].add (looks["Beard"])
 		self.assertEqual (seen, rigs)
-		self.assertTrue (all (bald[anim] > 0 for anim in rigs if anim != 0x6550), bald) # elf women are never bald
+		self.assertTrue (all (bald[anim] > 0 for anim in rigs if anim != 0x6550), bald) # elf men bald now and then (14)
+		self.assertEqual (bald[0x6550], 0) # elf women never
 		# halflings are drawn with the dwarves' bodies (avatars.2da), so they take only the dwarf rigs' styles;
 		# a dwarf man always has a beard and a halfling man never (all that tells the two men apart)
 		for sex in (1, 2):

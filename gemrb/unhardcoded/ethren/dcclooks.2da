@@ -4,19 +4,20 @@
 # the sprites, DCC/Looks.h). ANIM is the animation id (avatars.2da, decimal): the bald body the hair and beard
 # overlays go on (0x6501 CPM2 the male, 0x6511 CPF2 the female; S6: each demihuman's own, 0x6520-0x6570). HAIR lists the hair styles of dcchair.2da it may take (| between them, a style listed
 # twice comes up twice as often); each style is rendered on one rig, so the male rows take only 1-7 and the
-# female rows 8-13. BALD is the chance in % of no hair at all (the bald body as it is), BEARD the chance of a
-# beard (100: always, and the paper doll offers no "none") and BEARDS its styles (human men 1-3, dwarf men their
+# female rows 8-13. BALD is the chance in % of no hair at all and BARE (S5) the style a bald one takes: 0 none
+# (the bald body as it is), 14 on the elves (their pointed ears alone, dcchair.2da; the paper doll offers it in
+# place of "none"). BEARD is the chance of a beard (100: always, and the paper doll offers no "none") and BEARDS its styles (human men 1-3, dwarf men their
 # own 4-6; dwarf women, elves and halflings none). Halflings are drawn with the dwarves' bodies (avatars.2da), so
 # they take only the dwarf rigs' styles; a dwarf man always has a beard and a halfling man never (it is what tells
 # them apart). The colour columns
 # are ranges of Ethren's pal16 rows: SKIN, HAIRCOL, the dyes of the minor and major colours (DYES), LEATHER
 # and METAL (metal and armor).
-            ANIM    HAIR             BALD  BEARD  BEARDS     SKIN   HAIRCOL  DYES   LEATHER  METAL
-HUMAN_M     25857   1|2|3|4|5|6|7    15    45     1|2|3      28-35  36-45    7-27   46-51    0-6
-HUMAN_F     25873   8|9|10|11|12|13  2     0      0          28-35  36-45    7-27   46-51    0-6
-ELF_M       25920   1|3|4|5|6|7      5     0      0          28-33  36-45    7-27   46-51    0-6
-ELF_F       25936   8|9|10|11|12|13  0     0      0          28-33  36-45    7-27   46-51    0-6
-DWARF_M     25888   1|2|3|4|5|6|7    30    100    4|5|6      29-35  36-45    7-27   46-51    0-6
-DWARF_F     25904   8|9|10|11|12|13  2     0      0          29-35  36-45    7-27   46-51    0-6
-HALFLING_M  25952   1|2|3|4|5|6|7    10    0      0          28-35  36-45    7-27   46-51    0-6
-HALFLING_F  25968   8|9|10|11|12|13  2     0      0          28-35  36-45    7-27   46-51    0-6
+            ANIM    HAIR             BALD  BARE  BEARD  BEARDS     SKIN   HAIRCOL  DYES   LEATHER  METAL
+HUMAN_M     25857   1|2|3|4|5|6|7    15    0     45     1|2|3      28-35  36-45    7-27   46-51    0-6
+HUMAN_F     25873   8|9|10|11|12|13  2     0     0      0          28-35  36-45    7-27   46-51    0-6
+ELF_M       25920   1|3|4|5|6|7      5     14    0      0          28-33  36-45    7-27   46-51    0-6
+ELF_F       25936   8|9|10|11|12|13  0     14    0      0          28-33  36-45    7-27   46-51    0-6
+DWARF_M     25888   1|2|3|4|5|6|7    30    0     100    4|5|6      29-35  36-45    7-27   46-51    0-6
+DWARF_F     25904   8|9|10|11|12|13  2     0     0      0          29-35  36-45    7-27   46-51    0-6
+HALFLING_M  25952   1|2|3|4|5|6|7    10    0     0      0          28-35  36-45    7-27   46-51    0-6
+HALFLING_F  25968   8|9|10|11|12|13  2     0     0      0          28-35  36-45    7-27   46-51    0-6

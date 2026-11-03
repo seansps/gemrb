@@ -65,7 +65,8 @@ void Actor::DCCUpdateLooks()
 {
 	const RulesData* rules = Rules();
 	if (!anims || !rules) return;
-	bool helmet = anims->HasHelmet();
+	// S5: a closed helmet (dcchelm.2da) takes its own crop; run every frame, so a helmet swap shows at once
+	DCC::Helmet helmet = rules->helmets.Worn(anims->GetHelmetRef().c_str());
 	std::string hair = DCC::HairOverlay(rules->hair.Find(int(BaseStats[IE_DCC_HAIR]), false), helmet);
 	std::string beard = DCC::HairOverlay(rules->hair.Find(int(BaseStats[IE_DCC_BEARD]), true), helmet);
 	// cheap when nothing changed: SetHairRefs only drops the animations for a new code

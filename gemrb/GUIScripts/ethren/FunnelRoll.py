@@ -238,7 +238,8 @@ def RollLooks (die, tables, race, sex):
 	bald body (ANIM) and the styles that are rendered on its rig (S4: hair 1-7 and the beards on the
 	male, 8-13 on the female), so a style never lands on a body it wasn't drawn for; halflings are drawn
 	with the dwarves' bodies, and a dwarf man always has a beard (BEARD 100), a halfling man never. The
-	dice: the style, d100 for no hair (BALD), d100 for a beard (BEARD) and its style, then the colours"""
+	dice: the style, d100 for no hair (BALD: the row's BARE style, S5: an elf's pointed ears alone),
+	d100 for a beard (BEARD) and its style, then the colours"""
 	looks = tables["dcclooks"]
 	row = "%s_%s" % (LOOK_ROWS.get (race, "HUMAN"), "F" if sex == 2 else "M")
 	if row not in looks.rows:
@@ -246,7 +247,7 @@ def RollLooks (die, tables, race, sex):
 	styles = [int (s) for s in (looks.Get (row, "HAIR") or "0").split ("|")]
 	hair = styles[die (len (styles)) - 1]
 	if hair and die (100) <= looks.Int (row, "BALD"):
-		hair = 0
+		hair = looks.Int (row, "BARE", 0)
 	beard = 0
 	beards = [int (s) for s in (looks.Get (row, "BEARDS") or "0").split ("|") if int (s)]
 	if beards and die (100) <= looks.Int (row, "BEARD"):
@@ -345,14 +346,16 @@ def _LookRow (tables, race, sex):
 
 def LookOptions (tables, race, sex, part):
 	"""what a look part may be on this species and sex: style ids (0 none) or pal16 rows. A beard that
-	always comes (BEARD 100: a dwarf man's, what tells him from a halfling man) is never 0"""
+	always comes (BEARD 100: a dwarf man's, what tells him from a halfling man) is never 0; a bald head
+	is the row's BARE style (S5: an elf's ears alone, never "none")"""
 	looks, row = _LookRow (tables, race, sex)
 	name, slot, column, fallback = [p for p in LOOK_PARTS if p[0] == part][0]
 	if slot is None:
 		styles = sorted (set (int (s) for s in (looks.Get (row, column) or "0").split ("|") if s and int (s)))
 		if part == "Beard" and styles and looks.Int (row, "BEARD") >= 100:
 			return styles
-		return [0] + styles
+		bare = looks.Int (row, "BARE", 0) if part == "Hair" else 0
+		return [bare] + [s for s in styles if s != bare]
 	low, high = ParseRange (looks.Get (row, column), *fallback)
 	return list (range (low, high + 1))
 

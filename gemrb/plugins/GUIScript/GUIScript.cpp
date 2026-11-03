@@ -7851,8 +7851,8 @@ static PyObject* GemRB_DCCAvatarFrame(PyObject* /*self*/, PyObject* args)
 	anims->SetColors(colours);
 	const DCC::RulesData* rules = core->GetDCCRules();
 	if (rules) {
-		std::string hairRef = DCC::HairOverlay(rules->hair.Find(hair, false), false);
-		std::string beardRef = DCC::HairOverlay(rules->hair.Find(beard, true), false);
+		std::string hairRef = DCC::HairOverlay(rules->hair.Find(hair, false), DCC::Helmet::None);
+		std::string beardRef = DCC::HairOverlay(rules->hair.Find(beard, true), DCC::Helmet::None);
 		anims->SetHairRefs(AnimRef(hairRef.c_str()), AnimRef(beardRef.c_str()));
 	}
 
