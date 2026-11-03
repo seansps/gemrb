@@ -43,6 +43,12 @@
 #      check total, misfires, corruption with and without a Luck burn (and the prompt, with the
 #      wizard in the party), mercurial magic, disapproval and atonement, lay on hands, turn unholy,
 #      the spellburn prompt of a real SpellRES cast, and amnesia
+#  12. traps and thief skills (the thief scenario, first in the fight): who rolls what, Detect traps
+#      (the secret find, once per character, half speed, the notice line), disarming (by 1-4 a miss,
+#      a natural 1 or by 5+ it springs, a thief's skill and XP), DCCRevealTrap, a deadly disarm's
+#      prompt, a ward, the lowest Luck, locks, pick pocket, Stealth by the light and the floor,
+#      backstab revised and hiding again in a fight, a ranged backstab; with the sheet scenario the
+#      trap rolls through the save
 # Every check logs "[DCC] ok ..." or "[DCC] FAIL ...", and the end "[DCC] autotest done:
 # N checks, F failed"; the DCT_AT_DCC global becomes 1 if all passed, 2 if not.
 import GemRB
