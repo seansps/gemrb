@@ -1296,7 +1296,7 @@ TEST(DCC_Tables, Looks)
 		}
 		EXPECT_EQ(avatars->QueryField(row, 7), body.second) << id;
 	}
-	for (const char* id : { "0x6501", "0x6511" }) { // the bald human bodies have their armour sets too
+	for (const std::string id : { "0x6501", "0x6511" }) { // the bald human bodies have their armour sets too
 		TableMgr::index_t row = avatars->GetRowIndex(id);
 		EXPECT_EQ(avatars->QueryField(row, 3), avatars->QueryField(row, 0).substr(0, 3) + "P") << id;
 	}
