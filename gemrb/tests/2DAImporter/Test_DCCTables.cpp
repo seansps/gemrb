@@ -1287,13 +1287,20 @@ TEST(DCC_Tables, Looks)
 	const std::map<std::string, std::pair<std::string, std::string>> bodyFiles { { "0x6520", { "CDM2", "D" } },
 		{ "0x6530", { "CDF2", "W" } }, { "0x6540", { "CEM2", "E" } }, { "0x6550", { "CEF2", "V" } },
 		{ "0x6560", { "CDM2", "D" } }, { "0x6570", { "CDF2", "W" } } };
+	// S5: AT_1 the body in clothes, AT_2-AT_4 the same body in light, mail and plate (its prefix's last letter)
 	for (const auto& [id, body] : bodyFiles) {
 		TableMgr::index_t row = avatars->GetRowIndex(id);
-		for (TableMgr::index_t col = 0; col < 4; ++col) {
-			EXPECT_EQ(avatars->QueryField(row, col), body.first) << id << " " << col;
+		EXPECT_EQ(avatars->QueryField(row, 0), body.first) << id;
+		for (TableMgr::index_t col = 1; col < 4; ++col) {
+			EXPECT_EQ(avatars->QueryField(row, col), body.first.substr(0, 3) + "LCP"[col - 1]) << id << " " << col;
 		}
 		EXPECT_EQ(avatars->QueryField(row, 7), body.second) << id;
 	}
+	for (const char* id : { "0x6501", "0x6511" }) { // the bald human bodies have their armour sets too
+		TableMgr::index_t row = avatars->GetRowIndex(id);
+		EXPECT_EQ(avatars->QueryField(row, 3), avatars->QueryField(row, 0).substr(0, 3) + "P") << id;
+	}
+	EXPECT_EQ(avatars->QueryField(avatars->GetRowIndex("0x6500"), 3), "CPM1"); // the baked-hair body has none
 	for (TableMgr::index_t col = 0; col < avatars->GetColumnCount(); ++col) {
 		EXPECT_EQ(avatars->QueryField(avatars->GetRowIndex("0x6560"), col), avatars->QueryField(avatars->GetRowIndex("0x6520"), col)) << col;
 		EXPECT_EQ(avatars->QueryField(avatars->GetRowIndex("0x6570"), col), avatars->QueryField(avatars->GetRowIndex("0x6530"), col)) << col;

@@ -2,15 +2,15 @@
 *
            AT_1       AT_2       AT_3       AT_4       TYPE       SPACE      PALETTE    SIZE
 0x6500     CPM1       CPM1       CPM1       CPM1       0          2          0          L
-0x6501     CPM2       CPM2       CPM2       CPM2       0          2          0          L
+0x6501     CPM2       CPML       CPMC       CPMP       0          2          0          L
 0x6510     CPF1       CPF1       CPF1       CPF1       0          2          0          F
-0x6511     CPF2       CPF2       CPF2       CPF2       0          2          0          F
-0x6520     CDM2       CDM2       CDM2       CDM2       0          2          0          D
-0x6530     CDF2       CDF2       CDF2       CDF2       0          2          0          W
-0x6540     CEM2       CEM2       CEM2       CEM2       0          2          0          E
-0x6550     CEF2       CEF2       CEF2       CEF2       0          2          0          V
-0x6560     CDM2       CDM2       CDM2       CDM2       0          2          0          D
-0x6570     CDF2       CDF2       CDF2       CDF2       0          2          0          W
+0x6511     CPF2       CPFL       CPFC       CPFP       0          2          0          F
+0x6520     CDM2       CDML       CDMC       CDMP       0          2          0          D
+0x6530     CDF2       CDFL       CDFC       CDFP       0          2          0          W
+0x6540     CEM2       CEML       CEMC       CEMP       0          2          0          E
+0x6550     CEF2       CEFL       CEFC       CEFP       0          2          0          V
+0x6560     CDM2       CDML       CDMC       CDMP       0          2          0          D
+0x6570     CDF2       CDFL       CDFC       CDFP       0          2          0          W
 # ethren (M2.11): our character animations (tools/sprite_render writes the rows; the test games merge
 # them into the demo's table). The engine uses the row with the largest id not above the CRE's, so each
 # body owns a block of 16 ids (variants, outfits) and each species and gender a block of 0x10 bodies:
@@ -26,3 +26,7 @@
 # own: 0x6560 the halfling man and 0x6570 the halfling woman are drawn with the dwarves' (CDM2 D, CDF2 W), their
 # weapon, shield, helmet and hair overlays too. The ids stay apart (saves, CREs and the looks roll use them);
 # a dwarf man always has a beard and a halfling man never, the rest is hair, portrait and name (dcclooks.2da).
+# S5 armour levels: a bald body's AT_2-AT_4 are the same body in light, mail and plate (the armour ITM's
+# animation 2A/3A/4A, IE_ARMOR_TYPE), its prefix's last letter L, C or P (CPM2 CPML CPMC CPMP); built from whole
+# Quaternius outfits (art/sprites/armour.json). The hair, beard, helmet and weapon overlays serve every level.
+# The baked-hair bodies (CPM1, CPF1) have no armour sets.
