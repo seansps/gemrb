@@ -334,14 +334,20 @@ public:
 	 * chosen (1-4, in this order) are the party, the other survivors go to the reserves (level-1 XP,
 	 * class pending) and the dead leave it; 0 on success, -1 if a pick isn't a living party member */
 	int DCCEndFunnel(const std::vector<Actor*>& chosen);
-	/** a party member leaves: a living one goes to the reserves, a dead one is buried (its grave
-	 * stays in dccRecord); -1 if it isn't in the party */
+	/** a party member leaves: a living one is benched (to the reserves, keeping its level, XP,
+	 * class, gear and records), a dead one is buried (its grave stays in dccRecord); its place is
+	 * free from now on, its player's (dccRecord.places); -1 if it isn't in the party */
 	int DCCDismiss(Actor* pc);
-	/** a reserve joins the party next to its leader, as the last party member (a class pick still
-	 * pending is made now); -1 if it isn't a reserve or the party is full */
-	int DCCRecruit(Actor* reserve);
-	/** the reserves (living funnel characters waiting off the map), in roster order */
+	/** a reserve (a funnel survivor or a benched hero) joins the party in a free place (an index into
+	 * DCCFreePlaces, -1 the first), next to the selected party member (else the first one standing),
+	 * as the last party member; it becomes the player's whose place it was (a class pick still
+	 * pending is made now); -1 if it isn't a reserve or there is no such free place */
+	int DCCRecruit(Actor* reserve, int place = -1);
+	/** the reserves (living funnel characters and benched heroes waiting off the map), in roster order */
 	std::vector<Actor*> DCCReserves() const;
+	/** the party's free places once the funnel is over (party size less the party), each with the
+	 * co-op player it belongs to (DCC::FUNNEL_NO_PLAYER: the host's), in the order they were freed */
+	std::vector<uint8_t> DCCFreePlaces() const;
 	/** Returns slot*/
 	int DelPC(unsigned int slot, bool autoFree = false);
 	int DelNPC(unsigned int slot, bool autoFree = false);

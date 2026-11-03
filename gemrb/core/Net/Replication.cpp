@@ -482,6 +482,12 @@ NetGuiOpInfo NetGuiInfo(NetGuiOp op)
 		// M3.3 (v15): a level-0 character's alignment and god, its owner's choice
 		case NetGuiOp::DCCSetAlignment:
 			return { 0, 3, NetPermission::Control, "DCCSetAlignment" };
+		// v17: the reserves at an inn or camp: a player benches or buries its own hero and fills a free
+		// place of its own (the host checks the place's owner and the inn or camp); the new party comes back as a save
+		case NetGuiOp::DCCDismiss:
+			return { 0, 1, NetPermission::Control, "DCCDismiss", true };
+		case NetGuiOp::DCCRecruit:
+			return { -1, 1, NetPermission::Control, "DCCRecruit", true, true };
 		default:
 			return {};
 	}

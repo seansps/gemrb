@@ -289,6 +289,25 @@ TEST(DCC_GameRecord, Graveyard)
 	EXPECT_TRUE(back.RemoveGrave(12, 4500));
 	EXPECT_FALSE(back.RemoveGrave(12, 4500));
 	EXPECT_EQ(back.graves.size(), 1u);
+	// the party's free places (the reserves at inns and camps), each with its player
+	GameRecord seats;
+	seats.places = { 1, FUNNEL_NO_PLAYER, 0 };
+	EXPECT_FALSE(seats.Empty());
+	bytes = WriteGameRecord(seats);
+	GameRecord seatsBack;
+	ASSERT_TRUE(ReadGameRecord(bytes.data(), bytes.size(), seatsBack));
+	EXPECT_EQ(seatsBack.places, seats.places);
+	EXPECT_TRUE(seatsBack.graves.empty());
+	EXPECT_EQ(WriteGameRecord(seatsBack), bytes);
+	seats.graves = record.graves;
+	bytes = WriteGameRecord(seats);
+	ASSERT_TRUE(ReadGameRecord(bytes.data(), bytes.size(), seatsBack));
+	EXPECT_EQ(seatsBack.places, seats.places);
+	EXPECT_EQ(seatsBack.graves.size(), 2u);
+	// a record cut short in its places is refused
+	std::vector<uint8_t> cut = WriteGameRecord(GameRecord { {}, { 1, 2, 3 }, {} });
+	cut[cut.size() - 4] = 9; // says nine places, has three
+	EXPECT_FALSE(ReadGameRecord(cut.data(), cut.size(), seatsBack));
 	// unknown records are kept
 	RawRecord later;
 	later.tag = { 'R', 'S', 'R', 'V' };

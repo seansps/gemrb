@@ -52,19 +52,29 @@ Modules here so far:
   survivors' cards, sorting, picking up to four, classes and gods, graveyard
   lines), with no GUI (tested by tests/GUIScripts/test_funnelchoose.py).
 - ChooseFour.py (M3.3): "Choose your four", and Watch (), which the roster's
-  timer runs: it opens the funnel's end screens and the reserves when the
-  game's DCC_FUNNEL and DCC_CAMP globals ask for them (co-op clients too).
+  timer runs: it opens the funnel's end screens when the game's DCC_FUNNEL
+  global asks for them (co-op clients too), and closes the reserves' screen
+  once the party is no longer at an inn or camp.
 - ClassPick.py (M3.3): the level-1 class pick: alignment, class, a cleric's
   god (the Estaronan pantheon, the domain on hover), then the learn window for
   casters; each player its own characters.
-- Reserves.py (M3.3): the reserves at a camp or tavern: bury, dismiss, join.
+- Reserves.py (M3.3; inns and camps since 2026-11-03): the reserves, opened
+  only from an inn's Reserves tab or a camp's rest button: bench a living
+  hero (it keeps everything, no XP while benched), bury the dead, fill a free
+  place (its player's in co-op; the host any) with a reserve.
+- GUISTORE.py: the store window built from code (the shared one needs a
+  GUISTORE.chu nobody has): the store's services as tabs (Rent room built:
+  bed rest; the others shown disabled) and, in a store with rooms, Reserves.
+- Camp.py: the roster's Rest button: at a camp (the global DCC_CAMP, set by
+  the camp's area script) the camp's window (Rest, Reserves, Leave), else a
+  night's rest.
 - DCCSkills.py (M3.4): the record sheet's occupation skill lines (the
   occupation, its tags trained at d20 with their uses, the acquired ones, the
   tags it has some familiarity with at d10+2), with no GUI (tested by
   tests/GUIScripts/test_dccskills.py). The checks themselves are the engine's
   (GemRB.DCCSkillCheck and the scripts' DCCSkillCheck trigger and action).
 - FunnelEnd.py (M3.3): the funnel's end screen: the party, the reserves, the
-  graveyard.
+  graveyard (no Reserves button: they join at inns and camps).
 - Game.py (M3.3): the demo's EnterGame with the party size of a DCC game (16
   in the funnel, DCC_PARTY_SIZE after it) and no protagonist (the game ends
   when the whole party is dead).

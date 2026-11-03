@@ -287,7 +287,8 @@ GEM_EXPORT size_t ExtensionSize(const uint8_t* data, size_t size);
  * the CRE extension, after the GAM's last section; the GAM header's unused bytes at 0x80 hold its
  * offset and size) and replicated to co-op clients (NetGraveyard). Records: "GRAV", the
  * graveyard: every funnel character who died, written at the death, so the dead are remembered
- * after they leave the party (the end of the funnel, a swap at camp).
+ * after they leave the party (the end of the funnel, a swap at camp). "SEAT" (the reserves at inns
+ * and camps): the party's free places, each with the co-op player it belongs to.
  */
 struct Grave {
 	std::string name; // UTF-8, at most FUNNEL_TEXT_MAX bytes
@@ -308,9 +309,12 @@ struct Grave {
 
 struct GEM_EXPORT GameRecord {
 	std::vector<Grave> graves; // in the order they died
+	// the party's free places after the funnel (a hero buried or benched), in the order they were
+	// freed: the co-op player each belongs to (whose hero left it), FUNNEL_NO_PLAYER the host's
+	std::vector<uint8_t> places;
 	std::vector<RawRecord> other; // records this version doesn't know, kept as they are
 
-	bool Empty() const { return graves.empty() && other.empty(); }
+	bool Empty() const { return graves.empty() && places.empty() && other.empty(); }
 	/** a grave for this order and time of death, nullptr if there is none */
 	const Grave* FindGrave(uint8_t order, uint32_t diedAt) const;
 	/** takes a grave back (a body rolled over and alive); false if there was none */

@@ -8561,6 +8561,9 @@ static PyObject* GemRB_DCCSetScriptName(PyObject* /*self*/, PyObject* args)
 	std::string name = NetUtf8(pyName);
 	if (name.empty() || name.size() >= sizeof(ieVariable)) Py_RETURN_FALSE;
 	actor->SetScriptName(ieVariable(name.c_str()));
+	// the BG CRE writer saves the original script name: the new one is its own from now on, saves too
+	// (the reserves are found by it after a load, and in co-op by the host)
+	actor->ignoredFields.origScriptName = ieVariable(name.c_str());
 	Py_RETURN_TRUE;
 }
 
@@ -8636,11 +8639,13 @@ PyDoc_STRVAR(GemRB_DCCDismiss__doc,
 \n\
 **Prototype:** GemRB.DCCDismiss (globalID)\n\
 \n\
-**Description:** A party member leaves (M3.3, the reserves): a living one goes to the reserves, a \n\
-dead one is buried where it fell (its things on the ground; its grave stays in the game's record). \n\
-Host or single player only.\n\
+**Description:** A party member leaves (M3.3, the reserves at an inn or camp): a living one is benched \n\
+(to the reserves, keeping its level, XP, class, gear and records; no XP while it waits), a dead one is \n\
+buried where it fell (its things on the ground; its grave stays in the game's record). Its place is \n\
+free from now on and belongs to its player (GetDCCFreePlaces). In co-op a client asks the host (its \n\
+own heroes only, at an inn or camp); the new party comes back as a save.\n\
 \n\
-**Return value:** 0, -1 if refused");
+**Return value:** 0, -1 if refused, -2 sent to the host (co-op client)");
 
 static PyObject* GemRB_DCCDismiss(PyObject* /*self*/, PyObject* args)
 {
@@ -8649,30 +8654,85 @@ static PyObject* GemRB_DCCDismiss(PyObject* /*self*/, PyObject* args)
 	GET_GAME();
 	GET_ACTOR_GLOBAL();
 	const NetSession* net = core->GetNetSession();
-	if (net && !net->IsHost()) return PyLong_FromLong(-1);
+	if (net && !net->IsHost()) {
+		NetForward(NetGuiOp::DCCDismiss, { globalID });
+		return PyLong_FromLong(-2);
+	}
 	return PyLong_FromLong(game->DCCDismiss(actor));
 }
 
 PyDoc_STRVAR(GemRB_DCCRecruit__doc,
 	     "===== DCCRecruit =====\n\
 \n\
-**Prototype:** GemRB.DCCRecruit (globalID)\n\
+**Prototype:** GemRB.DCCRecruit (reserve[, place])\n\
 \n\
-**Description:** A reserve (GetDCCReserves) joins the party next to its first member, as the last \n\
-one, rested; its class pick (pending since the funnel's end) is made now. Refused while the party is full. Host or \n\
-single player only.\n\
+**Description:** A reserve (GetDCCReserves: a global ID, or its script name) joins the party in a free \n\
+place (GetDCCFreePlaces' index, -1 the first) next to the selected party member, as the last one, \n\
+rested; a level-0 one's class pick (pending since the funnel's end) is made now, a benched hero comes \n\
+back as it left. The hero becomes the player's whose place it was. Refused while the party is full. In \n\
+co-op a player fills a place of its own and the host any (it picks for that place's player); a client \n\
+asks the host, at an inn or camp, and the new party comes back as a save.\n\
 \n\
-**Return value:** the party slot (0-based), -1 if refused");
+**Return value:** the party slot (0-based), -1 if refused, -2 sent to the host (co-op client)");
 
 static PyObject* GemRB_DCCRecruit(PyObject* /*self*/, PyObject* args)
 {
-	int globalID;
-	PARSE_ARGS(args, "i", &globalID);
+	PyObject* who = nullptr;
+	int place = -1;
+	PARSE_ARGS(args, "O|i", &who, &place);
 	GET_GAME();
-	GET_ACTOR_GLOBAL();
-	const NetSession* net = core->GetNetSession();
-	if (net && !net->IsHost()) return PyLong_FromLong(-1);
-	return PyLong_FromLong(game->DCCRecruit(actor));
+	Actor* actor = nullptr;
+	if (PyUnicode_Check(who)) {
+		// the host running a client's call: the reserve by its script name
+		std::string name = NetUtf8(who);
+		for (Actor* reserve : game->DCCReserves()) {
+			if (reserve->GetScriptName() == ieVariable(name.c_str())) actor = reserve;
+		}
+	} else {
+		actor = game->GetActorByGlobalID(ieDword(PyLong_AsLong(who)));
+	}
+	if (!actor) return PyLong_FromLong(-1);
+	NetSession* net = core->GetNetSession();
+	if (net) {
+		std::vector<uint8_t> places = game->DCCFreePlaces();
+		size_t index = place < 0 ? 0 : size_t(place);
+		uint8_t caller = net->CallerSlot();
+		// a player fills a free place of its own; the host any (for that place's player)
+		if (index < places.size() && caller != NET_HOST_SLOT && places[index] != caller) {
+			std::string why = fmt::format("That place in the party is player {}'s to fill.", places[index] == DCC::FUNNEL_NO_PLAYER ? 0 : places[index]);
+			Log(MESSAGE, "DCC", "Player {} may not fill free place {}: {}", caller, index, why);
+			if (net->IsHost()) net->TellPlayer(caller, why);
+			return PyLong_FromLong(-1);
+		}
+		if (!net->IsHost()) {
+			NetForward(NetGuiOp::DCCRecruit, { place }, std::string(actor->GetScriptName().c_str()));
+			return PyLong_FromLong(-2);
+		}
+	}
+	return PyLong_FromLong(game->DCCRecruit(actor, place));
+}
+
+PyDoc_STRVAR(GemRB_GetDCCFreePlaces__doc,
+	     "===== GetDCCFreePlaces =====\n\
+\n\
+**Prototype:** GemRB.GetDCCFreePlaces ()\n\
+\n\
+**Description:** The party's free places after the funnel (a hero buried or benched, or fewer than four \n\
+went on), in the order they were freed: the co-op player each belongs to, the one who fills it \n\
+(-1 nobody's: the host's). Kept in the save and replicated with the game's record.\n\
+\n\
+**Return value:** list of player slots");
+
+static PyObject* GemRB_GetDCCFreePlaces(PyObject* /*self*/, PyObject* /*args*/)
+{
+	GET_GAME();
+	PyObject* list = PyList_New(0);
+	for (uint8_t owner : game->DCCFreePlaces()) {
+		PyObject* item = PyLong_FromLong(owner == DCC::FUNNEL_NO_PLAYER ? -1 : long(owner));
+		PyList_Append(list, item);
+		Py_DecRef(item);
+	}
+	return list;
 }
 
 PyDoc_STRVAR(GemRB_GetDCCReserves__doc,
@@ -8680,8 +8740,8 @@ PyDoc_STRVAR(GemRB_GetDCCReserves__doc,
 \n\
 **Prototype:** GemRB.GetDCCReserves ()\n\
 \n\
-**Description:** The funnel's reserves (M3.3): the survivors who weren't chosen, waiting off the map, \n\
-in roster order. Their global IDs work with GetPlayerName, GetPlayerStat, GetDCCStats and \n\
+**Description:** The reserves (M3.3): the funnel's survivors who weren't chosen and the heroes benched \n\
+at an inn or camp (DCCDismiss), waiting off the map, in roster order. Their global IDs work with GetPlayerName, GetPlayerStat, GetDCCStats and \n\
 GetDCCFunnel.\n\
 \n\
 **Return value:** list of global IDs");
@@ -16092,6 +16152,7 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(DCCDismiss, METH_VARARGS),
 	METHOD(DCCRecruit, METH_VARARGS),
 	METHOD(GetDCCReserves, METH_NOARGS),
+	METHOD(GetDCCFreePlaces, METH_NOARGS),
 	METHOD(GetDCCGraveyard, METH_NOARGS),
 	METHOD(DCCWalk, METH_VARARGS),
 	METHOD(GameControlMoveSelected, METH_VARARGS),

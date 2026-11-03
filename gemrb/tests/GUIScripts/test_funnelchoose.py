@@ -120,6 +120,39 @@ class FunnelChooseTest (unittest.TestCase):
 		self.assertTrue (FunnelChoose.PickValid (classes, gods, 1, 3, 2, 9)) # Turil is neutral
 		self.assertFalse (FunnelChoose.PickValid (classes, gods, 1, 1, 0, 0)) # no alignment
 
+	def test_reserves (self):
+		# a survivor who never went on is a reserve, not benched; a level-1 hero sent back is benched
+		tam = dict (Card (1007, 7, [10] * 6), Status = "reserve", ClassPending = 1, XP = 10)
+		gorm = dict (Card (1008, 8, [10] * 6, race = 4), Status = "reserve", Level = 1, Class = 5, XP = 25)
+		self.assertFalse (FunnelChoose.Benched (tam))
+		self.assertTrue (FunnelChoose.Benched (gorm))
+		self.assertFalse (FunnelChoose.Benched (dict (gorm, Status = "chosen")))
+		self.assertEqual (FunnelChoose.ReserveTitle (tam), "P7")
+		self.assertEqual (FunnelChoose.ReserveTitle (gorm), "P8, benched")
+		self.assertEqual (FunnelChoose.ReserveLines (tam)[-1], "XP 10")
+		self.assertEqual (FunnelChoose.ReserveLines (gorm)[-1], "XP 25, none while benched")
+		self.assertTrue (FunnelChoose.ReserveLines (gorm)[3].endswith ("Dwarf 1"))
+		# co-op: a free place is its player's to fill, the host fills any; nobody's is the host's
+		self.assertTrue (FunnelChoose.MayFill (1, 1, False))
+		self.assertFalse (FunnelChoose.MayFill (0, 1, False))
+		self.assertFalse (FunnelChoose.MayFill (-1, 1, False))
+		self.assertTrue (FunnelChoose.MayFill (1, 0, True))
+		self.assertTrue (FunnelChoose.MayFill (-1, 0, True))
+		self.assertTrue (FunnelChoose.MayBench (2, 2, False))
+		self.assertFalse (FunnelChoose.MayBench (0, 2, False))
+		self.assertTrue (FunnelChoose.MayBench (2, 0, True))
+		self.assertEqual (FunnelChoose.PlaceLine (1, 1, True), "(a free place: yours)")
+		self.assertEqual (FunnelChoose.PlaceLine (1, 0, True), "(a free place: P1's)")
+		self.assertEqual (FunnelChoose.PlaceLine (-1, 1, True), "(a free place: the host's)")
+		self.assertEqual (FunnelChoose.PlaceLine (0, 1, True), "(a free place: the host's)")
+		self.assertEqual (FunnelChoose.PlaceLine (-1, 0, True), "(a free place: yours)")
+		self.assertEqual (FunnelChoose.PlaceLine (2, 1, True), "(a free place: P2's)")
+		self.assertEqual (FunnelChoose.PlaceLine (1, 0, False), "(a free place)")
+		self.assertEqual (FunnelChoose.FirstFillable ([0, 1, 1], 1, False), 1)
+		self.assertEqual (FunnelChoose.FirstFillable ([0, -1], 1, False), -1)
+		self.assertEqual (FunnelChoose.FirstFillable ([0, 1], 0, True), 0)
+		self.assertEqual (FunnelChoose.FirstFillable ([], 0, True), -1)
+
 	def test_grave_lines (self):
 		grave = {"Name": "Gristle", "Killer": "Marauder", "Cause": "crossbow bolt", "Place": "the wooded trail", "Level": 0, "Class": 8}
 		self.assertEqual (FunnelChoose.GraveLine (grave, "cordwainer"), "Gristle, cordwainer: crossbow bolt (Marauder), the wooded trail")

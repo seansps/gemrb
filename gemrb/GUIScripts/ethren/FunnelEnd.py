@@ -87,8 +87,7 @@ def Open (gameOver = False):
 		area.SetText ("\n".join (lines))
 	close = _Button (win, 10, screen[0] - 150, screen[1] - 44, 140, 32, "To the start" if gameOver else "Onward", Leave)
 	close.MakeEscape ()
-	if not gameOver and GemRB.NetGetMode () != "client":
-		_Button (win, 11, screen[0] - 300, screen[1] - 44, 140, 32, "Reserves", OpenReserves)
+	# no Reserves button since 2026-11-03: the reserves join only at an inn or camp (Reserves.py)
 	Window = win
 	Shown.clear ()
 	Shown.update ({"Title": title, "Party": party, "Reserves": reserves, "Graves": graves})
@@ -106,11 +105,6 @@ def _Button (win, id, x, y, w, h, text, action):
 	# defaults (lambda i = i: ...): the action is called without any
 	button.OnPress (lambda: action ())
 	return button
-
-def OpenReserves ():
-	import Reserves
-	Close ()
-	Reserves.Open ()
 
 def Leave ():
 	import ChooseFour

@@ -8286,6 +8286,12 @@ void Actor::AddExperience(int exp, int combat)
 {
 	// DCC: XP comes as awarded (funnel.md); level-up readiness is DCCCanLevelUp
 	if (core->HasFeature(GFFlags::RULES_DCC)) {
+		// a reserve (a benched hero, a survivor who never went on) earns nothing while it waits off
+		// the map: the party's shares only go to party members, this catches the rest (AddXPObject)
+		if (dccExt.funnel.status == DCC::FunnelStatus::Reserve) {
+			Log(MESSAGE, "DCC", "{} is in the reserves: no XP ({}).", fmt::WideToChar { GetShortName() }, exp);
+			return;
+		}
 		SetBase(IE_XP, std::max(0, int(BaseStats[IE_XP]) + exp));
 		return;
 	}
