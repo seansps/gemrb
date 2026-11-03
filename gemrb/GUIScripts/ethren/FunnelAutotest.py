@@ -624,7 +624,7 @@ LOOKS_AT = (180, 1000) # the mannequins' first row: open ground at the glade's s
 # and west of the shade of the one at x 790-920 (the area's lightmap tints actors)
 LOOKS_DX, LOOKS_DY = 60, 110
 QUIVER_CODE = -24 # the first quiver slot (core slot 11) less the first weapon slot (35): demo's slottype.2da
-SLOT_KINDS = {"weapon": 256, "quiver": 512, "shield": 4, "helmet": 1} # ie_slots: SLOT_WEAPON, QUIVER, SHIELD, HELM
+SLOT_KINDS = {"weapon": 256, "quiver": 512, "shield": 4, "helmet": 1, "armor": 2} # ie_slots: SLOT_WEAPON, QUIVER, SHIELD, HELM, ARMOUR
 # one per weapon class of the funnel: name, items, expected (weapon animation type, ready file, ready overlay
 # suffix, the jab's body suffix); bows, the crossbow and the sling shoot with the one-handed ready stance
 LOADOUTS = [
@@ -892,6 +892,22 @@ def _Looks2 ():
 		_LooksShot ("twoweapons_attack_%s" % label, gids[3])
 		yield
 		yield
+	_Clear ()
+	yield
+
+	# 7. S5: armour levels: light, mail and plate (the ITMs' animation 2A 3A 4A) on the 8 bald bodies draw the
+	# L/C/P sets (avatars.2da AT_2-AT_4); CPM1, its hair baked in, keeps its one set
+	for row, ref in enumerate (("FNTLEAT", "FNTCHMA", "FNTPLAT")):
+		for column, anim in enumerate (TWO_WEAPON_RIGS + (0x6500,)):
+			_Mannequin (anim & 0x10 != 0, column, row - 1, items = [("armor", ref)], anim = anim) # the glade ends below row 1
+	yield
+	yield
+	worn = [Mannequins[i:i + 9] for i in range (0, 27, 9)]
+	got = [[GemRB.GetDCCStats (gid)["StanceFiles"]["Ready"][0][:4].upper () for gid in row] for row in worn]
+	_Check ("looks2: armour levels: the light, mail and plate bodies drawn (CPM1 keeps its one set)", got, [[body[:3] + letter for body in TWO_WEAPON_BODIES] + ["CPM1"] for letter in "LCP"])
+	_Play (Mannequins, IE_ANI_READY)
+	yield
+	_LooksShot ("armour", worn[1][3])
 	_Clear ()
 	yield
 
