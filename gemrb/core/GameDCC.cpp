@@ -5,7 +5,10 @@
 // DCC games (M3.3): the end of the level-0 funnel and the reserves. The party of sixteen becomes
 // the four the players chose; the other survivors wait off the map as reserve NPCs (Game::NPCs,
 // in the GAM's NPC section, their area DCC::RESERVE_AREA) and the dead leave the party, their
-// graves kept in Game::dccRecord. Kept apart from Game.cpp so the stock code stays as it is.
+// graves kept in Game::dccRecord. After the funnel the reserves join only at inns and camps (the GUI's
+// Reserves screen), into a free place of the party of four: a place a hero left (buried or benched),
+// kept with the co-op player it belongs to in dccRecord.places. A benched hero keeps everything and
+// earns no XP (Actor::AddExperience). Kept apart from Game.cpp so the stock code stays as it is.
 
 #include "Game.h"
 
@@ -81,6 +84,8 @@ int Game::DCCEndFunnel(const std::vector<Actor*>& chosen)
 	// a party of four from now on, also after a load (the ethren GUI's EnterGame reads the global)
 	SetPartySize(DCC::FUNNEL_PARTY_SIZE);
 	locals[ieVariable("DCC_PARTY_SIZE")] = DCC::FUNNEL_PARTY_SIZE;
+	// fewer than four went on: the places left are free, the host's
+	dccRecord.places.assign(DCC::FUNNEL_PARTY_SIZE - PCs.size(), DCC::FUNNEL_NO_PLAYER);
 	core->SetEventFlag(EF_PORTRAIT);
 	Log(MESSAGE, "DCC", "The funnel is over: {} go on, {} leave the party; {} in the graveyard.", PCs.size(), others.size(), dccRecord.graves.size());
 	return 0;
@@ -90,6 +95,8 @@ int Game::DCCDismiss(Actor* pc)
 {
 	if (!pc || InParty(pc) < 0) return -1;
 	bool dead = IsDead(pc);
+	// its place is free from now on, its player's
+	std::vector<uint8_t> places = DCCFreePlaces();
 	Map* map = pc->GetCurrentArea();
 	Point where = pc->Pos;
 	pc->ClearActions();
@@ -105,27 +112,35 @@ int Game::DCCDismiss(Actor* pc)
 		if (npc >= 0) DelNPC(unsigned(npc), false);
 		Log(MESSAGE, "DCC", "{} is buried in {}.", fmt::WideToChar { pc->GetShortName() }, map ? map->GetScriptRef().c_str() : "no area");
 	} else {
-		// to the reserves: off the map, waiting in the game's NPC list (and its saves)
-		if (funnel.status != DCC::FunnelStatus::None) funnel.status = DCC::FunnelStatus::Reserve;
+		// benched: to the reserves, off the map, waiting in the game's NPC list (and its saves) with
+		// its level, XP, class, gear and records; it earns no XP there (AddExperience)
+		funnel.status = DCC::FunnelStatus::Reserve;
 		if (map) map->RemoveActor(pc);
 		pc->AreaName = ResRef(DCC::RESERVE_AREA);
-		Log(MESSAGE, "DCC", "{} goes to the reserves.", fmt::WideToChar { pc->GetShortName() });
+		Log(MESSAGE, "DCC", "{} goes to the reserves (level {}, {} XP).", fmt::WideToChar { pc->GetShortName() }, pc->GetBase(IE_LEVEL), pc->GetBase(IE_XP));
 	}
 	pc->DCCExtChanged();
+	places.push_back(funnel.player);
+	dccRecord.places = places;
 	return 0;
 }
 
-int Game::DCCRecruit(Actor* reserve)
+int Game::DCCRecruit(Actor* reserve, int place)
 {
 	if (!reserve || InStore(reserve) < 0 || InParty(reserve) >= 0) return -1;
 	if (reserve->dccExt.funnel.status != DCC::FunnelStatus::Reserve || IsDead(reserve)) return -1;
-	if (partysize && PCs.size() >= partysize) return -1;
-	// it joins where the party is: next to the first one standing
-	const Actor* leader = nullptr;
+	std::vector<uint8_t> places = DCCFreePlaces();
+	if (place < 0) place = 0;
+	if (size_t(place) >= places.size()) return -1;
+	uint8_t owner = places[size_t(place)];
+	// it joins where the party is (the inn, the camp): next to the selected one (who talked to the
+	// innkeeper; on the co-op host the caller's selection), else the first one standing
+	const Actor* leader = GetSelectedPCSingle(true);
+	if (leader && !leader->GetCurrentArea()) leader = nullptr;
 	for (const Actor* pc : PCs) {
+		if (leader) break;
 		if (!IsDead(pc) && pc->GetCurrentArea()) {
 			leader = pc;
-			break;
 		}
 	}
 	if (!leader && !PCs.empty()) leader = PCs[0];
@@ -140,10 +155,14 @@ int Game::DCCRecruit(Actor* reserve)
 	int slot = JoinParty(reserve, JP_JOIN | JP_SELECT);
 	DCC::Funnel& funnel = reserve->dccExt.funnel;
 	funnel.status = DCC::FunnelStatus::Chosen;
+	// the hero is the player's whose place it was (co-op: the one who picked, or the host for it)
+	if (owner != DCC::FUNNEL_NO_PLAYER) funnel.player = owner;
 	// a reserve kept the level-1 XP from the funnel's end and makes its class pick now
 	if (!reserve->GetBase(IE_LEVEL)) funnel.flags |= DCC::FUNNEL_CLASS_PENDING;
 	reserve->DCCExtChanged();
-	Log(MESSAGE, "DCC", "{} joins the party from the reserves (slot {}).", fmt::WideToChar { reserve->GetShortName() }, reserve->InParty);
+	places.erase(places.begin() + place);
+	dccRecord.places = places;
+	Log(MESSAGE, "DCC", "{} joins the party from the reserves (slot {}, level {}, {} XP).", fmt::WideToChar { reserve->GetShortName() }, reserve->InParty, reserve->GetBase(IE_LEVEL), reserve->GetBase(IE_XP));
 	return slot;
 }
 
@@ -157,6 +176,17 @@ std::vector<Actor*> Game::DCCReserves() const
 		return a->dccExt.funnel.order < b->dccExt.funnel.order;
 	});
 	return reserves;
+}
+
+std::vector<uint8_t> Game::DCCFreePlaces() const
+{
+	std::vector<uint8_t> places;
+	if (!partysize || PCs.size() >= partysize) return places;
+	places = dccRecord.places;
+	// the record follows the party: a place taken by other means (a stock join) goes, the oldest
+	// first; a place nobody left (fewer than four went on, a stock leave) is the host's
+	places.resize(partysize - PCs.size(), DCC::FUNNEL_NO_PLAYER);
+	return places;
 }
 
 }

@@ -455,6 +455,17 @@ TEST(NetReplicationTest, GuiOps)
 	EXPECT_EQ(NetGuiInfo(NetGuiOp::DCCSetAlignment).minArgs, 3u);
 	EXPECT_EQ(NetGuiInfo(NetGuiOp::DCCSetAlignment).permission, NetPermission::Control);
 	EXPECT_FALSE(NetGuiInfo(NetGuiOp::DCCSetAlignment).hostOnly);
+	// v17: the reserves at inns and camps: bench or bury a hero of one's own, fill a free place (by the
+	// reserve's script name, the call's text); both change the party, so the host runs them
+	EXPECT_STREQ(NetGuiInfo(NetGuiOp::DCCDismiss).name, "DCCDismiss");
+	EXPECT_EQ(NetGuiInfo(NetGuiOp::DCCDismiss).actorArg, 0);
+	EXPECT_EQ(NetGuiInfo(NetGuiOp::DCCDismiss).permission, NetPermission::Control);
+	EXPECT_TRUE(NetGuiInfo(NetGuiOp::DCCDismiss).hostOnly);
+	EXPECT_STREQ(NetGuiInfo(NetGuiOp::DCCRecruit).name, "DCCRecruit");
+	EXPECT_EQ(NetGuiInfo(NetGuiOp::DCCRecruit).actorArg, -1);
+	EXPECT_EQ(NetGuiInfo(NetGuiOp::DCCRecruit).minArgs, 1u);
+	EXPECT_TRUE(NetGuiInfo(NetGuiOp::DCCRecruit).hostOnly);
+	EXPECT_TRUE(NetGuiInfo(NetGuiOp::DCCRecruit).text);
 	EXPECT_STREQ(NetGuiInfo(NetGuiOp::count).name, "?");
 }
 

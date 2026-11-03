@@ -44,8 +44,12 @@
 #      four picks), the engine's end (the party of four, ten reserves off the map, level-1 XP for every
 #      survivor, class picks pending, the dead out of the party and in the graveyard), the class picks
 #      (a cleric with its god, a wizard's learn window), the end screen; screenshots
-#   g. the reserves (reserves): a death among the four, the camp's roster, a swap and the newcomer's
-#      class pick, a dismissal; save and load (the reserves, the graveyard, the party size)
+#   g. the reserves (reserves; at inns and camps, decided 2026-11-03): none outside them; the inn (Marta's
+#      dialog, the Glade Inn's window: Rent room, the Reserves tab): a hero benched with everything, a reserve
+#      into its place next to the party and its class pick; no XP while benched (a quest, an award by name, a
+#      kill); a death: short-handed, no pop-up, the rest button just rests; the camp (DCC_CAMP, the rest
+#      button): bury, the benched hero back as it left, another benched, a night's rest; save and load (the
+#      benched hero, the free place, the reserves, the graveyard), the hero back after the load
 # M3.4:
 #   h. occupation skills (skills, after the class picks): each peasant's tags and how it rolls (trained d20,
 #      untrained d10, familiar d10+2, anyone's d20; a level-1 wizard keeps hers), checks with forced dice and
@@ -1561,7 +1565,7 @@ SCENARIOS = (
 	("save", None), # 8
 	("rolling", None), # e (M3.1): a new game through the rolling screen
 	("choose", None), # f (M3.3): the funnel's end in the rolled game: choose your four, the class picks, the end screen
-	("reserves", None), # g (M3.3): the reserves at camp: a death, a swap, a dismissal, save and load
+	("reserves", None), # g (M3.3, inns and camps): the inn's Reserves tab, benching, no XP while benched, the camp's rest button, save and load
 )
 NEEDS = {
 	"roster": ["classpicks"], # a level-1 character to bleed out
@@ -2016,64 +2020,200 @@ def _StepChoose ():
 		return "reserves" if _Wanted ("reserves") else "done"
 
 ReserveSave = "funnelend"
+INN = (20, 60) # the Glade Inn's rooms (FNTINN.STO): the common room, the merchant's
+
+def _Hero (actor):
+	"""what a benched hero keeps: level, XP, class, god, alignment, abilities, max HP, its gear, its looks and
+	its records (OCCU, FUNL's order and deeds, the script name)"""
+	stats = GemRB.GetDCCStats (actor)
+	record = GemRB.GetDCCFunnel (actor)
+	occ, place = record["Occupation"], record["Funnel"]
+	items = [(slot, item["ItemResRef"].lower (), item["Usages0"]) for slot, item in ((slot, GemRB.GetSlotItem (actor, slot)) for slot in range (40)) if item]
+	colours = [GemRB.GetPlayerStat (actor, stat) & 0xff for stat in (IE_METAL_COLOR, IE_MINOR_COLOR, IE_MAJOR_COLOR, IE_SKIN_COLOR, IE_LEATHER_COLOR, IE_ARMOR_COLOR, IE_HAIR_COLOR)]
+	return {
+		"Name": GemRB.GetPlayerName (actor, 0), "Script": GemRB.GetPlayerName (actor, 2).lower (),
+		"Level": stats["Level"], "Class": stats["Class"], "XP": stats["XP"], "God": stats["God"], "Alignment": stats["AlignmentCode"],
+		"Abilities": [GemRB.GetPlayerStat (actor, stat, 1) for stat in (IE_STR, IE_DEX, IE_CON, IE_CHR, IE_INT, IE_DCC_LUCK)],
+		"MaxHP": GemRB.GetPlayerStat (actor, IE_MAXHITPOINTS, 1), "Items": items,
+		"Looks": [GemRB.GetPlayerStat (actor, IE_ANIMATION_ID), stats["Hair"], stats["Beard"], colours],
+		"Occupation": [occ["Id"], occ["Sub"], sorted (occ["Skills"])], "Funnel": [place["Order"], place["Kills"], place["NearDeaths"]],
+	}
+
+def _ReserveByScript (name):
+	return ([i for i in GemRB.GetDCCReserves () if GemRB.GetPlayerName (i, 2).lower () == name] or [0])[0]
+
+def _Near (actor, pc):
+	a, b = GemRB.GetActorPosition (actor), GemRB.GetActorPosition (pc)
+	return abs (a["X"] - b["X"]) + abs (a["Y"] - b["Y"]) < 200
+
+def _PickClass (newcomer, what):
+	"""a newcomer's class pick, as the four made theirs (its own class for a demihuman, else a warrior)"""
+	import ClassPick, DCCLearn
+	yield from _Wait (lambda: ClassPick.Window, 10)
+	_Check ("%s: the newcomer's class pick opens" % what, [bool (ClassPick.Window), ClassPick.Shown], [True, newcomer])
+	if not ClassPick.Window:
+		return
+	race = GemRB.GetPlayerStat (newcomer, IE_RACE)
+	ClassPick.Choose (ClassPick.Last["Choice"]["Class"] if race != 1 else 2)
+	ClassPick.Confirm ()
+	yield
+	if DCCLearn.Window:
+		DCCLearn.Confirm ()
+	_Check ("%s: the newcomer is level 1" % what, GemRB.GetDCCStats (newcomer)["Level"], 1)
 
 def _Reserves ():
-	"""g: a party member dies, the camp's roster: bury it, a reserve joins and picks its class; a dismissal"""
-	import ChooseFour, ClassPick, DCCLearn, Reserves, Roster
-	# the party's second dies (level 1: it bleeds out)
-	victim = 2
+	"""g: the reserves at an inn and a camp (decided 2026-11-03): nowhere else; the inn's window (Marta's dialog,
+	Rent room, the Reserves tab): a hero benched with everything, a reserve into its place next to the party and its
+	class pick; no XP while benched (a quest's share, an award by name, a kill); a death away from it all (no pop-up,
+	short-handed, the rest button just rests); the camp's rest button: the dead buried, the benched hero back as it
+	left, another benched; save and load"""
+	import ChooseFour, ClassPick, Camp, GUISTORE, Reserves, Roster
+	party = [_Id (pc) for pc in range (1, 5)]
+	# the reserves wait at inns and camps only, and nothing opens them on its own
+	_Check ("reserves: not outside an inn or camp", [Reserves.Open ("camp"), Reserves.Open ("inn"), GUISTORE.IsInn (), Camp.AtCamp ()], [None, None, False, False])
+	# the inn: Marta's dialog opens the Glade Inn
+	where = GemRB.GetActorPosition (1)
+	marta = GemRB.CreateCreature (1, "FNTINNK", where["X"] + 40, where["Y"])
+	_Put (marta, where["X"] + 40, where["Y"])
+	yield
+	GemRB.GameSelectPC (1, 1, SELECT_REPLACE)
+	yield from _Talk (marta, "Player1")
+	_Check ("inn: marta talks", _InDialog (), True)
+	_Reply (0) # Let's see the rooms, and who waits by the fire.
+	yield from _Wait (lambda: GUISTORE.StoreWindow, 20)
+	_Check ("inn: the glade inn's window opens (an inn with rooms)", [bool (GUISTORE.StoreWindow), GUISTORE.Shown.get ("Name"), GUISTORE.IsInn ()], [True, "The Glade Inn", True])
+	if not GUISTORE.StoreWindow:
+		return
+	_Check ("inn: its tabs, the reserves beside rent room", GUISTORE.Shown.get ("Tabs"), [("Rent room", True), ("Reserves", True)])
+	_Check ("inn: rent room first, the two rooms it has", [GUISTORE.Shown["Tab"], GUISTORE.Shown["Rooms"]], ["Rent room", [("Common room", INN[0]), ("Merchant's room", INN[1]), None, None]])
+	_ShotScreen ("inn_window")
+	# a night in the common room: paid, bed rest
+	gold, time = GemRB.GameGetPartyGold (), GemRB.GetGameTime ()
+	_Check ("inn: pick the common room", GUISTORE.PickRoom (0), True)
+	_Check ("inn: rent it", GUISTORE.RentRoom (), True)
+	yield
+	_Check ("inn: paid, the night passed", [GemRB.GameGetPartyGold (), GemRB.GetGameTime () - time >= 8 * 300], [gold - INN[0], True])
+	_Check ("inn: no room in a royal suite it hasn't", GUISTORE.PickRoom (3), False)
+	# the reserves tab
+	GUISTORE.SelectTab (GUISTORE.RESERVES)
+	yield
+	_Check ("inn: the reserves' screen at the inn", [bool (Reserves.Window), Reserves.Shown.get ("Where")], [True, "inn"])
+	if not Reserves.Window:
+		return
+	_Check ("inn: ten waiting, the party of four, no free place", [len (Reserves.Shown["Reserves"]), len (Reserves.Shown["Party"]), Reserves.Shown["Places"]], [10, 4, []])
+	newcomer = Reserves.Shown["Reserves"][0]
+	_Check ("inn: none joins a full party", Reserves.Join (newcomer), -1)
+	_ShotScreen ("reserves_inn")
+	# the second of the four benched: to the reserves with everything
+	benched = party[1]
+	before = _Hero (benched)
+	Saved["benched"] = before
+	_Check ("inn: the hero to bench is level 1", before["Level"], 1)
+	_Check ("inn: bench the second", Reserves.Dismiss (2), 0)
+	yield
+	_Check ("inn: benched: out of the party, in the reserves, off the map", [GemRB.GetPartySize (), benched in GemRB.GetDCCReserves (), _Funnel (benched)["StatusName"], GemRB.DCCFindActor (before["Script"])], [3, True, "reserve", 0])
+	_Check ("inn: benched: it keeps everything (level, XP, class, god, abilities, gear, looks, records)", _Hero (benched), before)
+	_Check ("inn: its place is free (nobody's in single player), the screen shows it picked", [GemRB.GetDCCFreePlaces (), Reserves.Shown["Places"], Reserves.Shown["Place"]], [[-1], ["(a free place)"], 0])
+	_Check ("inn: the benched hero's card", [Reserves.Shown[benched][0], Reserves.Shown[benched][-1]], [before["Name"] + ", benched", "XP %d, none while benched" % before["XP"]])
+	_RosterIsParty ("inn: one benched")
+	# a reserve into the free place: it appears next to the party at the inn, its class pick comes up
+	_Check ("inn: a reserve joins the free place", Reserves.Join (newcomer) >= 0, True)
+	yield
+	_Check ("inn: the newcomer is the fourth, next to the party, the place taken", [GemRB.GetPartySize (), _Id (4), _Near (newcomer, 1), GemRB.GetDCCFreePlaces ()], [4, newcomer, True, []])
+	_Check ("inn: it is chosen, level 0, 10 XP, its pick pending", [_Funnel (newcomer)["StatusName"], GemRB.GetDCCStats (newcomer)["Level"], GemRB.GetDCCStats (newcomer)["XP"], _Funnel (newcomer)["ClassPending"]], ["chosen", 0, 10, 1])
+	_Check ("inn: ten wait again: nine of the funnel's and the benched hero", [len (GemRB.GetDCCReserves ()), benched in GemRB.GetDCCReserves ()], [10, True])
+	_RosterIsParty ("inn: after the newcomer")
+	yield from _PickClass (newcomer, "inn")
+	Reserves.Leave ()
+	_Check ("inn: back from the reserves to the inn's window", [Reserves.Window, bool (GUISTORE.StoreWindow)], [None, True])
+	GUISTORE.CloseStoreWindow ()
+	yield
+	_Check ("inn: left, the reserves gone with it", [GUISTORE.StoreWindow, GemRB.GetStore (), GUISTORE.IsInn (), Reserves.Open ("inn")], [None, None, False, None])
+	GemRB.ExecuteString ("DestroySelf()", marta)
+	yield
+	# no XP while benched: a quest's share goes to the four, an award by name finds nobody, a kill's share
+	xp = [GemRB.GetDCCStats (pc)["XP"] for pc in range (1, 5)]
+	GemRB.ExecuteString ("AddExperienceParty(40)")
+	yield
+	_Check ("xp: a quest's 40 shared by the four in the party", [GemRB.GetDCCStats (pc)["XP"] - xp[pc - 1] for pc in range (1, 5)], [10] * 4)
+	_Check ("xp: none for the benched hero", GemRB.GetDCCStats (benched)["XP"], before["XP"])
+	GemRB.ExecuteString ('AddXPObject("%s",50)' % before["Script"])
+	yield
+	_Check ("xp: none for it by name either", GemRB.GetDCCStats (benched)["XP"], before["XP"])
+	where = GemRB.GetActorPosition (1)
+	rat = GemRB.CreateCreature (1, "FNTRAT", where["X"] + 40, where["Y"])
+	_Put (rat, where["X"] + 40, where["Y"])
+	GemRB.SetPlayerStat (rat, IE_XPVALUE, 20)
+	yield
+	xp = [GemRB.GetDCCStats (pc)["XP"] for pc in range (1, 5)]
+	GemRB.DCCKillFor (rat, 1)
+	yield from _Wait (lambda: GemRB.GetPlayerStat (rat, IE_STATE_ID) & STATE_DEAD, 20)
+	_Check ("xp: a kill's 20 shared by the four", [GemRB.GetDCCStats (pc)["XP"] - xp[pc - 1] for pc in range (1, 5)], [5] * 4)
+	_Check ("xp: none of it for the benched hero", GemRB.GetDCCStats (benched)["XP"], before["XP"])
+	_Check ("xp: the benched hero is otherwise as it left", _Hero (benched), before)
+	# a hero dies away from any inn or camp: the party plays short-handed, nothing pops up
+	victim = 3
 	Saved["victim"] = GemRB.GetPlayerName (victim, 0)
+	victimClass = GemRB.GetDCCStats (victim)["Class"]
 	GemRB.GameSetScreenFlags (GS_PARTYAI, OP_NAND)
 	GemRB.ApplyEffect (victim, "Damage", GemRB.GetPlayerStat (victim, IE_HITPOINTS) + 2, 0)
 	yield from _Wait (lambda: _Dead (victim), 60)
 	GemRB.GameSetScreenFlags (GS_PARTYAI, OP_OR)
-	_Check ("reserves: the second of the four died", _Dead (victim), True)
+	_Check ("short-handed: the third of the four died", _Dead (victim), True)
 	graves = GemRB.GetDCCGraveyard ()
-	_Check ("reserves: its grave, with its class", [(g["Name"], g["Level"], g["Class"], g["Cause"]) for g in graves][-1], (Saved["victim"], 1, Saved["classes"][Saved["picks"][1]], "bled out"))
-	# a camp script opens the roster
+	_Check ("short-handed: its grave, with its class", [(g["Name"], g["Level"], g["Class"], g["Cause"]) for g in graves][-1], (Saved["victim"], 1, victimClass, "bled out"))
+	for i in range (6):
+		yield
+	_Check ("short-handed: nothing opens, nobody joins, the dead stays in its place", [Reserves.Window, ClassPick.Window, Camp.Window, GemRB.GetPartySize (), GemRB.GetDCCFreePlaces ()], [None, None, None, 4, []])
+	# the rest button away from a camp: a rest, not the camp
+	Camp.Shown.pop ("Rested", None)
+	Roster.RestPress ()
+	yield
+	_Check ("short-handed: the rest button rests here (no camp)", [Camp.Window, Reserves.Window, "Rested" in Camp.Shown], [None, None, True])
+	_Log ("the rest away from a camp: %s" % Camp.Shown.get ("Rested"))
+	# the camp: its area script sets DCC_CAMP, the rest button opens the camp's window
 	GemRB.ExecuteString ('SetGlobal("DCC_CAMP","GLOBAL",1)')
-	yield from _Wait (lambda: Reserves.Window, 10)
-	_Check ("reserves: the camp's roster opens", bool (Reserves.Window), True)
+	yield
+	Roster.RestPress ()
+	_Check ("camp: the rest button opens the camp", [bool (Camp.Window), Camp.AtCamp ()], [True, True])
+	_ShotScreen ("camp_window")
+	Camp.OpenReserves ()
+	_Check ("camp: the reserves' screen at the camp", [bool (Reserves.Window), Reserves.Shown.get ("Where"), Camp.Window], [True, "camp", None])
 	if not Reserves.Window:
 		return
-	_Check ("reserves: ten waiting, the party of four", [len (Reserves.Shown["Reserves"]), len (Reserves.Shown["Party"])], [10, 4])
-	_Check ("reserves: the dead one's row", Reserves.Shown["Party"][1].endswith ("(dead)"), True)
-	_ShotScreen ("reserves_roster")
-	newcomer = Reserves.Shown["Reserves"][0]
-	_Check ("reserves: none joins a full party", Reserves.Join (newcomer), -1)
-	# bury the dead, the first reserve joins
-	_Check ("reserves: swap the dead for a reserve", Reserves.Swap (victim, newcomer) >= 0, True)
+	_Check ("camp: the dead one's row", Reserves.Shown["Party"][victim - 1].endswith ("(dead)"), True)
+	_ShotScreen ("reserves_camp")
+	# bury the dead and take the benched hero back into its place: as it left, no class pick
+	_Check ("camp: bury the dead, the benched hero back in", Reserves.Swap (victim, benched) >= 0, True)
 	yield
-	party = [_Id (pc) for pc in range (1, GemRB.GetPartySize () + 1)]
-	_Check ("reserves: the newcomer is the fourth", [len (party), party[-1]], [4, newcomer])
-	_Check ("reserves: it is chosen, level 0, 10 XP, its pick pending", [_Funnel (newcomer)["StatusName"], GemRB.GetDCCStats (newcomer)["Level"], GemRB.GetDCCStats (newcomer)["XP"], _Funnel (newcomer)["ClassPending"]], ["chosen", 0, 10, 1])
-	_Check ("reserves: nine wait now", len (GemRB.GetDCCReserves ()), 9)
-	_Check ("reserves: the dead one is buried, its grave kept", [Saved["victim"] in [GemRB.GetPlayerName (pc, 0) for pc in range (1, 5)], len (Roster.GraveLinesAll ())], [False, 3])
-	_RosterIsParty ("reserves: after the swap")
-	# its class pick comes up
-	yield from _Wait (lambda: ClassPick.Window, 10)
-	_Check ("reserves: the newcomer's class pick opens", [bool (ClassPick.Window), ClassPick.Shown], [True, newcomer])
-	if ClassPick.Window:
-		race = GemRB.GetPlayerStat (newcomer, IE_RACE)
-		want = ClassPick.Last["Choice"]["Class"] if race != 1 else 2
-		ClassPick.Choose (want)
-		ClassPick.Confirm ()
+	_Check ("camp: the benched hero is back as it left (level, XP, class, gear, looks, records)", _Hero (benched), before)
+	_Check ("camp: chosen again, no class pick for a hero", [_Funnel (benched)["StatusName"], _Funnel (benched)["ClassPending"], benched in GemRB.GetDCCReserves ()], ["chosen", 0, False])
+	_Check ("camp: the dead buried, its grave kept", [Saved["victim"] in [GemRB.GetPlayerName (pc, 0) for pc in range (1, GemRB.GetPartySize () + 1)], len (Roster.GraveLinesAll ()), GemRB.GetPartySize ()], [False, 3, 4])
+	_RosterIsParty ("camp: after the swap")
+	for i in range (4):
 		yield
-		if DCCLearn.Window:
-			DCCLearn.Confirm ()
-		_Check ("reserves: the newcomer is level 1", GemRB.GetDCCStats (newcomer)["Level"], 1)
-	# a living party member goes back to the reserves, level 1 and all
+	_Check ("camp: no class pick opens for it", ClassPick.Window, None)
+	# the first goes to the bench, and stays there over the save
 	first = _Id (1)
-	Reserves.Open ()
-	_Check ("reserves: dismiss the first", Reserves.Dismiss (1), 0)
-	_Check ("reserves: dismissed, in the reserves, still level 1", [GemRB.GetPartySize (), first in GemRB.GetDCCReserves (), GemRB.GetDCCStats (first)["Level"], _Funnel (first)["StatusName"]], [3, True, 1, "reserve"])
-	_RosterIsParty ("reserves: a party of three")
-	_Check ("reserves: and back again (room for one)", Reserves.Join (first) >= 0, True)
+	Saved["benchedFirst"] = _Hero (first)
+	_Check ("camp: bench the first", Reserves.Dismiss (1), 0)
+	_Check ("camp: a party of three, one free place", [GemRB.GetPartySize (), GemRB.GetDCCFreePlaces (), first in GemRB.GetDCCReserves (), Reserves.Shown["Places"]], [3, [-1], True, ["(a free place)"]])
+	_RosterIsParty ("camp: a party of three")
 	Reserves.Leave ()
-	_Check ("reserves: closed, the camp's global cleared", [Reserves.Window, GemRB.GetGameVar ("DCC_CAMP")], [None, 0])
+	_Check ("camp: back from the reserves to the camp's window", [Reserves.Window, bool (Camp.Window)], [None, True])
+	# a night at camp
+	time = GemRB.GetGameTime ()
+	Camp.Shown.pop ("Rested", None)
+	Camp.RestHere ()
 	yield
-	Saved["reserves2"] = sorted (GemRB.GetDCCReserves ())
+	_Check ("camp: rest the night there", [Camp.Window, Camp.Shown.get ("Rested") is not None], [None, True])
+	_Log ("the night at camp: %s, %d s passed" % (Camp.Shown.get ("Rested"), GemRB.GetGameTime () - time))
+	# the party leaves the camp
+	GemRB.ExecuteString ('SetGlobal("DCC_CAMP","GLOBAL",0)')
+	yield
+	_Check ("camp: left: no reserves here", [Camp.AtCamp (), Reserves.Open ("camp")], [False, None])
 	Saved["reserveNames"] = sorted (GemRB.GetPlayerName (i, 0) for i in GemRB.GetDCCReserves ())
+	Saved["scriptNames"] = sorted (GemRB.GetPlayerName (i, 2).lower () for i in GemRB.GetDCCReserves () + [_Id (pc) for pc in range (1, GemRB.GetPartySize () + 1)])
 	Saved["graves"] = GemRB.GetDCCGraveyard ()
 	Saved["party"] = [GemRB.GetPlayerName (pc, 0) for pc in range (1, GemRB.GetPartySize () + 1)]
 	for game in [g for g in GemRB.GetSaveGames () if g.GetName () == ReserveSave]:
@@ -2100,10 +2240,15 @@ def _StepReserves ():
 		return "rsvloading"
 
 def _StepReservesLoaded ():
-	_Check ("loaded: the party of four", [GemRB.GetPlayerName (pc, 0) for pc in range (1, GemRB.GetPartySize () + 1)], Saved.get ("party"))
-	_Check ("loaded: the party size stays four", [GemRB.GetGameVar ("DCC_PARTY_SIZE"), GemRB.GetGameVar ("DCC_FUNNEL")], [4, 4])
+	_Check ("loaded: the party of three", [GemRB.GetPlayerName (pc, 0) for pc in range (1, GemRB.GetPartySize () + 1)], Saved.get ("party"))
+	_Check ("loaded: the party size stays four, its free place kept", [GemRB.GetGameVar ("DCC_PARTY_SIZE"), GemRB.GetGameVar ("DCC_FUNNEL"), GemRB.GetDCCFreePlaces ()], [4, 4, [-1]])
 	_Check ("loaded: the reserves with their records", sorted (GemRB.GetPlayerName (i, 0) for i in GemRB.GetDCCReserves ()), Saved.get ("reserveNames"))
-	_Check ("loaded: the reserves' pick still pending, level 0", sorted (set ((GemRB.GetDCCStats (i)["Level"], GemRB.GetDCCStats (i)["XP"], _Funnel (i)["ClassPending"], _Funnel (i)["StatusName"]) for i in GemRB.GetDCCReserves ())), [(0, 10, 1, "reserve")])
+	_Check ("loaded: everyone keeps its own script name", sorted (GemRB.GetPlayerName (i, 2).lower () for i in GemRB.GetDCCReserves () + [_Id (pc) for pc in range (1, GemRB.GetPartySize () + 1)]), Saved.get ("scriptNames"))
+	hero = Saved.get ("benchedFirst", {})
+	first = _ReserveByScript (hero.get ("Script"))
+	others = [i for i in GemRB.GetDCCReserves () if i != first]
+	_Check ("loaded: the funnel's reserves' picks still pending, level 0", sorted (set ((GemRB.GetDCCStats (i)["Level"], GemRB.GetDCCStats (i)["XP"], _Funnel (i)["ClassPending"], _Funnel (i)["StatusName"]) for i in others)), [(0, 10, 1, "reserve")])
+	_Check ("loaded: the benched hero keeps everything (level, XP, class, gear, looks, records)", _Hero (first) if first else None, hero)
 	# M3.4: the skill tags carry through the reserves and the level-1 class picks (the occupation's, from OCCU)
 	import DCCSkills
 	occupations = DCCSkills.Tables ()["dccoccup"]
@@ -2115,8 +2260,17 @@ def _StepReservesLoaded ():
 	_Check ("loaded: the graveyard (the game's record)", GemRB.GetDCCGraveyard (), Saved.get ("graves"))
 	import Roster
 	Roster.UpdateRoster ()
-	_Check ("loaded: the roster of four", len (Roster.Tiles), 4)
+	_Check ("loaded: the roster of three", len (Roster.Tiles), 3)
 	_RosterIsParty ("loaded")
+	# back at camp after the load: the benched hero takes its place again
+	import Reserves
+	GemRB.SetGlobal ("DCC_CAMP", "GLOBAL", 1)
+	_Check ("loaded: at camp, the reserves' screen shows the free place", [bool (Reserves.Open ("camp")), Reserves.Shown.get ("Places")], [True, ["(a free place)"]])
+	_Check ("loaded: the benched hero joins", Reserves.Join (first) >= 0 if first else False, True)
+	_Check ("loaded: back as it left, a party of four, no place free", [_Hero (first) if first else None, GemRB.GetPartySize (), GemRB.GetDCCFreePlaces (), _Funnel (first)["StatusName"] if first else None], [hero, 4, [], "chosen"])
+	Reserves.Leave ()
+	GemRB.SetGlobal ("DCC_CAMP", "GLOBAL", 0)
+	_RosterIsParty ("loaded: the hero back")
 	return "done"
 
 StepTable = {

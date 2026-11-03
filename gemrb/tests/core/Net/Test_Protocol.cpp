@@ -1151,8 +1151,8 @@ TEST(NetProtocolTest, FunnelRecordAndCardEdits)
 
 TEST(NetProtocolTest, CardChoiceEdits)
 {
-	// v16 (M3.5): a player picks its own card's species, sex and looks
-	EXPECT_EQ(NET_PROTOCOL_VERSION, 16);
+	// v16 (M3.5): a player picks its own card's species, sex and looks (v17: the reserves' GUI calls)
+	EXPECT_GE(NET_PROTOCOL_VERSION, 16);
 	NetCardEdit edit;
 	NetCardEdit back;
 	edit.partySlot = 16;

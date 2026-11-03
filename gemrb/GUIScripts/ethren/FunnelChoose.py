@@ -11,7 +11,7 @@
 #
 # A survivor (a dict): Id (global ID), Order (roster order), Name, Scores (Str Agi Sta Per Int Luck, the
 # current ones), Mods, HP, MaxHP, Kills, NearDeaths, Occupation (its name), Race, Alignment (1-3),
-# Player (-1 none), Level, Class, God, Dead.
+# Player (-1 none), Level, Class, XP, God, Dead.
 
 import FunnelRoll
 
@@ -49,6 +49,7 @@ def Survivor (actor, tables = None):
 		"Occupation": OccupationName (tables, record["Occupation"]["Id"], record["Occupation"]["Sub"]),
 		"Race": GemRB.GetPlayerStat (actor, IE_RACE), "Alignment": stats["AlignmentCode"] if stats else 2,
 		"Player": place["Player"], "Level": stats["Level"] if stats else 0, "Class": stats["Class"] if stats else LEVEL0,
+		"XP": stats["XP"] if stats else 0,
 		"God": stats["God"] if stats else 0, "GodName": stats["GodName"] if stats else "",
 		"Status": place["StatusName"], "ClassPending": place["ClassPending"],
 		"Dead": bool (GemRB.GetPlayerStat (actor, IE_STATE_ID) & 0x800),
@@ -209,3 +210,47 @@ def GraveLine (grave, occupation):
 		how = cause or killer or "unknown causes"
 	where = grave.get ("Place", "") or grave.get ("DiedIn", "")
 	return "%s: %s%s" % (who, how, ", " + where if where else "")
+
+###################################################
+# the reserves at an inn or camp (decided 2026-11-03)
+
+def Benched (survivor):
+	"""a hero who went on and waits in the reserves now (level 1 or more): it keeps everything and
+	earns no XP until it is back"""
+	return survivor.get ("Status") == "reserve" and survivor["Level"] > 0 and survivor["Class"] != LEVEL0
+
+def ReserveTitle (survivor):
+	"""a reserve card's first line: "Tam" for a funnel survivor, "Gorm, benched" for a hero"""
+	return survivor["Name"] + (", benched" if Benched (survivor) else "")
+
+def ReserveLines (survivor):
+	"""a reserve's card: the survivor's card, then its XP (a benched hero's stays as it left)"""
+	lines = CardLines (survivor)
+	lines.append ("XP %d%s" % (survivor.get ("XP", 0), ", none while benched" if Benched (survivor) else ""))
+	return lines
+
+def MayFill (owner, me, host):
+	"""co-op: the player whose free place it is fills it (picks the reserve); the host may fill any
+	(for that player); a place nobody's is the host's. Single player: host is True"""
+	return bool (host) or (owner >= 0 and owner == me)
+
+def MayBench (player, me, host):
+	"""a hero is benched (or buried) by its own player, or the host"""
+	return bool (host) or (player >= 0 and player == me)
+
+def PlaceLine (owner, me, coop):
+	"""a free place's row: whose it is to fill"""
+	if not coop:
+		return "(a free place)"
+	if owner == me or (owner < 0 and me == 0):
+		return "(a free place: yours)"
+	if owner <= 0:
+		return "(a free place: the host's)"
+	return "(a free place: P%d's)" % owner
+
+def FirstFillable (places, me, host):
+	"""the free place a Join fills when none is picked: the first this player may fill, -1 none"""
+	for index, owner in enumerate (places):
+		if MayFill (owner, me, host):
+			return index
+	return -1

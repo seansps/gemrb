@@ -8,7 +8,8 @@
 #   - the header: the party summary ("Alive 12 of 16, 2 dying, 2 dead"; a press opens the graveyard)
 #     and the prompts waiting for this player ("3 waiting");
 #   - Select all, Select mine (co-op), the formation buttons (Block, Column: set the party's formation
-#     and line the selection up in it where its leader stands), the party settings (DCCParty.py);
+#     and line the selection up in it where its leader stands), the party settings (DCCParty.py), Rest
+#     (Camp.py: at a camp the camp's window with the reserves, else a night's rest);
 #   - saved groups 1-9: Ctrl+1-9 (or a right click) saves the selection, Alt+1-9 (or a click) selects it;
 #   - a tile for each party member (sixteen in the funnel: two columns of eight; the four after it: two
 #     rows of two): the name, the occupation, the worst status, an HP bar,
@@ -105,7 +106,8 @@ def OpenRoster ():
 	labels = [("All", SelectAll, "Select everyone"), ("Mine", SelectMine, "Select the characters you control"),
 		("Block", lambda: Formation (0), "Formation: block (four wide). Lines the selection up where its first one stands"),
 		("Column", lambda: Formation (1), "Formation: column of twos. Lines the selection up where its first one stands"),
-		("Set", OpenSettings, "Party settings: Luck, spellburn, prompts, the party AI")]
+		("Set", OpenSettings, "Party settings: Luck, spellburn, prompts, the party AI"),
+		("Rest", RestPress, "Rest the night; at a camp: the camp, where the reserves wait")]
 	w = (inner - (len (labels) - 1) * GAP) // len (labels)
 	for i, (text, action, tip) in enumerate (labels):
 		_Button (win, 102 + i, GAP + i * (w + GAP), BUTTONS_Y, w, 22, text, action, tip)
@@ -270,6 +272,10 @@ def Formation (formation):
 
 def NextFormation ():
 	Formation ((CurrentFormation () + 1) % len (FORMATIONS))
+
+def RestPress ():
+	import Camp
+	return Camp.RestPress ()
 
 def OpenSettings ():
 	import DCCParty

@@ -161,6 +161,8 @@ public:
 	std::vector<uint8_t> ConnectedSlots() const;
 	/** host: whose party member this is (not who controls it now); the host for anyone else */
 	uint8_t OwnerSlot(const Actor& actor) const;
+	/** whose GUI call this is: on the host the remote player's while it runs one (else the host), on a client our own slot */
+	uint8_t CallerSlot() const;
 	std::string PlayerName(uint8_t slot) const;
 	/** host: the open prompt (or its outcome) to every player in the game */
 	void SendPrompt(const NetPrompt& msg);

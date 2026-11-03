@@ -23,6 +23,7 @@ constexpr char TAG_FUNNEL[4] = { 'F', 'U', 'N', 'L' };
 constexpr char TAG_CHARACTER[4] = { 'C', 'H', 'A', 'R' };
 constexpr char GAME_MAGIC[4] = { 'D', 'C', 'C', 'G' };
 constexpr char TAG_GRAVEYARD[4] = { 'G', 'R', 'A', 'V' };
+constexpr char TAG_PLACES[4] = { 'S', 'E', 'A', 'T' };
 
 const char* const SKILL_NAMES[OCCUPATION_SKILL_COUNT] = {
 	"ANIMALS", "FARMING", "HERBALISM", "MEDICINE", "ALCHEMY", "SMITHING", "MASONRY", "CARPENTRY", "MINING", "CRAFT_FINE",
@@ -569,6 +570,16 @@ std::vector<uint8_t> WriteGameRecord(const GameRecord& record)
 		EndRecord(out, at);
 		++records;
 	}
+	if (!record.places.empty()) {
+		size_t at = BeginRecord(out, TAG_PLACES, 1);
+		size_t count = std::min<size_t>(record.places.size(), 0xff);
+		out.U8(uint8_t(count));
+		for (size_t i = 0; i < count; ++i) {
+			out.U8(record.places[i]);
+		}
+		EndRecord(out, at);
+		++records;
+	}
 	for (const auto& raw : record.other) {
 		size_t at = BeginRecord(out, raw.tag.data(), raw.version);
 		out.bytes.insert(out.bytes.end(), raw.data.begin(), raw.data.end());
@@ -626,6 +637,12 @@ bool ReadGameRecord(const uint8_t* data, size_t size, GameRecord& out)
 				grave.cause = body.Text();
 				grave.place = body.Text();
 				if (body.Ok()) record.graves.push_back(std::move(grave));
+			}
+			if (!body.Ok()) return false;
+		} else if (std::memcmp(tag.data(), TAG_PLACES, 4) == 0 && recordVersion >= 1) {
+			uint8_t count = body.U8();
+			for (uint8_t i = 0; i < count; ++i) {
+				record.places.push_back(body.U8());
 			}
 			if (!body.Ok()) return false;
 		} else {

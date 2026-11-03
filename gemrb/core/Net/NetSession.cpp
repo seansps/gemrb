@@ -2035,6 +2035,10 @@ struct NetSession::Impl {
 			case NetGuiOp::DCCConfirmSpells:
 				args.push_back(PyString(call.text));
 				break;
+			case NetGuiOp::DCCRecruit:
+				// the reserve by its script name (global IDs differ between host and clients)
+				args.insert(args.begin(), PyString(call.text));
+				break;
 			default:
 				break;
 		}
@@ -2080,6 +2084,9 @@ struct NetSession::Impl {
 		}
 		bool storeOp = call.op == NetGuiOp::ChangeStoreItem || call.op == NetGuiOp::SetPurchasedAmount;
 		if (why.empty() && storeOp && info.store.IsEmpty()) why = "no store open";
+		// v17: the reserves only at an inn (the player has one open) or a camp
+		bool reservesOp = call.op == NetGuiOp::DCCDismiss || call.op == NetGuiOp::DCCRecruit;
+		if (why.empty() && reservesOp && !AtInnOrCamp(info)) why = "the reserves are only at an inn or a camp";
 		Map* area = actor ? actor->GetCurrentArea() : nullptr;
 		Container* container = nullptr;
 		if (info.container) {
@@ -2181,6 +2188,17 @@ struct NetSession::Impl {
 		}
 		partyDirty = true;
 		storeHashes.erase(std::string(info.store.c_str()));
+	}
+
+	// DCC games: an inn's window open for this player (a store with rooms) or a camp (the global
+	// DCC_CAMP an area script sets), where the reserves can be swapped
+	bool AtInnOrCamp(const NetPeerInfo& info) const
+	{
+		const Game* game = core->GetGame();
+		if (game && game->GetGlobal(ieVariable("DCC_CAMP"), 0)) return true;
+		if (info.store.IsEmpty()) return false;
+		const Store* store = gamedata->GetStore(info.store);
+		return store && store->AvailableRooms;
 	}
 
 	void ForgetActor(ieDword id)
@@ -5379,6 +5397,12 @@ uint8_t NetSession::OwnerSlot(const Actor& actor) const
 	return NetSlotOwner(uint8_t(actor.InParty), impl->assigned, impl->roster);
 }
 
+uint8_t NetSession::CallerSlot() const
+{
+	if (mode != Mode::Host) return impl->slot;
+	return impl->guiCaller ? impl->guiCaller->slot : NET_HOST_SLOT;
+}
+
 std::string NetSession::PlayerName(uint8_t slot) const
 {
 	if (mode == Mode::Host) {
@@ -5605,6 +5629,11 @@ std::vector<uint8_t> NetSession::ConnectedSlots() const
 }
 
 uint8_t NetSession::OwnerSlot(const Actor&) const
+{
+	return NET_HOST_SLOT;
+}
+
+uint8_t NetSession::CallerSlot() const
 {
 	return NET_HOST_SLOT;
 }

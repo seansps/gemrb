@@ -25,7 +25,7 @@ import FunnelChoose
 from GUIDefines import *
 
 FUNNEL_VAR = "DCC_FUNNEL" # 0 the funnel runs, 1 choose the four, 2 the class picks, 3 the end screen, 4 done
-CAMP_VAR = "DCC_CAMP" # 1: the reserves' roster is open (a camp or tavern script sets it)
+CAMP_VAR = "DCC_CAMP" # 1: the party is at a camp (its area script sets it): the rest button offers the reserves (Camp.py)
 
 Font = "NORMAL"
 CardFont = "INFOFONT"
@@ -48,7 +48,6 @@ Mode = None # "single", "host" or "client"
 Shown = {} # for tests: "Cards" (ids in the order shown), id -> [name, lines...], "Status", "Picks"
 TableCache = None
 EndShown = False
-CampShown = False
 
 def _Log (text):
 	print ("[Choose] " + text)
@@ -97,7 +96,7 @@ def LivingSurvivors ():
 
 def Watch ():
 	"""opens what the funnel's state asks for; on the host it moves the state on"""
-	global EndShown, CampShown
+	global EndShown
 	state = State ()
 	# windows that went with the game (a load; in co-op the host's new save after the party changed)
 	import ClassPick, Reserves, FunnelEnd, DCCLearn
@@ -128,14 +127,11 @@ def Watch ():
 		# later swaps: a reserve that joins at level 0 picks its class too
 		import ClassPick
 		ClassPick.Next ()
-	camp = GemRB.GetGameVar (CAMP_VAR)
-	if camp and not CampShown:
-		import Reserves
-		CampShown = True
-		Reserves.Open ()
-	elif not camp and CampShown:
-		import Reserves
-		CampShown = False
+	# the reserves are only at an inn or camp (decided 2026-11-03): gone with it (the camp left, the
+	# inn's window closed)
+	import Reserves
+	if Reserves.Window and not Reserves.SafePlace (Reserves.Where):
+		_Log ("the reserves' screen closes: no longer at %s" % Reserves.PLACES.get (Reserves.Where, "?"))
 		Reserves.Close ()
 
 ###################################################

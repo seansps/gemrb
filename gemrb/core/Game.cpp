@@ -225,10 +225,11 @@ Actor* Game::GetPC(size_t slot, bool onlyAlive) const
 		return nullptr;
 	}
 	if (onlyAlive) {
+		// the living only count (bc7723a87 counted the dead too, so a dead party member before a
+		// living one made this nullptr: resting with a dead one in the party crashed)
 		for (const auto& pc : PCs) {
-			if (IsAlive(pc) && !slot) {
-				return pc;
-			}
+			if (!IsAlive(pc)) continue;
+			if (!slot) return pc;
 			--slot;
 		}
 		return nullptr;

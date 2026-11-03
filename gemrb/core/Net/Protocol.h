@@ -31,7 +31,7 @@
 namespace GemRB {
 
 constexpr uint8_t NET_MAGIC = 0xE7;
-constexpr uint8_t NET_PROTOCOL_VERSION = 16;
+constexpr uint8_t NET_PROTOCOL_VERSION = 17;
 constexpr uint16_t NET_DEFAULT_PORT = 27015;
 constexpr size_t NET_HEADER_SIZE = 3;
 constexpr size_t NET_MAX_STRING = 1024;
@@ -745,6 +745,8 @@ enum class NetGuiOp : uint8_t {
 	DCCConfirmSpells, // actor (text: the elf's lucky spell, may be empty) (v12)
 	DCCSetPartyAI, // actor, party AI mode (v13, M2.10)
 	DCCSetAlignment, // actor, alignment (1-3), god (-1: it follows) (v15, M3.3)
+	DCCDismiss, // actor (v17, the reserves at inns and camps; host only: bench a living hero, bury a dead one)
+	DCCRecruit, // free place (-1 the first) (text: the reserve's script name) (v17; host only)
 	count
 };
 
