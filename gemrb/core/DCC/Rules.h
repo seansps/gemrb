@@ -87,6 +87,7 @@ public:
 	ClericSpellsTable clericSpells; // Table 1-5's spells known (dccclesp.2da)
 	BodyTable body; // M2.10: body weight by race and the load limits (dccbody.2da)
 	HairTable hair; // M2.11: the hair and beard overlays (dcchair.2da)
+	HelmetTable helmets; // S5: the closed helmets, which take their own crop of the hair (dcchelm.2da)
 	GodTable gods; // M3.3: the gods a cleric may serve by alignment (dccgods.2da)
 	HeldTable held; // weapons held in both hands though one-handed in DCC, for their animation (dcchold.2da)
 	SkillTable skills; // M3.4: the occupation skill tags (dccskill.2da)

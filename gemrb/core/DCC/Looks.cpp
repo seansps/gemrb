@@ -29,9 +29,9 @@ static std::string Code(const std::string& text)
 bool HairTable::Load(const TableMgr& table)
 {
 	styles.clear();
-	static const char* const columns[] = { "ID", "KIND", "CODE", "HELMET" };
-	TableMgr::index_t cols[4];
-	for (int i = 0; i < 4; ++i) {
+	static const char* const columns[] = { "ID", "KIND", "CODE", "HELMET", "CLOSED" };
+	TableMgr::index_t cols[5];
+	for (int i = 0; i < 5; ++i) {
 		cols[i] = table.GetColumnIndex(std::string(columns[i]));
 		if (cols[i] == TableMgr::npos) return false;
 	}
@@ -48,6 +48,7 @@ bool HairTable::Load(const TableMgr& table)
 		style.code = Code(table.QueryField(r, cols[2]));
 		if (style.code.size() != 2) return false;
 		style.underHelmet = Code(table.QueryField(r, cols[3]));
+		style.underClosed = Code(table.QueryField(r, cols[4]));
 		Set(style);
 	}
 	return true;
@@ -73,10 +74,17 @@ const HairStyle* HairTable::Find(int id, bool beard) const
 	return nullptr;
 }
 
-std::string HairOverlay(const HairStyle* style, bool helmet)
+std::string HairOverlay(const HairStyle* style, Helmet helmet)
 {
 	if (!style) return {};
-	return helmet ? style->underHelmet : style->code;
+	switch (helmet) {
+		case Helmet::Open:
+			return style->underHelmet;
+		case Helmet::Closed:
+			return style->underClosed;
+		default:
+			return style->code;
+	}
 }
 
 unsigned int OverlayColourByte(unsigned int paletteType)
@@ -152,6 +160,34 @@ bool HeldTable::BothHands(const std::string& resref, const std::string& animCode
 	if (code.size() != 2) return false;
 	auto row = rows.find(code);
 	return row != rows.end() && row->second;
+}
+
+bool HelmetTable::Load(const TableMgr& table)
+{
+	closed.clear();
+	TableMgr::index_t column = table.GetColumnIndex("CLOSED");
+	if (column == TableMgr::npos) return false;
+	for (TableMgr::index_t r = 0; r < table.GetRowCount(); ++r) {
+		const std::string& value = table.QueryField(r, column);
+		if (value != "0" && value != "1") return false;
+		const std::string& code = table.GetRowName(r);
+		if (code.size() != 2) return false;
+		Set(code, value == "1");
+	}
+	return true;
+}
+
+void HelmetTable::Set(const std::string& code, bool isClosed)
+{
+	closed[Upper(code)] = isClosed;
+}
+
+Helmet HelmetTable::Worn(const std::string& code) const
+{
+	std::string key = Code(code);
+	if (key.empty()) return Helmet::None;
+	auto row = closed.find(key);
+	return row != closed.end() && row->second ? Helmet::Closed : Helmet::Open;
 }
 
 unsigned char WeaponAnimType(bool twoHandedFlag, bool heldInBothHands, OffHand offHand)

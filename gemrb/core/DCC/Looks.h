@@ -12,7 +12,10 @@
  * (a body with its hair baked in). unhardcoded/ethren/dcchair.2da gives each style id its
  * overlay: CODE is the overlay's 2-letter animation code (its BAMs are WQ<size><code><suffix>,
  * like a helmet's), HELMET what is drawn while a helmet is worn, a cropped style's code or * for
- * nothing. KIND is HAIR or BEARD. The layers take the body's palette: the hair range colours them.
+ * nothing, and CLOSED (S5) the same under a closed helmet, which covers the head down to the neck
+ * (a crop of its own, Y? for the hair, Z? for the beards). KIND is HAIR or BEARD. The layers take
+ * the body's palette: the hair range colours them. unhardcoded/ethren/dcchelm.2da lists which
+ * helmet overlays are closed.
  *
  * The weapon, off-hand and helmet overlays take their own colour bytes in DCC games, as in the
  * IE games: byte 1, 2 or 3 of each CRE colour (effect 7's locations 0x10-0x36), so an item's
@@ -41,11 +44,15 @@ struct HairStyle {
 	bool beard = false;
 	std::string code; // the overlay's animation code, 2 letters
 	std::string underHelmet; // the code drawn under a helmet, "" for nothing
+	std::string underClosed; // S5: the code drawn under a closed helmet, "" for nothing
 };
+
+/** the helmet a character wears, for the hair drawn under it */
+enum class Helmet : uint8_t { None, Open, Closed };
 
 class GEM_EXPORT HairTable {
 public:
-	/** dcchair.2da: rows by name, columns ID KIND (HAIR or BEARD) CODE HELMET */
+	/** dcchair.2da: rows by name, columns ID KIND (HAIR or BEARD) CODE HELMET CLOSED */
 	bool Load(const TableMgr& table);
 	void Set(const HairStyle& style);
 	/** the style of this kind with this id, nullptr for 0 or an unknown one */
@@ -56,8 +63,25 @@ private:
 	std::vector<HairStyle> styles;
 };
 
-/** the overlay to draw for a style: its code, or the helmet code while a helmet is worn ("" none) */
-GEM_EXPORT std::string HairOverlay(const HairStyle* style, bool helmet);
+/** the overlay to draw for a style: its code, or the code for the helmet worn ("" none) */
+GEM_EXPORT std::string HairOverlay(const HairStyle* style, Helmet helmet);
+
+/**
+ * S5: which helmet overlays are closed (the armet, FH: down to the neck, so the open helmets' crop of
+ * the hair would poke out of it). unhardcoded/ethren/dcchelm.2da: rows by the helmet's 2-letter
+ * animation code (ITM 0x22), column CLOSED 1 or 0. A helmet that isn't listed is open.
+ */
+class GEM_EXPORT HelmetTable {
+public:
+	bool Load(const TableMgr& table);
+	void Set(const std::string& code, bool closed);
+	/** the helmet worn with this overlay code: None for "" */
+	Helmet Worn(const std::string& code) const;
+	bool Empty() const { return closed.empty(); }
+
+private:
+	std::map<std::string, bool> closed; // upper case
+};
 
 /** the CRE colour byte an overlay's palette takes (CharAnimations' PaletteType: 5 weapon, 6
  * off-hand, 7 helmet take bytes 1-3; the body's parts take byte 0) */

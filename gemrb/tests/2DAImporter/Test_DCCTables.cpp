@@ -1201,27 +1201,63 @@ TEST(DCC_Tables, Looks)
 	ASSERT_TRUE(hair.Load(*table));
 	const HairStyle* parted = hair.Find(1, false);
 	ASSERT_NE(parted, nullptr);
-	EXPECT_EQ(HairOverlay(parted, false), "HP");
-	EXPECT_EQ(HairOverlay(parted, true), ""); // hidden under a helmet
+	EXPECT_EQ(HairOverlay(parted, Helmet::None), "HP");
+	EXPECT_EQ(HairOverlay(parted, Helmet::Open), ""); // hidden under a helmet
+	EXPECT_EQ(HairOverlay(parted, Helmet::Closed), "");
 	const HairStyle* beard = hair.Find(1, true);
 	ASSERT_NE(beard, nullptr);
-	EXPECT_EQ(HairOverlay(beard, true), "BD"); // a beard shows under a helmet
+	EXPECT_EQ(HairOverlay(beard, Helmet::None), "BD");
+	EXPECT_EQ(HairOverlay(beard, Helmet::Open), "BD"); // a beard shows under an open helmet
+	EXPECT_EQ(HairOverlay(beard, Helmet::Closed), "ZD"); // and its own crop under a closed one
 	EXPECT_EQ(hair.Find(0, false), nullptr);
-	// S4: thirteen hair styles and three beards; the long ones keep a cropped copy under a helmet
-	for (int id = 1; id <= 13; ++id) {
+	// S4: thirteen hair styles and three beards; the long ones keep a cropped copy under a helmet. S5: 14 the
+	// elves' bald head, their pointed ears alone (the elf bodies have human ears), hidden under any helmet
+	for (int id = 1; id <= 14; ++id) {
 		EXPECT_NE(hair.Find(id, false), nullptr) << id;
 	}
-	EXPECT_EQ(hair.Find(14, false), nullptr);
-	// S6: the dwarven beards (4-6) after the human ones
+	EXPECT_EQ(hair.Find(15, false), nullptr);
+	const HairStyle* ears = hair.Find(14, false);
+	ASSERT_NE(ears, nullptr);
+	EXPECT_EQ(HairOverlay(ears, Helmet::None), "EA");
+	EXPECT_EQ(HairOverlay(ears, Helmet::Open), "");
+	EXPECT_EQ(HairOverlay(ears, Helmet::Closed), "");
+	EXPECT_EQ(hair.Find(14, true), nullptr);
+	// S6: the dwarven beards (4-6) after the human ones; S5: under a closed helmet Z and the code's second letter
 	for (int id = 1; id <= 6; ++id) {
-		ASSERT_NE(hair.Find(id, true), nullptr) << id;
-		EXPECT_EQ(HairOverlay(hair.Find(id, true), true), HairOverlay(hair.Find(id, true), false)) << id;
+		const HairStyle* style = hair.Find(id, true);
+		ASSERT_NE(style, nullptr) << id;
+		EXPECT_EQ(HairOverlay(style, Helmet::Open), HairOverlay(style, Helmet::None)) << id;
+		EXPECT_EQ(HairOverlay(style, Helmet::Closed), "Z" + style->code.substr(1)) << id;
 	}
 	EXPECT_EQ(hair.Find(7, true), nullptr);
-	EXPECT_EQ(HairOverlay(hair.Find(6, false), true), "XT"); // the ponytail hangs below a helmet
-	EXPECT_EQ(HairOverlay(hair.Find(12, false), false), "HR");
-	EXPECT_EQ(HairOverlay(hair.Find(12, false), true), "XR");
-	EXPECT_EQ(HairOverlay(hair.Find(10, false), true), ""); // buzzed: nothing under a helmet
+	EXPECT_EQ(HairOverlay(hair.Find(6, false), Helmet::Open), "XT"); // the ponytail hangs below a helmet
+	EXPECT_EQ(HairOverlay(hair.Find(6, false), Helmet::None), "HT");
+	EXPECT_EQ(HairOverlay(hair.Find(6, false), Helmet::Closed), "YT"); // and below a closed one, cut at the neck
+	EXPECT_EQ(HairOverlay(hair.Find(12, false), Helmet::None), "HR");
+	EXPECT_EQ(HairOverlay(hair.Find(12, false), Helmet::Open), "XR");
+	EXPECT_EQ(HairOverlay(hair.Find(10, false), Helmet::None), "HY");
+	EXPECT_EQ(HairOverlay(hair.Find(10, false), Helmet::Open), ""); // buzzed: nothing under a helmet
+	EXPECT_EQ(HairOverlay(hair.Find(10, false), Helmet::Closed), "");
+	// S5: every hair style cropped X? under an open helmet is cropped Y? under a closed one, the rest nothing
+	for (int id = 1; id <= 14; ++id) {
+		const HairStyle* style = hair.Find(id, false);
+		ASSERT_NE(style, nullptr) << id;
+		std::string open = HairOverlay(style, Helmet::Open);
+		EXPECT_EQ(HairOverlay(style, Helmet::Closed), open.empty() ? "" : "Y" + open.substr(1)) << id;
+		EXPECT_TRUE(open.empty() || open[0] == 'X') << id;
+	}
+
+	// S5: the closed helmets (dcchelm.2da): the armet; the cap, kettle hat and nasal helm are open, as is
+	// any helmet not listed
+	auto helmTable = Open2DA("dcchelm");
+	ASSERT_TRUE(helmTable);
+	HelmetTable helmets;
+	ASSERT_TRUE(helmets.Load(*helmTable));
+	EXPECT_EQ(helmets.Worn("FH"), Helmet::Closed);
+	for (const char* code : { "LC", "KH", "NH", "QQ" }) {
+		EXPECT_EQ(helmets.Worn(code), Helmet::Open) << code;
+	}
+	EXPECT_EQ(helmets.Worn(""), Helmet::None);
 
 	auto rates = Open2DA("moverate");
 	ASSERT_TRUE(rates);
@@ -1265,7 +1301,8 @@ TEST(DCC_Tables, Looks)
 	EXPECT_EQ(ids, (std::set<std::string> { "0x6500", "0x6501", "0x6510", "0x6511", "0x6520", "0x6530", "0x6540", "0x6550", "0x6560", "0x6570" }));
 
 	// the looks roll (dcclooks.2da) only gives a body the styles rendered on its rig: hair 1-7 on the men,
-	// 8-13 on the women; the beards 1-3 on human men, 4-6 on dwarf men (S6: each species its own body)
+	// 8-13 on the women; the beards 1-3 on human men, 4-6 on dwarf men (S6: each species its own body).
+	// S5: a bald one takes BARE: 0 (the bald body) or a hair style, 14 on the elves (their ears alone)
 	const std::map<std::string, int> bodies { { "HUMAN_M", 0x6501 }, { "HUMAN_F", 0x6511 }, { "DWARF_M", 0x6520 },
 		{ "DWARF_F", 0x6530 }, { "ELF_M", 0x6540 }, { "ELF_F", 0x6550 }, { "HALFLING_M", 0x6560 }, { "HALFLING_F", 0x6570 } };
 	auto looks = Open2DA("dcclooks");
@@ -1295,6 +1332,10 @@ TEST(DCC_Tables, Looks)
 			EXPECT_NE(hair.Find(id, false), nullptr) << name << " " << id;
 			EXPECT_TRUE(female ? id >= 8 && id <= 13 : id >= 1 && id <= 7) << name << " " << id;
 		}
+		const std::string& bare = looks->QueryField(row, looks->GetColumnIndex("BARE"));
+		EXPECT_EQ(bare, name.rfind("ELF_", 0) == 0 ? "14" : "0") << name;
+		int bareId = atoi(bare.c_str());
+		EXPECT_TRUE(bareId == 0 || hair.Find(bareId, false)) << name;
 		for (int id : styles(row, "BEARDS")) {
 			EXPECT_FALSE(female) << name;
 			EXPECT_NE(hair.Find(id, true), nullptr) << name << " " << id;

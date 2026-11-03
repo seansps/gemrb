@@ -5,29 +5,34 @@
 # (0 none: a body with its hair baked in, or a bald one). CODE is the overlay's 2-letter animation code: its
 # BAMs are WQ<size><code><suffix>, drawn like a helmet's over the body and coloured by the hair range. HELMET
 # is what is drawn while a helmet is worn: a cropped style's code (X?: the style cut at the helmets' rim, so
-# what hangs below still shows), the style itself (beards), or * for nothing (short styles).
+# what hangs below still shows), the style itself (beards), or * for nothing (short styles). S5: CLOSED is the
+# same under a closed helmet (dcchelm.2da: the armet, down to the neck): a crop of its own, Y? for the hair
+# cropped X? (* for the rest) and Z? for the beards. A code with no BAMs draws nothing.
 # Each style is rendered on one rig only, so it draws only on that rig's bodies (the size letter): hair 1-7
 # and the beards on the male (L: CPM2), hair 8-13 on the female (F: CPF2). The looks roll (dcclooks.2da)
 # picks them by sex; elsewhere the file is missing and nothing is drawn. S6: every hair style is rendered on
 # each demihuman rig of its sex too (D W E V); the dwarven beards 4-6 on the dwarf man (D) only. Halflings
-# have no rigs of their own: they are drawn on the dwarves' (D W, avatars.2da).
-               ID   KIND   CODE  HELMET
-SIMPLE_PARTED  1    HAIR   HP    *
-BALDING        2    HAIR   HA    *
-BUZZED         3    HAIR   HZ    *
-DREADS         4    HAIR   HD    XD
-MOHAWK         5    HAIR   HM    *
-PONYTAIL       6    HAIR   HT    XT
-SLICKBACK      7    HAIR   HS    *
-BOB            8    HAIR   HO    XO
-BUNS           9    HAIR   HN    *
-BUZZED_F       10   HAIR   HY    *
-LONG           11   HAIR   HL    XL
-LONG_DREADS    12   HAIR   HR    XR
-PONYTAIL_F     13   HAIR   HQ    XQ
-FULL_BEARD     1    BEARD  BD    BD
-MOUSTACHE      2    BEARD  BM    BM
-MUTTON_CHOPS   3    BEARD  BC    BC
-DWARF_LONG     4    BEARD  BL    BL
-DWARF_FORKED   5    BEARD  BF    BF
-DWARF_SPADE    6    BEARD  BS    BS
+# have no rigs of their own: they are drawn on the dwarves' (D W, avatars.2da). S5: the elves' bodies have
+# human ears; their pointed ears are drawn in every hair style on the elf rigs (E V), so a helmet's crop hides
+# them. 14 is a bald elf's (dcclooks.2da BARE): the ears alone, on both elf rigs only, nothing under a helmet.
+               ID   KIND   CODE  HELMET  CLOSED
+SIMPLE_PARTED  1    HAIR   HP    *       *
+BALDING        2    HAIR   HA    *       *
+BUZZED         3    HAIR   HZ    *       *
+DREADS         4    HAIR   HD    XD      YD
+MOHAWK         5    HAIR   HM    *       *
+PONYTAIL       6    HAIR   HT    XT      YT
+SLICKBACK      7    HAIR   HS    *       *
+BOB            8    HAIR   HO    XO      YO
+BUNS           9    HAIR   HN    *       *
+BUZZED_F       10   HAIR   HY    *       *
+LONG           11   HAIR   HL    XL      YL
+LONG_DREADS    12   HAIR   HR    XR      YR
+PONYTAIL_F     13   HAIR   HQ    XQ      YQ
+BALD           14   HAIR   EA    *       *
+FULL_BEARD     1    BEARD  BD    BD      ZD
+MOUSTACHE      2    BEARD  BM    BM      ZM
+MUTTON_CHOPS   3    BEARD  BC    BC      ZC
+DWARF_LONG     4    BEARD  BL    BL      ZL
+DWARF_FORKED   5    BEARD  BF    BF      ZF
+DWARF_SPADE    6    BEARD  BS    BS      ZS

@@ -135,6 +135,8 @@ bool RulesData::Load()
 	// the hair and beard overlays (M2.11)
 	table = gamedata->LoadTable("dcchair");
 	if (!table || !hair.Load(*table)) fail("dcchair");
+	table = gamedata->LoadTable("dcchelm");
+	if (!table || !helmets.Load(*table)) fail("dcchelm");
 	// the gods by alignment (M3.3, the cleric's class pick)
 	table = gamedata->LoadTable("dccgods");
 	if (!table || !gods.Load(*table)) fail("dccgods");

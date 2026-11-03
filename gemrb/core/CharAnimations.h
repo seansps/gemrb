@@ -304,7 +304,7 @@ public:
 	const AnimRef& GetBeardRef() const { return BeardRef; }
 	const AnimRef& GetWeaponRef() const { return WeaponRef; }
 	const AnimRef& GetOffhandRef() const { return OffhandRef; }
-	bool HasHelmet() const { return HelmetRef[0] != 0; }
+	const AnimRef& GetHelmetRef() const { return HelmetRef; }
 };
 
 GEM_EXPORT Palette SetupPaperdollColours(const ieDword* Colors, unsigned int type) noexcept;

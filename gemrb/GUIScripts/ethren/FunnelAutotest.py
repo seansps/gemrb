@@ -809,7 +809,7 @@ def _Looks2 ():
 	yield
 
 	# 4. each helmet over hair: the long styles show their cropped copy under it, the short ones nothing, a beard
-	# stays; two helmets a capture
+	# stays; S5: the closed full helm (FH, dcchelm.2da) its own crop, Y? and Z?; two helmets a capture
 	wearers = [(False, 6, 1), (False, 4, 0), (False, 3, 3), (True, 11, 0), (True, 12, 0), (True, 13, 0), (True, 8, 0), (True, 9, 0)]
 	for pair in (("FNTKHAT", "FNTNHLM"), ("FNTCAP", "FNTFHLM")):
 		gids = []
@@ -819,7 +819,13 @@ def _Looks2 ():
 		yield
 		yield
 		under = [(GemRB.GetDCCStats (gid)["HairOverlay"], GemRB.GetDCCStats (gid)["BeardOverlay"]) for gid in gids[:len (wearers)]]
-		_Check ("looks2: under a helmet (the cropped styles, beards kept)", under, [("XT", "BD"), ("XD", ""), ("", "BC"), ("XL", ""), ("XR", ""), ("XQ", ""), ("XO", ""), ("", "")])
+		openCrop = [("XT", "BD"), ("XD", ""), ("", "BC"), ("XL", ""), ("XR", ""), ("XQ", ""), ("XO", ""), ("", "")]
+		_Check ("looks2: under a helmet (the cropped styles, beards kept)", under, openCrop)
+		under = [(GemRB.GetDCCStats (gid)["HairOverlay"], GemRB.GetDCCStats (gid)["BeardOverlay"]) for gid in gids[len (wearers):]]
+		if pair[1] == "FNTFHLM":
+			_Check ("looks2: under the closed full helm (its own crop)", under, [("YT", "ZD"), ("YD", ""), ("", "ZC"), ("YL", ""), ("YR", ""), ("YQ", ""), ("YO", ""), ("", "")])
+		else:
+			_Check ("looks2: under the nasal helm (open)", under, openCrop)
 		if pair[0] == "FNTKHAT":
 			_Check ("looks2: the helmets' colours (byte 3: kettle hat dark iron 2, nasal helm steel 1)", [(GemRB.GetPlayerStat (gids[i * len (wearers)], IE_METAL_COLOR) >> 24) & 0xff for i in (0, 1)], [2, 1])
 		else:
