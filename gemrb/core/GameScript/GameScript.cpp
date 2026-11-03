@@ -606,6 +606,7 @@ static const ActionLink actionnames[] = {
 	{ "daynight", GameScript::DayNight, 0 },
 	{ "dccaddskill", GameScript::DCCAddSkill, 0 }, // DCC games (M3.4)
 	{ "dccpartyskillcheck", GameScript::DCCPartySkillCheck, 0 },
+	{ "dccrevealtrap", GameScript::DCCRevealTrap, 0 }, // DCC games (traps)
 	{ "dccskillcheck", GameScript::DCCSkillCheck, 0 },
 	{ "deactivate", GameScript::Deactivate, 0 },
 	{ "deathmatchpositionarea", nullptr, 0 },
@@ -1129,6 +1130,7 @@ static const ActionLink actionnames[] = {
 //Make this an ordered list, so we could use bsearch!
 static const ObjectLink objectnames[] = {
 	{ "bestac", GameScript::BestAC },
+	{ "dcclowestluck", GameScript::DCCLowestLuck }, // DCC games (traps)
 	{ "eighthfarthestenemyof", GameScript::EighthFarthestEnemyOf },
 	{ "eighthnearest", GameScript::EighthNearest },
 	{ "eighthnearestallyof", GameScript::EighthNearestAllyOf },

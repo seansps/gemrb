@@ -557,6 +557,7 @@ void AREImporter::GetInfoPoint(DataStream* str, int idx, Map* map) const
 	ieWord trapDetected;
 	Point launchP;
 	Point usePoint;
+	Highlightable::DCCRolls dccRolls;
 	Point talkPos;
 	Region bbox;
 	Point altPoint;
@@ -601,7 +602,16 @@ void AREImporter::GetInfoPoint(DataStream* str, int idx, Map* map) const
 		// maybe we have to store this
 		// bg2: 15 reserved dwords, the above point is actually in dwords (+1),
 		// but since it's the last thing the underseek doesn't matter
-		str->Seek(36, GEM_CURRENT_POS);
+		if (core->HasFeature(GFFlags::RULES_DCC)) {
+			// DCC: who has rolled to find and disarm the trap (Highlightable::DCCRolls) in the first 8
+			str->ReadWord(dccRolls.found);
+			str->ReadWord(dccRolls.disarm);
+			str->ReadWord(dccRolls.lock);
+			str->ReadWord(dccRolls.flags);
+			str->Seek(28, GEM_CURRENT_POS);
+		} else {
+			str->Seek(36, GEM_CURRENT_POS);
+		}
 	}
 
 	if (core->HasFeature(GFFlags::INFOPOINT_DIALOGS)) {
@@ -654,6 +664,7 @@ void AREImporter::GetInfoPoint(DataStream* str, int idx, Map* map) const
 	}
 
 	ip->OriginalName = ipName;
+	ip->dccRolls = dccRolls;
 	ip->TrapDetectionDiff = trapDetDiff;
 	ip->TrapRemovalDiff = trapRemDiff;
 	ip->Trapped = trapped;
@@ -748,7 +759,14 @@ void AREImporter::GetContainer(DataStream* str, int idx, Map* map)
 	str->ReadResRef(keyResRef);
 	str->Seek(4, GEM_CURRENT_POS); // break difficulty
 	str->ReadStrRef(openFail);
-	// 14 reserved dwords
+	// 14 reserved dwords; DCC: who has rolled to find and disarm the trap and to pick the lock in the first 8
+	Highlightable::DCCRolls dccRolls;
+	if (core->HasFeature(GFFlags::RULES_DCC)) {
+		str->ReadWord(dccRolls.found);
+		str->ReadWord(dccRolls.disarm);
+		str->ReadWord(dccRolls.lock);
+		str->ReadWord(dccRolls.flags);
+	}
 
 	str->Seek(VerticesOffset + firstIndex * 4, GEM_STREAM_START);
 
@@ -776,6 +794,7 @@ void AREImporter::GetContainer(DataStream* str, int idx, Map* map)
 
 	c->SetPos(pos);
 	c->OriginalName = containerName;
+	c->dccRolls = dccRolls;
 	c->LockDifficulty = lockDiff;
 	c->Flags = containerFlags;
 	c->TrapDetectionDiff = trapDetDiff;
@@ -1629,6 +1648,7 @@ Map* AREImporter::GetMap(const ResRef& resRef, bool day_or_night)
 	for (ieDword i = 0; i < DoorsCount; i++) {
 		Door* door = tm->GetDoor(i);
 		door->SetDoorOpen(door->IsOpen(), false, 0);
+		if (core->HasFeature(GFFlags::RULES_DCC)) door->DCCLoadRolls();
 	}
 
 	return map;
@@ -2104,7 +2124,15 @@ void AREImporter::PutContainers(DataStream* stream, const Map* map, ieDword Vert
 		stream->WriteResRef(c->KeyResRef);
 		stream->WriteDword(0); //unknown80
 		stream->WriteStrRef(c->OpenFail);
-		stream->WriteFilling(56); //unknown or unused stuff
+		if (core->HasFeature(GFFlags::RULES_DCC)) {
+			stream->WriteWord(c->dccRolls.found);
+			stream->WriteWord(c->dccRolls.disarm);
+			stream->WriteWord(c->dccRolls.lock);
+			stream->WriteWord(c->dccRolls.flags);
+			stream->WriteFilling(48);
+		} else {
+			stream->WriteFilling(56); //unknown or unused stuff
+		}
 	}
 }
 
@@ -2150,6 +2178,12 @@ void AREImporter::PutRegions(DataStream* stream, const Map* map, ieDword& VertIn
 			stream->WriteDword(ip->AltPoint.x);
 			stream->WriteDword(ip->AltPoint.y);
 			stream->WriteFilling(28); //unknown
+		} else if (core->HasFeature(GFFlags::RULES_DCC)) {
+			stream->WriteWord(ip->dccRolls.found);
+			stream->WriteWord(ip->dccRolls.disarm);
+			stream->WriteWord(ip->dccRolls.lock);
+			stream->WriteWord(ip->dccRolls.flags);
+			stream->WriteFilling(28);
 		} else {
 			stream->WriteFilling(36); //unknown
 		}

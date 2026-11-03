@@ -106,6 +106,9 @@ public:
 	int GetCursor(TargetMode targetMode, int lastCursor) const;
 	std::string dump() const override;
 	bool IsLocked() const override { return Flags & DOOR_LOCKED; }
+	// DCC: a door's record has no unused bytes; its trap and lock rolls live in area variables
+	void DCCRollsChanged() override;
+	void DCCLoadRolls();
 	int TrapResets() const override { return Flags & DOOR_RESET; }
 	bool CantAutoClose() const { return Flags & (DOOR_CANTCLOSE | DOOR_LOCKED); }
 	void SetNewOverlay(Holder<TileOverlay> Overlay);

@@ -4,4 +4,6 @@
 # wooded trail"), by area resref; _ for spaces. The engine writes the name into a peasant's funnel record
 # when it dies (DCC::Funnel::place); an area without a row goes by its world map caption, else its resref.
 # Ethren's own areas come with Phase 4; the test games ship their own copy.
-           NAME
+# FLOOR (traps and thief skills): the floor DC of sneak silently in the area (5 cushioned, 10 stone, 15
+# creaky wood, 20 very noisy; * or no row: 10); dccfloor.2da's regions set their own.
+           NAME  FLOOR

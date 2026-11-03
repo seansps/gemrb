@@ -264,6 +264,7 @@ SkillPlan PlanSkillCheck(const SkillTable& table, const SkillPlanInput& in)
 	plan.abilityMod = in.abilityMod;
 	plan.augur = in.augur;
 	plan.situational = in.situational;
+	plan.armor = std::min(0, in.armor);
 	const SkillTags& wanted = in.wanted;
 	if (wanted.untrainable) return plan; // d10 for everyone, nothing helps
 

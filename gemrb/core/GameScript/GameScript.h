@@ -1308,6 +1308,7 @@ public: //Script Functions
 	static void DCCSkillCheck(Scriptable* Sender, Holder<Action> parameters);
 	static void DCCPartySkillCheck(Scriptable* Sender, Holder<Action> parameters);
 	static void DCCAddSkill(Scriptable* Sender, Holder<Action> parameters);
+	static void DCCRevealTrap(Scriptable* Sender, Holder<Action> parameters);
 
 	//Objects
 	static Targets* BestAC(const Scriptable* Sender, Targets* parameters, int ga_flags);
@@ -1352,6 +1353,7 @@ public: //Script Functions
 	static Targets* LastTrigger(const Scriptable* Sender, Targets* parameters, int ga_flags);
 	static Targets* LeaderOf(const Scriptable* Sender, Targets* parameters, int ga_flags);
 	static Targets* LeastDamagedOf(const Scriptable* Sender, Targets* parameters, int ga_flags);
+	static Targets* DCCLowestLuck(const Scriptable* Sender, Targets* parameters, int ga_flags); // DCC games
 	static Targets* MostDamagedOf(const Scriptable* Sender, Targets* parameters, int ga_flags);
 	static Targets* Myself(const Scriptable* Sender, Targets* parameters, int ga_flags);
 	static Targets* MyTarget(const Scriptable* Sender, Targets* parameters, int ga_flags);

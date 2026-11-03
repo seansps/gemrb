@@ -4356,6 +4356,8 @@ int Actor::Damage(int damage, int damagetype, Scriptable* hitter, int modtype, i
 	//add lastdamagetype up ? maybe
 	//FIXME: what does original do?
 	LastDamageType |= damagetype;
+	// DCC: being hit ends Stealth (classes.md)
+	if (core->HasFeature(GFFlags::RULES_DCC) && damage > 0 && Modal.State == Modal::Stealth) DCCEndStealth(u"hit");
 
 	Actor* act = Scriptable::As<Actor>(hitter);
 
@@ -5398,11 +5400,15 @@ int Actor::GetEncumbranceFactor(bool feedback) const
 
 int Actor::CalculateSpeed(bool feedback) const
 {
+	int speed;
 	if (core->HasFeature(GFFlags::RESDATA_INI)) {
-		return CalculateSpeedFromINI(feedback);
+		speed = CalculateSpeedFromINI(feedback);
 	} else {
-		return CalculateSpeedFromRate(feedback);
+		speed = CalculateSpeedFromRate(feedback);
 	}
+	// DCC: a searcher walks at half speed (traps.md); the value is the time a step takes
+	if (core->HasFeature(GFFlags::RULES_DCC) && Modal.State == Modal::DetectTraps) speed *= 2;
+	return speed;
 }
 
 // NOTE: for ini-based speed users this will only update their encumbrance, speed will be 0
@@ -6649,6 +6655,7 @@ void Actor::SetModal(enum Modal newstate, bool force)
 		default:
 			return;
 	}
+	enum Modal oldState = Modal.State;
 
 	if (Modal.State != newstate) {
 		Modal.FirstApply = true;
@@ -6688,6 +6695,8 @@ void Actor::SetModal(enum Modal newstate, bool force)
 	} else {
 		Modal.State = newstate;
 	}
+	// DCC: Detect traps and Stealth are the engine's (ActorDCCThief.cpp)
+	if (core->HasFeature(GFFlags::RULES_DCC) && oldState != Modal.State) DCCLeaveModal(oldState);
 }
 
 void Actor::SetModalSpell(enum Modal state, const ResRef& spell)
@@ -8115,6 +8124,13 @@ void Actor::UpdateModalState(ieDword gameTime)
 		}
 
 		Timers.lastAttack = 0;
+	}
+
+	// DCC: a thief's awareness bookkeeping, and the Detect traps and Stealth modes (ActorDCCThief.cpp)
+	if (core->HasFeature(GFFlags::RULES_DCC)) {
+		DCCUpdateAwareness(gameTime);
+		DCCNoticeTraps(gameTime);
+		if (DCCUpdateModal(gameTime, roundFraction)) return;
 	}
 
 	if (Modal.State == Modal::None && !Modal.LingeringCount) {

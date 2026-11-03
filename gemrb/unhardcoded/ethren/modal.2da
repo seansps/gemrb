@@ -1,0 +1,12 @@
+2DA V1.0
+*
+             SPELL      ACTION       STR_ON     STR_OFF     STR_FAIL    AOESPELL  REPEAT_MSG
+NONE         *          *            0          0           0           0         0
+BARDSONG     BARDSONG   BattleSong   -1         -1          -1          1         1
+DETECTTRAPS  *          FindTraps    -1         -1          -1          0         0
+STEALTH      *          Hide         -1         -1          -1          0         0
+TURNUNDEAD   TURN       Turn         -1         -1          -1          1         1
+
+# ethren: the shared table's, with the DCC Detect traps and Stealth modes run by the engine under
+# DCCRules (Scriptable/ActorDCCThief.cpp): no modal spell, and their own log lines instead of strings
+# from a dialog.tlk. Detect traps is for every character (docs/rules/traps.md, "Finding").

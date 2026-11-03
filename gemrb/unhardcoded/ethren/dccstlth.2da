@@ -1,0 +1,12 @@
+2DA V1.0
+*
+# ethren: hide in shadows by the light where the thief stands (docs/rules/classes.md, "Skill effects and
+# DCs"). LIGHT is the highest light level of the band (Map::GetLightLevel, 0-100: the area's lightmap
+# darkened by the time of day's tint), DC the hide's DC there, LABEL what the log says (_ for spaces).
+# The book's bands: 5 night, dim or shaded; 10 moderate cover or a full moon; 15 daylight in deep shadow;
+# 20 broad daylight with little cover. Rows from dark to bright; anything brighter takes the last row.
+         LIGHT  DC  LABEL
+DIM      30     5   dim
+MODERATE 50     10  moderate_light
+SHADOW   75     15  light,_in_shadow
+DAYLIGHT 100    20  broad_daylight

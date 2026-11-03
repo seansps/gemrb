@@ -11,6 +11,7 @@
 #include "../../core/DCC/Funnel.h"
 #include "../../core/DCC/Rules.h"
 #include "../../core/DCC/Skills.h"
+#include "../../core/DCC/Thief.h"
 #include "../../core/Streams/FileStream.h"
 #include "../../core/Streams/MemoryStream.h"
 #include "../../plugins/2DAImporter/2DAImporter.h"
@@ -1522,6 +1523,33 @@ TEST(DCC_Tables, OccupationSkills)
 	EXPECT_EQ(occupations.Find(97)->name, "Wizard's apprentice");
 	EXPECT_EQ(occupations.Find(19)->race, 4); // the dwarven apothecarist
 	EXPECT_EQ(occupations.Find(24), nullptr); // 23-24 is one row, 23
+}
+
+// traps and thief skills: the hide bands are the book's DCs (classes.md, "Skill effects and DCs"), and the
+// engine's empty game tables read
+TEST(DCC_Tables, StealthAndTraps)
+{
+	auto stealth = Open2DA("dccstlth");
+	ASSERT_TRUE(stealth);
+	StealthTable table;
+	ASSERT_TRUE(table.Load(*stealth));
+	EXPECT_EQ(table.Band(10).dc, 5);
+	EXPECT_EQ(table.Band(40).dc, 10);
+	EXPECT_EQ(table.Band(60).dc, 15);
+	EXPECT_EQ(table.Band(90).dc, 20);
+	EXPECT_EQ(table.Band(90).label, "broad daylight");
+	auto traps = Open2DA("dcctrap");
+	ASSERT_TRUE(traps);
+	TrapTable trapTable;
+	EXPECT_TRUE(trapTable.Load(*traps));
+	auto floor = Open2DA("dccfloor");
+	ASSERT_TRUE(floor);
+	FloorTable floors;
+	EXPECT_TRUE(floors.LoadRegions(*floor));
+	auto area = Open2DA("dccarea");
+	ASSERT_TRUE(area);
+	EXPECT_TRUE(floors.LoadAreas(*area));
+	EXPECT_EQ(floors.AreaDC("AR0100"), FLOOR_DC_DEFAULT);
 }
 }
 }

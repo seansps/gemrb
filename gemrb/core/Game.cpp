@@ -23,6 +23,7 @@
 #include "Spell.h"
 #include "TableMgr.h"
 
+#include "DCC/Thief.h"
 #include "GUI/GameControl.h"
 #include "GameScript/GSUtils.h"
 #include "GameScript/GameScript.h"
@@ -510,6 +511,14 @@ int Game::JoinParty(Actor* actor, int join)
 	PCs.push_back(actor);
 	if (!actor->InParty) {
 		actor->InParty = (ieByte) (size + 1);
+	}
+	// DCC: a new character in a party slot hasn't rolled for any trap or lock yet (the loaded areas;
+	// docs/rules/traps.md, "Who has rolled")
+	if (core->HasFeature(GFFlags::RULES_DCC) && (join & JP_JOIN)) {
+		uint16_t bit = DCC::TrapSlotBit(actor->InParty);
+		for (Map* map : Maps) {
+			map->DCCForgetSlot(bit);
+		}
 	}
 
 	if (join & (JP_INITPOS | JP_SELECT)) {

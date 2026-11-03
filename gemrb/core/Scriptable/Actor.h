@@ -32,6 +32,7 @@
 #include "DCC/Luck.h"
 #include "DCC/Magic.h"
 #include "DCC/Skills.h"
+#include "DCC/Thief.h"
 #include "Scriptable/Movable.h"
 #include "Scriptable/PCStatStruct.h"
 
@@ -46,6 +47,7 @@ namespace GemRB {
 class Action;
 class Animation;
 class DataFileMgr;
+class Highlightable;
 class Map;
 enum class Feat : uint8_t;
 
@@ -909,6 +911,78 @@ public:
 	static Actor* DCCBestSkillRoller(const Map* area, const DCC::SkillTags& tags, int ability, int dc, int situational = 0);
 	/** the last skill check anyone rolled (not saved) */
 	static const DCC::SkillCheckResult& DCCLastSkillCheck();
+
+	// DCC traps and thief skills in play (ActorDCCThief.cpp; docs/rules/traps.md, classes.md)
+	using DCCThiefDone = std::function<void(const DCC::ThiefCheckResult&)>;
+	/** carries an item dcctools.2da lists */
+	bool DCCHasThievesTools() const;
+	/** the armour check penalty of its armour and shield (0 or less; Table 3-3, dccfumdi.2da's CHECK) */
+	int DCCArmorCheckPenalty() const;
+	/** how it rolls a thief skill: a thief of level 1+ (with tools where needed) or a halfling's sneak
+	 * and hide with the class bonus; traps as anyone (d20 + the ability); the other skills by the
+	 * occupation rules (d20 trained, d10 + 2, d10) */
+	DCC::ThiefPlan DCCThiefPlan(DCC::ThiefSkill skill, int dc, DCC::Ability ability, int situational = 0, int dwarf = 0) const;
+	/** rolls a thief skill on its dice (DCCDie): Luck by the policy unless SKILL_NO_LUCK; a SKILL_DEADLY
+	 * failure asks a party member who pauses on key rolls (with ask; done then comes later); the log
+	 * line names the roll and its parts ("Vex hides in shadows: 9 +3 +1 Agi = 13 vs DC 10 (dim): unseen"),
+	 * nothing for a failed THIEF_SECRET roll. what names the object or the target */
+	DCC::ThiefCheckResult DCCThiefCheck(DCC::ThiefSkill skill, int dc, const std::string& dcLabel, DCC::Ability ability, uint32_t flags = 0,
+					    const String& what = String(), int situational = 0, int dwarf = 0, bool ask = false,
+					    const DCCThiefDone& done = nullptr);
+	/** the last thief skill check anyone rolled (not saved) */
+	static const DCC::ThiefCheckResult& DCCLastThiefCheck();
+	/** the DCC Detect traps and Stealth modes, each tick from UpdateModalState; false for other modes */
+	bool DCCUpdateModal(ieDword gameTime, int roundFraction);
+	/** a searcher's rolls for every hidden trap within 20' of its outline and in sight */
+	void DCCSearchTraps();
+	/** the party member in area (alive) with the lowest Luck; with a region, only those inside it (a trap
+	 * that catches only some catches the lowest Luck, traps.md); party order on ties */
+	static Actor* DCCLowestLuck(const Map* area, const Highlightable* region);
+	/** a party member near a trap with a notice line (dcctrap.2da) says it, once per trap */
+	void DCCNoticeTraps(ieDword gameTime);
+	/** hide in shadows by the light and sneak silently by the floor where it stands: rolled on entering
+	 * Stealth and again on a new DC (force: both now) */
+	void DCCUpdateStealth(bool force);
+	/** Stealth ends (attacking, being hit, the toggle) */
+	void DCCEndStealth(const char16_t* why);
+	/** in Stealth with a successful hide in shadows */
+	bool DCCHidden() const;
+	/** the light DC and the floor DC where it stands */
+	int DCCHideDC(std::string* label = nullptr) const;
+	int DCCFloorDC() const;
+	struct DCCStealthState {
+		int hideDC = -1; // the DCs last rolled against (-1: not yet)
+		int floorDC = -1;
+		bool hidden = false; // hide in shadows passed
+		bool silent = false; // sneak silently passed
+		bool invisible = false; // the stealth's invisibility is applied
+	};
+	DCCStealthState dccStealth; // not saved: Stealth rolls again on load
+	/** backstab (classes.md, "Backstab, revised"): why target hasn't noticed this thief */
+	DCC::Unaware DCCBackstabUnaware(const Actor* target, bool targetFighting) const;
+	/** target has noticed this thief (attacked by it, or it saw the thief) */
+	void DCCMarkAware(const Actor* target, const char* why);
+	bool DCCAwareOf(const Actor* target) const;
+	/** attacked or was attacked in the last two rounds (in a fight) */
+	bool DCCInFight(ieDword now) const;
+	struct DCCAwareness {
+		bool aware = false;
+		ieDword lostSince = 0; // game time since it fights someone else or can't see the thief (0: not lost)
+	};
+	std::map<ieDword, DCCAwareness> dccAwareness; // per target (global ID), of this thief; not saved
+	ieDword dccBreakAwaySince = 0; // game time since no foe is in reach or after it (0: not broken away)
+	ieDword dccAttackedTime = 0; // game time a foe last swung at it
+	/** a thief's awareness bookkeeping, about once a second: who sees it, hiding again in a fight */
+	void DCCUpdateAwareness(ieDword gameTime);
+	/** pick pocket: the DC (-1 never: the target's IE_PICKPOCKET 255; 5 unaware, 20 fighting, else its
+	 * own or 10) */
+	int DCCPickPocketDC(const Actor* target) const;
+	/** pick pocket (the PickPockets action): true if something may be taken; a miss by 1-4 takes nothing
+	 * unnoticed, a natural 1 or a miss by 5+ is caught (the target turns hostile with turnHostile, and
+	 * gets PickPocketFailed) */
+	bool DCCPickPocket(Actor* target, bool turnHostile);
+	/** the SetModal hook: it left Detect traps or Stealth */
+	void DCCLeaveModal(enum Modal oldState);
 
 	// DCC spellcasting (M2.5, ActorDCCMagic.cpp)
 	/** the lists and settings that don't fit in stats: known spells (mercurial magic, manifestation,

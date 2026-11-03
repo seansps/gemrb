@@ -2465,6 +2465,7 @@ void GameScript::RemoveTraps(Scriptable* Sender, Holder<Action> parameters)
 	}
 
 	unsigned int distance;
+	Point edge;
 	const Point* p;
 	Door* door = NULL;
 	Container* container = NULL;
@@ -2496,6 +2497,12 @@ void GameScript::RemoveTraps(Scriptable* Sender, Holder<Action> parameters)
 			// need to find a point using trigger->outline
 			p = &trigger->Pos;
 			distance = Distance(tar, Sender);
+			// DCC: walk up to the outline, not into the trap
+			if (core->HasFeature(GFFlags::RULES_DCC)) {
+				edge = trigger->DCCNearestPoint(Sender->Pos);
+				p = &edge;
+				distance = Distance(edge, Sender);
+			}
 			flags = trigger->Trapped && trigger->TrapDetected && trigger->CanDetectTrap();
 			actor->SetDisarmingTrap(trigger->GetGlobalID());
 			break;
@@ -2527,7 +2534,8 @@ void GameScript::RemoveTraps(Scriptable* Sender, Holder<Action> parameters)
 		MoveNearerTo(Sender, *p, MAX_OPERATING_DISTANCE, MNT::None);
 		return;
 	}
-	Sender->SetWait(1);
+	// DCC: a disarm takes a round (traps.md)
+	Sender->SetWait(core->HasFeature(GFFlags::RULES_DCC) && flags ? core->Time.round_size : 1);
 	Sender->ReleaseCurrentAction();
 }
 
@@ -4716,7 +4724,15 @@ void GameScript::PickPockets(Scriptable* Sender, Holder<Action> parameters)
 	int skill = snd->GetStat(IE_PICKPOCKET);
 	int tgt = scr->GetStat(IE_PICKPOCKET);
 	int check;
-	if (core->HasFeature(GFFlags::RULES_3ED)) {
+	if (core->HasFeature(GFFlags::RULES_DCC)) {
+		// DCC: d20 + pick pocket + Agi (or the occupation rules) vs the target's DC; a miss by 1-4 takes
+		// nothing unnoticed, a natural 1 or a miss by 5 or more is caught (ActorDCCThief.cpp)
+		if (!snd->DCCPickPocket(scr, turnHostile)) {
+			Sender->ReleaseCurrentAction();
+			return;
+		}
+		check = 0;
+	} else if (core->HasFeature(GFFlags::RULES_3ED)) {
 		skill = snd->GetSkill(IE_PICKPOCKET);
 		int roll = core->Roll(1, 20, 0);
 		int level = scr->GetXPLevel(true);
@@ -6067,6 +6083,11 @@ void GameScript::Hide(Scriptable* Sender, Holder<Action> /*parameters*/)
 		return;
 	}
 
+	// DCC: Stealth rolls hide in shadows and sneak silently itself (ActorDCCThief.cpp), never opposed
+	if (core->HasFeature(GFFlags::RULES_DCC)) {
+		actor->SetModal(Modal::Stealth, true);
+		return;
+	}
 	if (actor->TryToHide()) {
 		actor->SetModal(Modal::Stealth);
 	}

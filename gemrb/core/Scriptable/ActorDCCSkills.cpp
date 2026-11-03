@@ -21,6 +21,7 @@
 #include "DCC/Rules.h"
 #include "DCC/Skills.h"
 #include "DCC/Stats.h"
+#include "DCC/Thief.h"
 #include "GUI/GameControl.h"
 #include "Logging/Logging.h"
 #include "Net/NetSession.h"
@@ -126,8 +127,12 @@ SkillPlan Actor::DCCSkillPlan(const SkillTags& tags, int ability, int dc, int si
 	// born under the loom: the frozen Luck modifier on skill checks
 	in.augur = GetDCCAugurBonus(AugurRoll::SkillCheck);
 	in.thiefSkill = SkillThiefOverlap(table, tags.bits);
+	// the armour check penalty on physical checks (equipment.md: Str and Agi)
+	if (PhysicalAbility(CheckAbility(tags, ability))) in.armor = DCCArmorCheckPenalty();
 	int level = Signed(BaseStats[IE_LEVEL]);
-	if (rules && in.thiefSkill >= 0 && level >= 1 && BaseStats[IE_CLASS] == static_cast<ieDword>(ClassID::Thief)) {
+	// a thief's bonus where the skill needs thieves' tools only with them (classes.md)
+	bool tooled = in.thiefSkill < 0 || !SkillNeedsTools(static_cast<ThiefSkill>(in.thiefSkill)) || DCCHasThievesTools();
+	if (rules && in.thiefSkill >= 0 && level >= 1 && BaseStats[IE_CLASS] == static_cast<ieDword>(ClassID::Thief) && tooled) {
 		in.thief = true;
 		in.thiefBonus = rules->thiefSkills.Bonus(AlignmentFromIE(GetStat(IE_ALIGNMENT)), level, static_cast<ThiefSkill>(in.thiefSkill));
 	}
@@ -179,6 +184,7 @@ static String SkillLine(const Actor* actor, const SkillCheckResult& r)
 	Part(line, r.plan.thiefBonus, u"thief");
 	Part(line, r.plan.augur, u"augur");
 	Part(line, r.plan.situational, u"situation");
+	Part(line, r.plan.armor, u"armour");
 	Part(line, r.rollMod, u"groggy");
 	Part(line, r.luckBonus, u"Luck");
 	line += fmt::format(u" = {} vs DC {}: {}", r.total, r.dc, r.success ? u"success" : u"failure");

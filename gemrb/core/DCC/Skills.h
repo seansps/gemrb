@@ -83,6 +83,7 @@ enum SkillCheckFlags : uint32_t {
 	SKILL_NONE = 0,
 	SKILL_DEADLY = 1, // failure is a disaster: a key roll (the owner may be asked to burn Luck), and an "avoid disaster" policy burns too
 	SKILL_NO_LUCK = 2, // Luck can't help (like a Luck check)
+	SKILL_NO_THIEF = 0x80, // (the engine's own) a thief without the tools the skill needs rolls as anyone
 	SKILL_PARTY = 0x100 // (the engine's own) the best placed of the party rolls for everyone
 };
 
@@ -154,6 +155,7 @@ struct SkillPlanInput {
 	int abilityMod = 0; // the check's ability
 	int augur = 0; // born under the loom: the frozen Luck modifier on skill checks
 	int situational = 0;
+	int armor = 0; // the armour check penalty (0 or less) on a Str or Agi check (equipment.md: physical checks)
 	bool thief = false; // a thief of level 1+
 	int thiefBonus = 0; // its Table 1-9 bonus for the overlapped skill (thiefSkill)
 	int thiefSkill = -1; // the ThiefSkill the wanted tags overlap, -1 none (SkillTable::Plan fills it)
@@ -167,9 +169,10 @@ struct SkillPlan {
 	int abilityMod = 0;
 	int augur = 0;
 	int situational = 0;
+	int armor = 0; // the armour check penalty
 	uint32_t matched = 0; // the tags that trained it (or gave the familiarity)
 	bool capped = false; // trained by the occupation, but past its DC cap in a thief's skill
-	int Modifier() const { return familiarity + thiefBonus + abilityMod + augur + situational; }
+	int Modifier() const { return familiarity + thiefBonus + abilityMod + augur + situational + armor; }
 };
 
 /** how a character with known tags rolls a check (funnel.md, "Resolution rule"): ANYONE trains

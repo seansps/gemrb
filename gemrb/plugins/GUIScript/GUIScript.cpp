@@ -9091,6 +9091,353 @@ static PyObject* GemRB_DCCAddSkill(PyObject* /*self*/, PyObject* args)
 	Py_RETURN_FALSE;
 }
 
+// traps and thief skills in play
+static PyObject* DCCThiefPlanDict(const DCC::ThiefPlan& plan)
+{
+	PyObject* dict = PyDict_New();
+	PyDict_SetItemString(dict, "Roller", DecRef(PyUnicode_FromString, DCC::ThiefRollerName(plan.roller)));
+	DictInt(dict, "Die", plan.die);
+	PyDict_SetItemString(dict, "Ability", DecRef(PyUnicode_FromString, DCCAbilityNames[static_cast<int>(plan.ability) % DCC::ABILITY_COUNT]));
+	DictInt(dict, "Skill", plan.skill);
+	DictInt(dict, "Familiarity", plan.familiarity);
+	DictInt(dict, "AbilityMod", plan.abilityMod);
+	DictInt(dict, "Augur", plan.augur);
+	DictInt(dict, "Armor", plan.armor);
+	DictInt(dict, "Dwarf", plan.dwarf);
+	DictInt(dict, "Situational", plan.situational);
+	DictInt(dict, "Modifier", plan.Modifier());
+	return dict;
+}
+
+static PyObject* DCCThiefResultDict(const DCC::ThiefCheckResult& r)
+{
+	PyObject* dict = PyDict_New();
+	DictInt(dict, "Roller", long(r.roller));
+	DictInt(dict, "Skill", static_cast<int>(r.skill));
+	PyObject* plan = DCCThiefPlanDict(r.plan);
+	PyDict_SetItemString(dict, "Plan", plan);
+	Py_DecRef(plan);
+	DictInt(dict, "DC", r.dc);
+	PyDict_SetItemString(dict, "Label", DecRef(PyUnicode_FromString, r.dcLabel.c_str()));
+	DictInt(dict, "Natural", r.natural);
+	DictInt(dict, "RollMod", r.rollMod);
+	DictInt(dict, "Total", r.total);
+	DictInt(dict, "Success", r.success);
+	DictInt(dict, "Outcome", static_cast<int>(r.outcome));
+	DictInt(dict, "Cursed", r.cursed);
+	DictInt(dict, "LuckBurned", r.luckBurned);
+	DictInt(dict, "LuckBonus", r.luckBonus);
+	DictInt(dict, "Waiting", r.waiting);
+	return dict;
+}
+
+static const char* const DCCAbilityKeys[] = { "STR", "AGI", "STA", "PER", "INT", "LUCK" };
+
+// the skill's own ability unless one is named (0 the skill's, 1 Str .. 6 Luck, as dccabil.ids)
+static DCC::Ability DCCThiefAbility(int skill, int code)
+{
+	if (code >= 1 && code <= DCC::ABILITY_COUNT) return static_cast<DCC::Ability>(code - 1);
+	DCC::Ability ability = DCC::Ability::Agi;
+	if (!DCC::ThiefSkillAbility(static_cast<DCC::ThiefSkill>(skill), ability)) ability = DCC::Ability::Agi;
+	return ability;
+}
+
+PyDoc_STRVAR(GemRB_GetDCCThiefPlan__doc,
+	     "===== GetDCCThiefPlan =====\n\
+\n\
+**Prototype:** GemRB.GetDCCThiefPlan (globalID, skill, dc[, ability])\n\
+\n\
+**Description:** How a character rolls a thief skill (DCC::ThiefSkill: 1 sneak, 2 hide, 3 pick \n\
+pocket, 4 climb, 5 pick lock, 6 find trap, 7 disable trap): Roller ('thief', 'halfling', \n\
+'anyone', 'trained d20', 'familiar d10+2', 'untrained d10'), Die, Ability, Skill, Familiarity, \n\
+AbilityMod, Augur, Armor, Dwarf, Situational, Modifier. ability 0 is the skill's own.\n\
+\n\
+**Return value:** dict");
+
+static PyObject* GemRB_GetDCCThiefPlan(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int skill;
+	int dc;
+	int ability = 0;
+	PARSE_ARGS(args, "iii|i", &globalID, &skill, &dc, &ability);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	if (skill < 0 || skill >= DCC::THIEF_SKILL_COUNT) return RuntimeError("Unknown thief skill!\n");
+	return DCCThiefPlanDict(actor->DCCThiefPlan(static_cast<DCC::ThiefSkill>(skill), dc, DCCThiefAbility(skill, ability)));
+}
+
+PyDoc_STRVAR(GemRB_DCCThiefCheck__doc,
+	     "===== DCCThiefCheck =====\n\
+\n\
+**Prototype:** GemRB.DCCThiefCheck (globalID, skill, dc[, ability[, flags[, label]]])\n\
+\n\
+**Description:** Rolls a thief skill at once on the character's dice (DCCForceDice), with its \n\
+log line; flags as dccskfl.ids (2 no Luck) plus 0x200 secret (a failure logs nothing). Host or \n\
+single player.\n\
+\n\
+**Return value:** dict (Natural, Total, DC, Success, Outcome 0 success 1 miss 2 botch, Plan, ...), \n\
+None on a client");
+
+static PyObject* GemRB_DCCThiefCheck(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int skill;
+	int dc;
+	int ability = 0;
+	int flags = 0;
+	const char* label = "";
+	PARSE_ARGS(args, "iii|iis", &globalID, &skill, &dc, &ability, &flags, &label);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	const NetSession* net = core->GetNetSession();
+	if (net && !net->IsHost()) Py_RETURN_NONE;
+	if (skill < 0 || skill >= DCC::THIEF_SKILL_COUNT) return RuntimeError("Unknown thief skill!\n");
+	return DCCThiefResultDict(actor->DCCThiefCheck(static_cast<DCC::ThiefSkill>(skill), dc, label ? label : "", DCCThiefAbility(skill, ability), uint32_t(flags)));
+}
+
+PyDoc_STRVAR(GemRB_GetDCCLastThiefCheck__doc,
+	     "===== GetDCCLastThiefCheck =====\n\
+\n\
+**Prototype:** GemRB.GetDCCLastThiefCheck ()\n\
+\n\
+**Description:** The last thief skill check anyone rolled (a find, disarm, lock, pocket, hide \n\
+or sneak), as DCCThiefCheck returns it.\n\
+\n\
+**Return value:** dict");
+
+static PyObject* GemRB_GetDCCLastThiefCheck(PyObject* /*self*/, PyObject* /*args*/)
+{
+	return DCCThiefResultDict(Actor::DCCLastThiefCheck());
+}
+
+PyDoc_STRVAR(GemRB_GetDCCTrap__doc,
+	     "===== GetDCCTrap =====\n\
+\n\
+**Prototype:** GemRB.GetDCCTrap (scriptName)\n\
+\n\
+**Description:** A region, door or container of the current area with that script name, its \n\
+trap and lock: Type ('region', 'door', 'container'), Trapped, Detected, FindDC, DisarmDC, \n\
+Locked, LockDC, Flags, Found, Disarm and Lock (the party slots that rolled, a bit each), Notice \n\
+(said), Kind, DisarmAbility, Deadly, XP (dcctrap.2da), ID (its global ID).\n\
+\n\
+**Return value:** dict, None if there is none");
+
+// a region, door or container of the current area by script name, its lock DC and flags
+static Highlightable* DCCFindTrapObject(const Map* map, const char* name, const char*& type, int& lockDC, ieDword& flags)
+{
+	ieVariable wanted(name);
+	for (const auto& ip : map->TMap->GetInfoPoints()) {
+		if (ip->GetScriptName() != wanted) continue;
+		type = "region";
+		flags = ip->Flags;
+		return ip.get();
+	}
+	for (const auto& door : map->TMap->GetDoors()) {
+		if (door->GetScriptName() != wanted) continue;
+		type = "door";
+		lockDC = int(door->LockDifficulty);
+		flags = door->Flags;
+		return door.get();
+	}
+	for (const auto& container : map->TMap->GetContainers()) {
+		if (container->GetScriptName() != wanted) continue;
+		type = "container";
+		lockDC = int(container->LockDifficulty);
+		flags = container->Flags;
+		return container.get();
+	}
+	return nullptr;
+}
+
+static PyObject* GemRB_GetDCCTrap(PyObject* /*self*/, PyObject* args)
+{
+	char* name = nullptr;
+	PARSE_ARGS(args, "s", &name);
+	GET_GAME();
+	const Map* map = game->GetCurrentArea();
+	if (!map) Py_RETURN_NONE;
+	const char* type = "";
+	int lockDC = 0;
+	ieDword flags = 0;
+	const Highlightable* object = DCCFindTrapObject(map, name, type, lockDC, flags);
+	if (!object) Py_RETURN_NONE;
+	PyObject* dict = PyDict_New();
+	PyDict_SetItemString(dict, "Type", DecRef(PyUnicode_FromString, type));
+	DictInt(dict, "ID", long(object->GetGlobalID()));
+	DictInt(dict, "Trapped", object->Trapped);
+	DictInt(dict, "Detected", object->TrapDetected);
+	DictInt(dict, "FindDC", object->TrapDetectionDiff);
+	DictInt(dict, "DisarmDC", object->TrapRemovalDiff);
+	DictInt(dict, "Locked", object->IsLocked());
+	DictInt(dict, "LockDC", lockDC);
+	DictInt(dict, "Flags", long(flags));
+	DictInt(dict, "Found", object->dccRolls.found);
+	DictInt(dict, "Disarm", object->dccRolls.disarm);
+	DictInt(dict, "Lock", object->dccRolls.lock);
+	DictInt(dict, "Notice", (object->dccRolls.flags & Highlightable::DCC_NOTICE_SAID) != 0);
+	const DCC::RulesData* rules = core->GetDCCRules();
+	const DCC::TrapInfo* info = rules ? rules->traps.Find(map->GetScriptName().c_str(), object->GetScriptName().c_str()) : nullptr;
+	DCC::TrapInfo defaults;
+	if (!info) info = &defaults;
+	PyDict_SetItemString(dict, "Kind", DecRef(PyUnicode_FromString, DCC::TrapKindName(info->kind)));
+	PyDict_SetItemString(dict, "DisarmAbility", DecRef(PyUnicode_FromString, info->disarmable ? DCCAbilityKeys[static_cast<int>(info->disarm)] : "NONE"));
+	DictInt(dict, "Deadly", info->deadly);
+	DictInt(dict, "XP", info->xp);
+	return dict;
+}
+
+PyDoc_STRVAR(GemRB_DCCSetTrapRolls__doc,
+	     "===== DCCSetTrapRolls =====\n\
+\n\
+**Prototype:** GemRB.DCCSetTrapRolls (scriptName, found, disarm, lock)\n\
+\n\
+**Description:** Sets which party slots have rolled to find, disarm and pick a region, door or \n\
+container of the current area (a bit each, slot 1 is bit 0), for tests of the area save.\n\
+\n\
+**Return value:** bool (False if there is no such object)");
+
+static PyObject* GemRB_DCCSetTrapRolls(PyObject* /*self*/, PyObject* args)
+{
+	char* name = nullptr;
+	int found;
+	int disarm;
+	int lock;
+	PARSE_ARGS(args, "siii", &name, &found, &disarm, &lock);
+	GET_GAME();
+	const Map* map = game->GetCurrentArea();
+	if (!map) Py_RETURN_FALSE;
+	const char* type = "";
+	int lockDC = 0;
+	ieDword flags = 0;
+	Highlightable* object = DCCFindTrapObject(map, name, type, lockDC, flags);
+	if (!object) Py_RETURN_FALSE;
+	object->dccRolls.found = uint16_t(found);
+	object->dccRolls.disarm = uint16_t(disarm);
+	object->dccRolls.lock = uint16_t(lock);
+	object->DCCRollsChanged();
+	Py_RETURN_TRUE;
+}
+
+PyDoc_STRVAR(GemRB_GetDCCStealth__doc,
+	     "===== GetDCCStealth =====\n\
+\n\
+**Prototype:** GemRB.GetDCCStealth (globalID[, x, y])\n\
+\n\
+**Description:** A character's Detect traps and Stealth: Mode (the modal state: 2 detect traps, \n\
+3 stealth), Hidden and Silent (the last hide and sneak rolls passed), HideDC and FloorDC (rolled \n\
+against; -1 not yet), Invisible (Stealth's invisibility is on), and where it stands: Light \n\
+(0-100), LightDC, LightLabel, Floor (the floor DC), Speed (the walk scale, 0 can't move); \n\
+with x and y, Light, LightDC and LightLabel are those of that point.\n\
+\n\
+**Return value:** dict");
+
+static PyObject* GemRB_GetDCCStealth(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int x = -1;
+	int y = -1;
+	PARSE_ARGS(args, "i|ii", &globalID, &x, &y);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	PyObject* dict = PyDict_New();
+	DictInt(dict, "Mode", static_cast<int>(actor->Modal.State));
+	DictInt(dict, "Hidden", actor->dccStealth.hidden);
+	DictInt(dict, "Silent", actor->dccStealth.silent);
+	DictInt(dict, "HideDC", actor->dccStealth.hideDC);
+	DictInt(dict, "FloorDC", actor->dccStealth.floorDC);
+	DictInt(dict, "Invisible", actor->dccStealth.invisible);
+	const Map* map = actor->GetCurrentArea();
+	Point where = x >= 0 && y >= 0 ? Point(x, y) : actor->Pos;
+	int light = map ? int(map->GetLightLevel(where)) : 100;
+	DictInt(dict, "Light", light);
+	std::string label;
+	const DCC::RulesData* rules = core->GetDCCRules();
+	static const DCC::StealthTable defaults;
+	const DCC::LightBand& band = (rules ? rules->stealth : defaults).Band(light);
+	label = band.label;
+	DictInt(dict, "LightDC", band.dc);
+	PyDict_SetItemString(dict, "LightLabel", DecRef(PyUnicode_FromString, label.c_str()));
+	DictInt(dict, "Floor", actor->DCCFloorDC());
+	DictInt(dict, "Speed", actor->CalculateSpeed(false));
+	return dict;
+}
+
+PyDoc_STRVAR(GemRB_GetDCCLowestLuck__doc,
+	     "===== GetDCCLowestLuck =====\n\
+\n\
+**Prototype:** GemRB.GetDCCLowestLuck ([regionName])\n\
+\n\
+**Description:** The party member of the current area with the lowest Luck (the scripts' \n\
+DCCLowestLuck object), only those inside the region if one is named.\n\
+\n\
+**Return value:** the global ID, 0 for nobody");
+
+static PyObject* GemRB_GetDCCLowestLuck(PyObject* /*self*/, PyObject* args)
+{
+	const char* name = nullptr;
+	PARSE_ARGS(args, "|s", &name);
+	GET_GAME();
+	const Map* map = game->GetCurrentArea();
+	if (!map) return PyLong_FromLong(0);
+	const InfoPoint* region = name && *name ? map->TMap->GetInfoPoint(ieVariable(name)) : nullptr;
+	const Actor* actor = Actor::DCCLowestLuck(map, region);
+	return PyLong_FromLong(actor ? long(actor->GetGlobalID()) : 0);
+}
+
+PyDoc_STRVAR(GemRB_DCCKeepRandom__doc,
+	     "===== DCCKeepRandom =====\n\
+\n\
+**Prototype:** GemRB.DCCKeepRandom (restore)\n\
+\n\
+**Description:** For seeded autotests: keeps the state of the engine's random numbers (restore \n\
+0), or puts the kept state back (1), so a scenario added in the middle doesn't change the dice \n\
+of the ones after it.\n\
+\n\
+**Return value:** N/A");
+
+static PyObject* GemRB_DCCKeepRandom(PyObject* /*self*/, PyObject* args)
+{
+	int restore = 0;
+	PARSE_ARGS(args, "i", &restore);
+	static std::mt19937_64 kept;
+	static bool have = false;
+	if (restore) {
+		if (have) RNG::getInstance().SetState(kept);
+	} else {
+		kept = RNG::getInstance().GetState();
+		have = true;
+	}
+	Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(GemRB_GetDCCAware__doc,
+	     "===== GetDCCAware =====\n\
+\n\
+**Prototype:** GemRB.GetDCCAware (thiefID, targetID)\n\
+\n\
+**Description:** Whether a target has noticed a thief (backstab: attacked by it, or saw it; \n\
+until it loses track of it). And Unaware: why it hasn't, as the next attack would see it now \n\
+('hidden', 'unheard', 'unseen', 'not yet fighting', 'aware').\n\
+\n\
+**Return value:** dict (Aware, Unaware)");
+
+static PyObject* GemRB_GetDCCAware(PyObject* /*self*/, PyObject* args)
+{
+	int globalID;
+	int targetID;
+	PARSE_ARGS(args, "ii", &globalID, &targetID);
+	GET_GAME();
+	GET_ACTOR_GLOBAL();
+	const Actor* target = game->GetActorByGlobalID(targetID);
+	if (!target) return RuntimeError("Target not found!\n");
+	PyObject* dict = PyDict_New();
+	DictInt(dict, "Aware", actor->DCCAwareOf(target));
+	bool fighting = target->DCCInFight(game->GameTime);
+	PyDict_SetItemString(dict, "Unaware", DecRef(PyUnicode_FromString, DCC::UnawareText(actor->DCCBackstabUnaware(target, fighting))));
+	return dict;
+}
+
 PyDoc_STRVAR(GemRB_DCCCast__doc,
 	     "===== DCCCast =====\n\
 \n\
@@ -14307,7 +14654,9 @@ static PyObject* GemRB_SetModalState(PyObject* /*self*/, PyObject* args)
 
 	actor->SetModal((Modal) state, false);
 	actor->SetModalSpell((Modal) state, ResRefFromPy(spell));
-	if (actor->ModalSpellSkillCheck()) {
+	// DCC: Detect traps and Stealth have no modal spell; the engine rolls them on its next tick
+	bool dccMode = core->HasFeature(GFFlags::RULES_DCC) && (actor->Modal.State == Modal::DetectTraps || actor->Modal.State == Modal::Stealth);
+	if (!dccMode && actor->ModalSpellSkillCheck()) {
 		actor->ApplyModal(actor->Modal.Spell); // force immediate effect
 	}
 
@@ -16143,6 +16492,15 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(DCCPartySkillCheck, METH_VARARGS),
 	METHOD(GetDCCBestSkillRoller, METH_VARARGS),
 	METHOD(GetDCCLastSkillCheck, METH_NOARGS),
+	METHOD(GetDCCThiefPlan, METH_VARARGS),
+	METHOD(DCCThiefCheck, METH_VARARGS),
+	METHOD(GetDCCLastThiefCheck, METH_NOARGS),
+	METHOD(GetDCCTrap, METH_VARARGS),
+	METHOD(DCCSetTrapRolls, METH_VARARGS),
+	METHOD(GetDCCStealth, METH_VARARGS),
+	METHOD(GetDCCAware, METH_VARARGS),
+	METHOD(DCCKeepRandom, METH_VARARGS),
+	METHOD(GetDCCLowestLuck, METH_VARARGS),
 	METHOD(DCCAddSkill, METH_VARARGS),
 	METHOD(DCCSetAlignment, METH_VARARGS),
 	METHOD(DCCKillFor, METH_VARARGS),
