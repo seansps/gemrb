@@ -51,6 +51,7 @@
 #include "DCC/Luck.h"
 #include "DCC/Rules.h"
 #include "DCC/Stats.h"
+#include "DCC/Thief.h"
 #include "GUI/GameControl.h"
 #include "GameScript/GSUtils.h"
 #include "Logging/Logging.h"
@@ -629,27 +630,28 @@ void Actor::DCCAttack(Actor* target, bool viaProjectile)
 		}
 	}
 
-	// the thief's backstab: from behind a foe busy with another, or against an unaware one; the
-	// backstab bonus, and a hit is a crit (with a melee weapon: no fists, no missiles)
+	// the thief's backstab (classes.md, "Backstab, revised"): only against a target that hasn't noticed
+	// the thief (hidden, unheard or unseen, or not yet fighting with its back to it); the backstab bonus,
+	// and a hit is a crit. Any melee weapon but fists; at range only one with backstab dice (a thrown dagger)
 	DCCSwing& main = swings[0];
 	bool thief = character && BaseStats[IE_CLASS] == static_cast<ieDword>(ClassID::Thief);
-	// from behind: the target is fighting another foe in melee right now
-	bool busyElsewhere = false;
-	for (const auto& foe : target->dccEngaged) {
-		if (foe.first != GetGlobalID() && now <= foe.second + window) busyElsewhere = true;
-	}
-	bool fromBehind = targetInFight && IsBehind(target) && busyElsewhere;
 	bool unaware = Surprised(targetInFight, aware);
-	if (melee && !inventory.FistsEquipped() && BackstabApplies(thief, Signed(BaseStats[IE_LEVEL]), fromBehind, unaware, target->GetStat(IE_DISABLEBACKSTAB))) {
+	const WeaponRow* backstabRow = WeaponRowFor(this, *main.wi);
+	bool backstabDice = backstabRow && !backstabRow->backstab.IsNone();
+	Unaware why = thief ? DCCBackstabUnaware(target, targetInFight) : Unaware::No;
+	if (BackstabWeapon(melee, inventory.FistsEquipped(), backstabDice) &&
+	    BackstabApplies(thief, Signed(BaseStats[IE_LEVEL]), false, why != Unaware::No, target->GetStat(IE_DISABLEBACKSTAB))) {
 		main.backstab = true;
 		main.in.autoCrit = true;
 		main.in.modifier += BackstabBonus(this);
-		const WeaponRow* row = WeaponRowFor(this, *main.wi);
-		if (row && !row->backstab.IsNone() && !main.subdual) main.damageDice = row->backstab;
-		Feedback(fmt::format(u"{} backstabs {} ({}): {:+} to hit, a hit is a crit", Name(this), Name(target), fromBehind ? u"from behind" : u"unaware",
-				     BackstabBonus(this)),
+		if (backstabDice && !main.subdual) main.damageDice = backstabRow->backstab;
+		Feedback(fmt::format(u"{} backstabs {} ({}): {:+} to hit, a hit is a crit", Name(this), Name(target), Widen(UnawareText(why)), BackstabBonus(this)),
 			 FT_COMBAT);
 	}
+	// the target knows the thief now, hit or miss; attacking ends Stealth (classes.md)
+	if (thief) DCCMarkAware(target, "attacked by it");
+	target->dccAttackedTime = now;
+	if (Modal.State == Modal::Stealth) DCCEndStealth(u"attacks");
 
 	// a charge (declared): +2 to hit and -2 AC for a round, with a run-up of half the speed
 	if ((options & OPT_CHARGE) && melee) {

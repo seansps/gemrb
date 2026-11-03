@@ -28,6 +28,7 @@
 #include "DCC/Learning.h"
 #include "DCC/Magic.h"
 #include "DCC/Skills.h"
+#include "DCC/Thief.h"
 
 #include <array>
 #include <map>
@@ -92,6 +93,10 @@ public:
 	HeldTable held; // weapons held in both hands though one-handed in DCC, for their animation (dcchold.2da)
 	SkillTable skills; // M3.4: the occupation skill tags (dccskill.2da)
 	OccupationTable occupations; // M3.4: Table 1-3's names and tags (dccoccup.2da)
+	TrapTable traps; // the traps' kind, disarm ability, deadly, XP, notice line (dcctrap.2da)
+	StealthTable stealth; // hide in shadows by the light (dccstlth.2da)
+	FloorTable floors; // sneak silently by the floor (dccarea.2da's FLOOR, dccfloor.2da)
+	std::set<std::string> thievesTools; // the items that count as thieves' tools (dcctools.2da, upper case)
 
 	/** loads every table through gamedata; logs and returns false if one is missing or bad */
 	bool Load();

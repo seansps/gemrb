@@ -170,6 +170,7 @@ bool Highlightable::TryBashLock(Actor* actor, ieWord lockDifficulty, HCStrings f
 
 bool Highlightable::TryPickLock(Actor* actor, ieWord lockDifficulty, ieStrRef customFailStr, HCStrings failStr)
 {
+	if (core->HasFeature(GFFlags::RULES_DCC)) return DCCTryPickLock(actor, lockDifficulty, customFailStr, failStr);
 	if (lockDifficulty == 100) {
 		if (int(customFailStr) && customFailStr != ieStrRef::INVALID) {
 			displaymsg->DisplayStringName(customFailStr, GUIColors::XPCHANGE, actor, STRING_FLAGS::SOUND | STRING_FLAGS::SPEECH);
@@ -217,6 +218,12 @@ void Highlightable::DetectTrap(int skill, ieDword actorID)
 	if (!CanDetectTrap()) return;
 	if (TrapDetected) return;
 	if (!Scripts[0]) return;
+	// DCC: no passive look (traps.md); only a sure detection (a spell, the debug key) finds a trap here,
+	// searchers roll through DCCDetectTrap
+	if (core->HasFeature(GFFlags::RULES_DCC)) {
+		if (skill == 256) DCCRevealTrap(actorID);
+		return;
+	}
 	if (skill >= 100 && skill != 256) skill = 100;
 
 	int check = 0;
@@ -270,6 +277,10 @@ void Highlightable::SetTrapDetected(int detected)
 void Highlightable::TryDisarm(Actor* actor)
 {
 	if (!Trapped || !TrapDetected) return;
+	if (core->HasFeature(GFFlags::RULES_DCC)) {
+		DCCTryDisarm(actor);
+		return;
+	}
 
 	int skill = actor->GetStat(IE_TRAPS);
 	int roll = 0;

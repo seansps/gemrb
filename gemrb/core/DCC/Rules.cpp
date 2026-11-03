@@ -148,6 +148,24 @@ bool RulesData::Load()
 	if (!table || !skills.Load(*table)) fail("dccskill");
 	table = gamedata->LoadTable("dccoccup");
 	if (!table || !occupations.Load(*table)) fail("dccoccup");
+	// traps and thief skills in play: a game without these tables has no trap data, the default light
+	// bands, floors of DC 10 and no thieves' tools
+	table = gamedata->LoadTable("dcctrap", true);
+	if (table && !traps.Load(*table)) fail("dcctrap");
+	table = gamedata->LoadTable("dccstlth", true);
+	if (table && !stealth.Load(*table)) fail("dccstlth");
+	table = gamedata->LoadTable("dccarea", true);
+	if (table && !floors.LoadAreas(*table)) fail("dccarea");
+	table = gamedata->LoadTable("dccfloor", true);
+	if (table && !floors.LoadRegions(*table)) fail("dccfloor");
+	table = gamedata->LoadTable("dcctools", true);
+	if (table) {
+		for (TableMgr::index_t row = 0; row < table->GetRowCount(); ++row) {
+			std::string name = table->GetRowName(row);
+			std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return std::toupper(c); });
+			thievesTools.insert(name);
+		}
+	}
 	return ok;
 }
 

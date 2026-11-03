@@ -17,6 +17,14 @@
 //   DCCPartySkillCheck(S:Tags*,I:Ability*DCCAbil,I:DC*,I:Flags*DCCSkFl,S:Variable*)
 //   DCCAddSkill(O:Object*,S:Tag*)                             an acquired tag (at most two)
 // The token <DCCSKILLER> names who rolled the last check, for the dialog's next line.
+//
+// Traps (docs/rules/traps.md):
+//   DCCRevealTrap(O:Object*)      the trap (region, door or container) is found for the party: its
+//                                 outline shows and it gets Detected, as if a searcher had found it
+//   object DCCLowestLuck(...)     the party member in the caller's area with the lowest Luck; called
+//                                 from a region (a trap), only those inside its outline
+
+#include "ie_stats.h"
 
 #include "Game.h"
 #include "Interface.h"
@@ -28,6 +36,7 @@
 #include "GameScript/Matching.h"
 #include "Logging/Logging.h"
 #include "Scriptable/Actor.h"
+#include "Scriptable/Highlightable.h"
 
 #include <map>
 
@@ -224,6 +233,27 @@ void GameScript::DCCAddSkill(Scriptable* Sender, Holder<Action> parameters)
 	if (!actor->DCCAddSkill(tags.bits)) {
 		Log(WARNING, "GameScript", "DCCAddSkill: {} can't learn {} (two acquired skills already?)", fmt::WideToChar { actor->GetName() }, SkillTagsKey(tags));
 	}
+}
+
+void GameScript::DCCRevealTrap(Scriptable* Sender, Holder<Action> parameters)
+{
+	if (!DCCScripts()) return;
+	Scriptable* target = GetScriptableFromObject(Sender, parameters);
+	Highlightable* trap = target && target->Type != ST_ACTOR && target->Type != ST_AREA && target->Type != ST_GLOBAL ? static_cast<Highlightable*>(target) : nullptr;
+	if (!trap) {
+		Log(WARNING, "GameScript", "DCCRevealTrap: no region, door or container");
+		return;
+	}
+	trap->DCCRevealTrap(Sender->GetGlobalID());
+}
+
+Targets* GameScript::DCCLowestLuck(const Scriptable* Sender, Targets* parameters, int ga_flags)
+{
+	const auto* region = Sender->Type == ST_PROXIMITY || Sender->Type == ST_TRIGGER || Sender->Type == ST_TRAVEL ? static_cast<const Highlightable*>(Sender) : nullptr;
+	Actor* lowest = Actor::DCCLowestLuck(Sender->GetCurrentArea(), region);
+	parameters->Clear();
+	if (lowest) parameters->AddTarget(lowest, 0, ga_flags);
+	return parameters;
 }
 
 }

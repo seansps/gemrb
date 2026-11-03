@@ -242,6 +242,7 @@ def _OurSaves ():
 
 def _StepDrained ():
 	_CheckDrained ("drained")
+	_SetTrapRollsForSave ()
 	# save (over the last run's save), then load that save
 	for game in _OurSaves ():
 		GemRB.DeleteSaveGame (game)
@@ -266,6 +267,7 @@ def _StepLoaded ():
 	_CheckDrained ("loaded")
 	_CheckLuckLoaded ()
 	_CheckMagicLoaded ()
+	_CheckTrapRollsLoaded ()
 	# a night in the field heals 1 point of loss
 	info = GemRB.RestParty (1 | 16, -1, 1)
 	_Check ("field rest allowed", info["Error"], False)
@@ -628,14 +630,14 @@ def _FightCompletion ():
 	GemRB.DCCForceDice (durn, [])
 	_Check ("durn gets up on a 20", [_Logged ("Durn tries to get up: Agi check 20 = 20 vs DC 16: up"), GemRB.GetPlayerStat (durn, IE_DCC_PRONE)], [True, 0])
 
-	# the thief's backstab against an unaware foe (Nim invisible, thug 2 not yet fighting): +3, and the hit is a
+	# the thief's backstab against an unaware foe (Nim invisible: hidden; thug 2 not yet fighting): +3, and the hit is a
 	# crit on Table II; the dagger's backstab damage is 1d10. 8 + 3 + 2 (invisible) = 13; 1d10 6; 1d10 6 on II:
 	# speed and actions halved for 1d4 (2) rounds. Thug 2 is surprised: no action this round
 	GemRB.ApplyEffect (nim, "State:Invisible", 0, 0)
 	yield
 	r = _Attack (nim, thug2, [8, 6, 6, 2])
 	_Check ("nim backstabs", _Pick (r[0], ["Backstab", "Total", "Hit", "Critical", "CritTable", "CritRoll", "Damage", "Result"]), [1, 13, 1, 1, 2, 6, 6, "leg slashed"])
-	_Check ("log: backstab", _Logged ("Nim backstabs Thug 2 (unaware): +3 to hit, a hit is a crit"), True)
+	_Check ("log: backstab", _Logged ("Nim backstabs Thug 2 (hidden): +3 to hit, a hit is a crit"), True)
 	_Check ("log: surprise", _Logged ("Thug 2 is caught by surprise: no action this round"), True)
 	yield
 	_Check ("thug 2 surprised, half its actions", [GemRB.GetPlayerStat (thug2, IE_DCC_NOATTACK), GemRB.GetDCCStats (thug2)["ActionLimit"]], [1, 1])
@@ -1111,6 +1113,9 @@ def _Fights ():
 	GemRB.GetDCCCombatLog (1)
 	# the M2.3 checks run without Luck burns (Korg, a warrior, would cancel his fumble by default)
 	GemRB.DCCSetLuckPolicy (_ID ("dctkorg"), DCC_BURN_NEVER, 10, DCC_LUCK_PAUSE | DCC_LUCK_ALLIES)
+	# traps and thief skills first: the party is as the sheet left it, and everything it changes is put back
+	if _Wanted ("thief"):
+		yield from _Thief ()
 	if _Wanted ("combat"):
 		yield from _Fight ()
 	if _Wanted ("luck"):
@@ -1465,6 +1470,365 @@ def _Magic_ ():
 		if "cast" in line or "spell" in line or "corrupt" in line or "Luck" in line or "disapproval" in line:
 			_Log ("magic: " + line)
 
+# --- traps and thief skills -------------------------------------------------------------------
+# docs/rules/traps.md and classes.md ("Ethren design: thief skills in real time", "Backstab, revised",
+# "Hiding again in a fight"). Forced dice (GemRB.DCCForceDice) drive every roll; the log lines name
+# each roll and its parts. GemRB.GetDCCThiefPlan, DCCThiefCheck, GetDCCTrap, GetDCCStealth, GetDCCAware.
+
+FIND_TRAP, DISABLE_TRAP, PICK_LOCK, PICK_POCKET, HIDE, SNEAK = 6, 7, 5, 3, 2, 1
+MS_NONE, MS_DETECTTRAPS, MS_STEALTH = 0, 2, 3
+EA_NEUTRAL, EA_ENEMY = 128, 255
+
+def _SetTrapRollsForSave ():
+	"""before the save: rolls in slot 16 (nobody's) on a region, a container and a door"""
+	if not _Wanted ("thief"):
+		return
+	_Check ("trap rolls set", [GemRB.DCCSetTrapRolls ("DctWard", 0x8000, 0x8000, 0), GemRB.DCCSetTrapRolls ("DctChest", 0x8000, 0, 0x8000),
+		GemRB.DCCSetTrapRolls ("DctGate", 0x4000, 0x8000, 0x8000)], [True, True, True])
+
+def _CheckTrapRollsLoaded ():
+	if not _Wanted ("thief"):
+		return
+	got = [[t["Found"], t["Disarm"], t["Lock"]] for t in (GemRB.GetDCCTrap (n) for n in ("DctWard", "DctChest", "DctGate"))]
+	_Check ("trap rolls through the save (region, container, door)", got, [[0x8000, 0x8000, 0], [0x8000, 0, 0x8000], [0x4000, 0x8000, 0x8000]])
+	for name in ("DctWard", "DctChest", "DctGate"):
+		GemRB.DCCSetTrapRolls (name, 0, 0, 0)
+
+def _Bit (pc):
+	return 1 << (pc - 1)
+
+def _Jump (actor, x, y, stop = True):
+	"""a teleport; stop clears the actions first, which also ends a modal state (keep it for Stealth)"""
+	if stop:
+		GemRB.ClearActions (actor)
+	GemRB.ExecuteString ("JumpToPoint([%d.%d])" % (x, y), actor)
+
+def _Order (actor, action, dice):
+	GemRB.DCCForceDice (actor, dice)
+	GemRB.ExecuteString (action, actor)
+
+def _Line (who, verb, natural, parts, total, dc, label, outcome):
+	"""the expected log line: "Vex hides in shadows: 9 +3 +1 Agi = 13 vs DC 10 (dim): unseen" """
+	line = "%s %s: %d" % (who, verb, natural)
+	for value, what in parts:
+		if value:
+			line += " %+d%s" % (value, (" " + what) if what else "")
+	line += " = %d vs DC %d" % (total, dc)
+	if label:
+		line += " (%s)" % label
+	if outcome:
+		line += ": " + outcome
+	return line
+
+def _Thief ():
+	"""traps and thief skills in play, with forced dice"""
+	party = _Party ()
+	sly, grub, brak = party.get ("dctsly"), party.get ("dctgrub"), party.get ("dctbrak")
+	_Check ("thief scenario: sly, grub and brak in the party", all ([sly, grub, brak]), True)
+	if not all ([sly, grub, brak]):
+		return
+	kit, rook, mark, vex, pip, durn = [_ID (n) for n in ("dctkit", "dctrook", "dctmark", "dctvex", "dctpip", "dctdurn")]
+	mook1, mook2, mook3 = [_ID ("dctmook%d" % i) for i in (1, 2, 3)]
+	_Check ("thieves, mark and the mooks in the area", all ([kit, rook, mark, mook1, mook2, mook3]), True)
+	# what this scenario changes in the party, put back at the end; and the dice: the scenarios after it
+	# (the magic sweeps) roll unforced durations, which would shift with every roll made here
+	GemRB.DCCKeepRandom (0)
+	saved = {}
+	for pc in (sly, grub, brak):
+		st = GemRB.GetDCCStats (pc)
+		saved[pc] = (GemRB.GetActorPosition (pc), st["LuckPolicy"], st["LuckThreshold"], st["LuckFlags"],
+			GemRB.GetPlayerStat (pc, IE_DCC_LOSS_LCK, 1), GemRB.GetPlayerStat (pc, IE_XP, 1))
+		GemRB.DCCSetLuckPolicy (pc, DCC_BURN_NEVER, 10, 0)
+
+	# --- who rolls what (the plans) ---
+	plan = GemRB.GetDCCThiefPlan (sly, FIND_TRAP, 8)
+	_Check ("sly without tools finds as anyone: d20 + Int + augur", [plan["Roller"], plan["Skill"], plan["Modifier"]], ["anyone", 0, 2])
+	GemRB.CreateItem (sly, "DCTTOOLS")
+	yield
+	plan = GemRB.GetDCCThiefPlan (sly, FIND_TRAP, 8)
+	_Check ("sly with tools: find trap +3 +1 Int +1 augur", [plan["Roller"], plan["Skill"], plan["AbilityMod"], plan["Augur"], plan["Modifier"]], ["thief", 3, 1, 1, 5])
+	plan = GemRB.GetDCCThiefPlan (sly, DISABLE_TRAP, 10)
+	_Check ("sly: disable trap +3 +2 Agi +1 augur", [plan["Roller"], plan["Modifier"]], ["thief", 6])
+	plan = GemRB.GetDCCThiefPlan (grub, FIND_TRAP, 8)
+	_Check ("grub (a peasant) finds with d20 + Int", [plan["Roller"], plan["Die"], plan["Modifier"]], ["anyone", 20, -3])
+	plan = GemRB.GetDCCThiefPlan (brak, DISABLE_TRAP, 10)
+	_Check ("brak (a warrior) disarms with d20 + Agi", [plan["Roller"], plan["Modifier"]], ["anyone", 1])
+	plan = GemRB.GetDCCThiefPlan (vex, PICK_LOCK, 10)
+	_Check ("vex without tools picks locks by the occupation rules", plan["Roller"] in ("trained d20", "familiar d10+2", "untrained d10"), True)
+	plan = GemRB.GetDCCThiefPlan (kit, HIDE, 10)
+	_Check ("kit (neutral, level 1): hide +1 +1 Agi", [plan["Roller"], plan["Modifier"]], ["thief", 2])
+	plan = GemRB.GetDCCThiefPlan (kit, SNEAK, 10)
+	_Check ("kit: sneak +3 +1 Agi", [plan["Roller"], plan["Modifier"]], ["thief", 4])
+	plan = GemRB.GetDCCThiefPlan (pip, HIDE, 10)
+	_Check ("pip, a halfling: hide with sneak & hide +3", [plan["Roller"], plan["Skill"]], ["halfling", 3])
+	plan = GemRB.GetDCCThiefPlan (durn, SNEAK, 10)
+	_Check ("durn in plate with a shield: the armour check penalty -8 -1 on sneaking", plan["Armor"], -9)
+
+	# --- Detect traps: the find roll, secret on a failure, once per character and trap ---
+	speed = GemRB.GetDCCStealth (sly)["Speed"]
+	_Jump (sly, 570, 520)
+	yield
+	GemRB.DCCForceDice (sly, [2]) # 2 + 5 = 7 vs DC 8: missed, and nothing says so
+	GemRB.SetModalState (sly, MS_DETECTTRAPS)
+	yield
+	GemRB.DCCForceDice (sly, [])
+	pit = GemRB.GetDCCTrap ("DctPit")
+	_Check ("sly's failed find: not found, rolled, nothing logged", [pit["Detected"], bool (pit["Found"] & _Bit (sly)), _Logged ("Sly finds a trap")], [0, True, False])
+	_Check ("searching: half speed", GemRB.GetDCCStealth (sly)["Speed"], speed * 2)
+	_Check ("log: sly searches", _Logged ("Sly searches for traps (half speed)"), True)
+	_Check ("the DC 100 trap: no roll finds it (marked, not found)", [bool (GemRB.GetDCCTrap ("DctHidden")["Found"] & _Bit (sly)), GemRB.GetDCCTrap ("DctHidden")["Detected"]], [True, 0])
+	GemRB.DCCForceDice (sly, [20])
+	for i in range (3):
+		yield
+	GemRB.DCCForceDice (sly, [])
+	_Check ("one roll per character: sly doesn't roll again", GemRB.GetDCCTrap ("DctPit")["Detected"], 0)
+	_Check ("the notice line, once", _LogCount ("The turf here lies in neat squares."), 1)
+	_Check ("the notice line is said", GemRB.GetDCCTrap ("DctPit")["Notice"], 1)
+	_Jump (grub, 560, 505)
+	yield
+	GemRB.DCCForceDice (grub, [11]) # 11 - 3 = 8 vs DC 8
+	GemRB.SetModalState (grub, MS_DETECTTRAPS)
+	yield from _Wait (lambda: GemRB.GetDCCTrap ("DctPit")["Detected"], 10)
+	GemRB.DCCForceDice (grub, [])
+	if GemRB.GamePause (3, 1):
+		GemRB.GamePause (0, 1)
+	_Check ("grub finds the pit", GemRB.GetDCCTrap ("DctPit")["Detected"], 1)
+	_Check ("log: grub finds a trap", _Logged ("Grub finds a trap: 11 -3 Int = 8 vs DC 8"), True)
+	yield
+	_Check ("the pit's script got Detected, the handle is on", [GemRB.GetGameVar ("DCT_PIT_FOUND"), GemRB.GetDCCTrap ("DctPitHandle")["Flags"] & 0x100], [1, 0])
+	GemRB.SetModalState (sly, MS_NONE)
+	GemRB.SetModalState (grub, MS_NONE)
+	yield
+	_Check ("stopped searching: full speed", [GemRB.GetDCCStealth (sly)["Mode"], GemRB.GetDCCStealth (sly)["Speed"]], [MS_NONE, speed])
+	_Check ("log: sly stops", _Logged ("Sly stops searching"), True)
+
+	# --- disarming: a miss by 1-4 only fails, by 5 or more (or a natural 1) it springs; one try each ---
+	# (Brak, out cold earlier in the sheet scenario, runs no actions after it: see the report; Grub and the
+	# protagonist stand in)
+	hero = 1
+	_Jump (grub, 575, 500)
+	yield
+	_Order (grub, 'RemoveTraps("DctPit")', [10]) # 10 - 3 = 7 vs DC 10: by 3
+	line = _Line ("Grub", "tries to disarm a trap", 10, [(-3, "Agi")], 7, 10, "", "missed, still armed")
+	yield from _Wait (lambda: _Logged (line), 20)
+	GemRB.DCCForceDice (grub, [])
+	_Check ("log: grub misses by 3", _Logged (line), True)
+	yield
+	_Check ("still armed, DisarmFailed, not sprung", [GemRB.GetDCCTrap ("DctPit")["Trapped"], GemRB.GetGameVar ("DCT_PIT_FAILED"), GemRB.GetGameVar ("DCT_PIT_SPRUNG")], [1, 1, 0])
+	_Order (grub, 'RemoveTraps("DctPit")', [])
+	yield from _Wait (lambda: _Logged ("Grub has tried to disarm this trap already"), 20)
+	_Check ("grub can't try again", _Logged ("Grub has tried to disarm this trap already"), True)
+	heroPos = GemRB.GetActorPosition (hero)
+	_Jump (hero, 545, 495)
+	yield
+	_Order (hero, 'RemoveTraps("DctPit")', [1]) # a natural 1 springs it, whatever the total
+	sprung = lambda: any (" tries to disarm a trap: 1" in l and l.endswith ("it springs!") for l in GemRB.GetDCCCombatLog ())
+	yield from _Wait (sprung, 20)
+	GemRB.DCCForceDice (hero, [])
+	_Check ("log: a natural 1 springs it", sprung (), True)
+	yield
+	# one block of the pit's script runs a pass: Entered (the payload) comes before DisarmFailed
+	_Check ("sprung (it resets, so still armed)", [GemRB.GetGameVar ("DCT_PIT_SPRUNG"), GemRB.GetDCCTrap ("DctPit")["Trapped"]], [1, 1])
+	_Jump (hero, heroPos["X"], heroPos["Y"])
+	xp = GemRB.GetPlayerStat (sly, IE_XP, 1)
+	_Jump (sly, 585, 500)
+	yield
+	_Order (sly, 'RemoveTraps("DctPit")', [5]) # 5 + 3 + 2 + 1 = 11 vs DC 10
+	line = _Line ("Sly", "tries to disarm a trap", 5, [(3, ""), (2, "Agi"), (1, "augur")], 11, 10, "", "disarmed")
+	yield from _Wait (lambda: _Logged (line), 20)
+	GemRB.DCCForceDice (sly, [])
+	_Check ("log: sly disarms it", _Logged (line), True)
+	yield
+	_Check ("disarmed for good, Disarmed sent, the trap's XP to the thief", [GemRB.GetDCCTrap ("DctPit")["Trapped"], GemRB.GetGameVar ("DCT_PIT_DISARMED"), GemRB.GetPlayerStat (sly, IE_XP, 1) - xp], [0, 1, 1])
+
+	# --- a deadly trap: found by a script, the disarm's Luck prompt (a thief's luck die); a ward ---
+	GemRB.ExecuteString ('DCCRevealTrap("DctBlade")', sly)
+	GemRB.ExecuteString ('DCCRevealTrap("DctWard")', sly)
+	yield from _Wait (lambda: GemRB.GetDCCTrap ("DctWard")["Detected"], 20)
+	_Check ("DCCRevealTrap", [GemRB.GetDCCTrap ("DctBlade")["Detected"], GemRB.GetDCCTrap ("DctWard")["Detected"]], [1, 1])
+	GemRB.DCCSetLuckPolicy (sly, DCC_BURN_NEVER, 10, DCC_LUCK_PAUSE)
+	luck = _Luck (sly)
+	_Jump (sly, 1000, 460)
+	yield
+	_Order (sly, 'RemoveTraps("DctBlade")', [3, 2]) # 3 + 6 = 9 vs DC 15: by 6, it would spring; the luck die d4 2
+	yield from _Wait (lambda: GemRB.GetPrompt () is not None, 20)
+	prompt = GemRB.GetPrompt ()
+	_Check ("the deadly disarm asks", prompt and prompt["Tag"], "luckburn")
+	if prompt:
+		_Log ("prompt: " + prompt["Text"])
+		GemRB.AnswerPrompt (prompt["ID"], [1]) # a d4: 2, so 11, a miss by 4
+	line = _Line ("Sly", "tries to disarm a trap", 3, [(3, ""), (2, "Agi"), (1, "augur"), (2, "Luck")], 11, 15, "", "missed, still armed")
+	yield from _Wait (lambda: _Logged (line), 20)
+	GemRB.DCCForceDice (sly, [])
+	_Check ("log: sly burns 1 Luck past the springing line", [_Logged ("Sly burns 1 Luck on a disarm (1d4 = +2): 9 -> 11 vs DC 15"), _Logged (line)], [True, True])
+	yield
+	_Check ("the blade didn't spring, sly's Luck", [GemRB.GetGameVar ("DCT_BLADE_SPRUNG"), _Luck (sly)], [0, luck - 1])
+	GemRB.DCCSetLuckPolicy (sly, DCC_BURN_NEVER, 10, 0)
+	_Jump (grub, 1020, 700)
+	yield
+	_Order (grub, 'RemoveTraps("DctWard")', [])
+	yield from _Wait (lambda: _Logged ("Grub can't disarm this by hand"), 20)
+	_Check ("a ward: no disarm by hand", _Logged ("Grub can't disarm this by hand: it takes a word, a token or a spell"), True)
+
+	# --- the lowest Luck in a region (the DCCLowestLuck object) ---
+	_Jump (grub, 680, 730)
+	_Jump (sly, 720, 730)
+	at = lambda pc, x, y: GemRB.GetActorPosition (pc)["X"] == x and GemRB.GetActorPosition (pc)["Y"] == y
+	yield from _Wait (lambda: at (grub, 680, 730) and at (sly, 720, 730), 20)
+	low = "dctgrub" if _Luck (grub) <= _Luck (sly) else "dctsly"
+	_Check ("the lowest Luck on DctLow", GemRB.GetDCCLowestLuck ("DctLow"), _ID (low))
+
+	# --- locks: d20 + pick lock + Agi with tools, else the occupation rules; one try each ---
+	_Jump (sly, 560, 420)
+	yield
+	_Order (sly, 'PickLock("DctGate")', [4]) # 4 + 3 + 2 + 1 = 10 vs DC 12
+	line = _Line ("Sly", "tries to pick the lock of DctGate", 4, [(3, ""), (2, "Agi"), (1, "augur")], 10, 12, "", "still locked")
+	yield from _Wait (lambda: _Logged (line), 20)
+	GemRB.DCCForceDice (sly, [])
+	_Check ("log: sly's lock holds", _Logged (line), True)
+	_Order (sly, 'PickLock("DctGate")', [])
+	yield from _Wait (lambda: _Logged ("Sly has tried this lock already"), 20)
+	_Check ("one try at a lock", [_Logged ("Sly has tried this lock already"), GemRB.GetDCCTrap ("DctGate")["Locked"]], [True, 1])
+	plan = GemRB.GetDCCThiefPlan (grub, PICK_LOCK, 10)
+	_Jump (grub, 700, 410)
+	yield
+	nat = plan["Die"]
+	_Order (grub, 'PickLock("DctChest")', [nat])
+	line = "Grub tries to pick the lock of DctChest (%s): %d" % (plan["Roller"], nat)
+	yield from _Wait (lambda: _Logged (line), 20)
+	GemRB.DCCForceDice (grub, [])
+	opened = nat + plan["Modifier"] >= 10
+	_Check ("log: grub's lock line names the occupation dice", _Logged (line), True)
+	_Check ("grub's chest by the occupation rules (%s, %+d)" % (plan["Roller"], plan["Modifier"]), GemRB.GetDCCTrap ("DctChest")["Locked"], 0 if opened else 1)
+
+	# --- pick pocket: by 1-4 nothing and unnoticed; caught on a 1 or by 5+ ---
+	_Jump (kit, 725, 620)
+	yield
+	gold = GemRB.GetPlayerStat (kit, IE_GOLD, 1)
+	_Order (kit, 'PickPockets("dctmark")', [3]) # 3 + 3 + 1 = 7 vs DC 10
+	line = _Line ("Kit", "tries to pick Mark's pocket", 3, [(3, ""), (1, "Agi")], 7, 10, "", "nothing taken, unnoticed")
+	yield from _Wait (lambda: _Logged (line), 20)
+	GemRB.DCCForceDice (kit, [])
+	_Check ("log: kit misses unnoticed", _Logged (line), True)
+	_Check ("unnoticed: mark stays neutral, nothing taken", [GemRB.GetPlayerStat (mark, IE_EA), GemRB.GetPlayerStat (kit, IE_GOLD, 1)], [EA_NEUTRAL, gold])
+	_Order (kit, 'PickPockets("dctmark")', [12])
+	line = _Line ("Kit", "tries to pick Mark's pocket", 12, [(3, ""), (1, "Agi")], 16, 10, "", "takes it")
+	yield from _Wait (lambda: _Logged (line), 20)
+	GemRB.DCCForceDice (kit, [])
+	yield
+	_Check ("kit lifts some of mark's gold", [_Logged (line), GemRB.GetPlayerStat (mark, IE_GOLD, 1) < 20], [True, True])
+	_Order (kit, 'PickPockets("dctmark")', [1])
+	line = _Line ("Kit", "tries to pick Mark's pocket", 1, [(3, ""), (1, "Agi")], 5, 10, "", "caught!")
+	yield from _Wait (lambda: _Logged (line), 20)
+	GemRB.DCCForceDice (kit, [])
+	yield
+	_Check ("caught on a 1: mark turns hostile", [_Logged (line), GemRB.GetPlayerStat (mark, IE_EA)], [True, EA_ENEMY])
+	GemRB.SetPlayerStat (mark, IE_EA, EA_NEUTRAL)
+
+	# --- Stealth: hide by the light, sneak by the floor, again on a new DC; being hit ends it ---
+	_Jump (kit, 700, 640)
+	yield
+	where = GemRB.GetDCCStealth (kit)
+	GemRB.DCCForceDice (kit, [9, 9])
+	GemRB.SetModalState (kit, MS_STEALTH)
+	yield
+	GemRB.DCCForceDice (kit, [])
+	st = GemRB.GetDCCStealth (kit)
+	hideDC = where["LightDC"]
+	hidden = 9 + 2 >= hideDC
+	_Log ("kit's light: %d, hide DC %d (%s)" % (where["Light"], hideDC, where["LightLabel"]))
+	_Check ("stealth: hide vs the light's DC, sneak vs the glade's grass", [st["Mode"], st["HideDC"], st["FloorDC"], st["Hidden"], st["Silent"]], [MS_STEALTH, hideDC, 5, int (hidden), 1])
+	_Check ("log: kit hides", _Logged (_Line ("Kit", "hides in shadows", 9, [(1, ""), (1, "Agi")], 11, hideDC, where["LightLabel"], "unseen" if hidden else "seen")), True)
+	_Check ("log: kit sneaks", _Logged (_Line ("Kit", "sneaks silently", 9, [(3, ""), (1, "Agi")], 13, 5, "cushioned", "unheard")), True)
+	_Check ("unseen while it stands: invisible", st["Invisible"], int (hidden))
+	planks = GemRB.GetDCCStealth (kit, 500, 730)
+	dice = [9, 2] if planks["LightDC"] != hideDC else [2]
+	GemRB.DCCForceDice (kit, dice)
+	_Jump (kit, 500, 730, False)
+	yield
+	GemRB.DCCForceDice (kit, [])
+	st = GemRB.GetDCCStealth (kit)
+	_Check ("on the planks: sneak again vs DC 15", [st["FloorDC"], st["Silent"]], [15, 0])
+	_Check ("log: kit heard on the planks", _Logged (_Line ("Kit", "sneaks silently", 2, [(3, ""), (1, "Agi")], 6, 15, "creaky wood", "heard")), True)
+	GemRB.ApplyEffect (kit, "Damage", 1, 0)
+	yield
+	_Check ("hit: out of Stealth", [_Logged ("Kit is out of Stealth (hit)"), GemRB.GetDCCStealth (kit)["Mode"], GemRB.GetDCCStealth (kit)["Invisible"]], [True, MS_NONE, 0])
+
+	# --- backstab, revised: hidden, then aware; break away, hide again, lost: a backstab again ---
+	def hide (thief):
+		GemRB.DCCForceDice (thief, [20, 20])
+		GemRB.SetModalState (thief, MS_STEALTH)
+	_Jump (kit, 815, 372)
+	yield
+	hide (kit)
+	yield
+	GemRB.DCCForceDice (kit, [])
+	_Check ("kit hidden next to mook 1", [GemRB.GetDCCStealth (kit)["Hidden"], GemRB.GetDCCAware (kit, mook1)["Unaware"]], [1, "hidden"])
+	r = _Attack (kit, mook1, [10, 5, 5, 3, 3, 3])
+	_Check ("kit backstabs mook 1 (hidden)", r[0]["Backstab"], 1)
+	_Check ("log: (hidden)", _Logged ("Kit backstabs Mook 1 (hidden): +0 to hit, a hit is a crit"), True)
+	_Check ("attacking ends Stealth; mook 1 knows kit now", [_Logged ("Kit is out of Stealth (attacks)"), GemRB.GetDCCStealth (kit)["Mode"], GemRB.GetDCCAware (kit, mook1)["Aware"]], [True, MS_NONE, 1])
+	yield
+	r = _Attack (kit, mook1, [10, 5, 3, 3])
+	_Check ("aware: no backstab", r[0]["Backstab"], 0)
+	# break away (nobody in reach or after it: mark, who caught kit, stands off too), hide, and stay lost a
+	# round: mook 1 loses track
+	_Jump (kit, 450, 640, False)
+	yield
+	hide (kit)
+	yield
+	GemRB.DCCForceDice (kit, [])
+	yield from _Wait (lambda: _Logged ("Mook 1 loses track of Kit"), 40)
+	_Check ("log: mook 1 loses track of kit", _Logged ("Mook 1 loses track of Kit"), True)
+	_Check ("mook 1 is unaware of kit again", GemRB.GetDCCAware (kit, mook1)["Aware"], 0)
+	GemRB.DCCForceDice (kit, [20, 20])
+	_Jump (kit, 815, 372, False)
+	yield
+	GemRB.DCCForceDice (kit, [])
+	r = _Attack (kit, mook1, [10, 5, 5, 3, 3, 3])
+	_Check ("a backstab again", [r[0]["Backstab"], _LogCount ("Kit backstabs Mook 1 (hidden)")], [1, 2])
+	# a condition fails: still in reach of mook 2 (who knows kit), so no breaking away and no backstab
+	_Jump (kit, 878, 372, False)
+	yield
+	r = _Attack (kit, mook2, [10, 5, 3, 3])
+	_Check ("mook 2 knows kit", GemRB.GetDCCAware (kit, mook2)["Aware"], 1)
+	hide (kit)
+	yield
+	GemRB.DCCForceDice (kit, [])
+	for i in range (12):
+		yield
+	_Check ("in reach: mook 2 doesn't lose track", [_Logged ("Mook 2 loses track of Kit"), GemRB.GetDCCAware (kit, mook2)["Aware"]], [False, 1])
+	r = _Attack (kit, mook2, [10, 5, 3, 3])
+	_Check ("no backstab while in reach", r[0]["Backstab"], 0)
+	# ranged: a thrown dagger backstabs (its backstab dice), from hiding
+	hide (rook)
+	yield
+	GemRB.DCCForceDice (rook, [])
+	r = _Attack (rook, mook3, [10, 5, 5, 3, 3, 3])
+	_Check ("rook's thrown dagger backstabs mook 3", [r[0]["Backstab"], _Logged ("Rook backstabs Mook 3 (hidden): +1 to hit, a hit is a crit")], [1, True])
+
+	# --- a thief skill roll through Python, and the co-op order path's pieces ---
+	GemRB.DCCForceDice (kit, [7])
+	r = GemRB.DCCThiefCheck (kit, HIDE, 10, 0, 2, "dim")
+	GemRB.DCCForceDice (kit, [])
+	_Check ("DCCThiefCheck", [r["Natural"], r["Total"], r["Success"], r["Outcome"]], [7, 9, 0, 1])
+
+	# put the party back
+	for pc in (sly, grub, brak):
+		GemRB.SetModalState (pc, MS_NONE)
+		pos, policy, threshold, flags, loss, xpv = saved[pc]
+		_Jump (pc, pos["X"], pos["Y"])
+		GemRB.DCCSetLuckPolicy (pc, policy, threshold, flags)
+		GemRB.SetPlayerStat (pc, IE_DCC_LOSS_LCK, loss)
+		GemRB.SetPlayerStat (pc, IE_XP, xpv)
+	for thief in (kit, rook):
+		GemRB.SetModalState (thief, MS_NONE)
+	yield
+	GemRB.DCCKeepRandom (1)
+	for line in GemRB.GetDCCCombatLog ():
+		if "trap" in line or "Stealth" in line or "pocket" in line or "lock" in line or "hides" in line or "sneaks" in line or "backstab" in line or "track" in line:
+			_Log ("thief: " + line)
+
 FightSteps = None
 
 def _StepFight ():
@@ -1499,7 +1863,9 @@ Steps = {
 #   completion  M2.3b combat completion
 #   demons      M2.9's demon crits
 #   magic       M2.5 spellcasting with the starter spells
-SCENARIOS = ("sheet", "combat", "luck", "completion", "demons", "magic")
+#   thief       traps and thief skills: Detect traps, finding, disarming, locks, pick pocket, Stealth,
+#               backstab revised and hiding again in a fight (and with sheet: the trap rolls through the save)
+SCENARIOS = ("sheet", "combat", "luck", "completion", "demons", "magic", "thief")
 NEEDS = {
 	"combat": ["sheet"],
 	"luck": ["sheet"],

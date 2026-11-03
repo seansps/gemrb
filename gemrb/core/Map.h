@@ -604,6 +604,8 @@ public:
 	bool DisplayTrackString(const Actor* actor) const;
 
 	unsigned int GetLightLevel(const Point& Pos) const;
+	/** DCC: a party slot's trap and lock rolls are forgotten (a new character joined in it) */
+	void DCCForgetSlot(uint16_t bit);
 
 	void SetBackground(const ResRef& bgResref, ieDword duration);
 

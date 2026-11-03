@@ -1,0 +1,12 @@
+2DA V1.0
+*
+# ethren: the traps' own data (docs/rules/traps.md, "What a trap is"), by area resref and the trapped
+# region's, door's or container's script name (OBJECT). KIND is the trap's kind (WOODLAND EARTHWORK
+# STONEWORK WOODWORK MECHANISM CAMP WARD): dwarves of level 1+ add their level to find stonework and
+# earthwork underground. DISARM is the ability of a disarm (AGI, STR to jam, INT to work out a mechanism;
+# NONE: only a word, a token or a spell disarms it). DEADLY 1 makes the disarm a key roll (the Luck prompt).
+# XP goes to a thief of level 1+ who disarms it. NOTICE floats once over the first party member to come
+# within 15' (_ for spaces, * none). The find and disarm DCs are the ARE's (TrapDetectionDiff and
+# TrapRemovalDiff, read as DCs; 100 or more: no roll finds or disarms it). A trap without a row is a
+# mechanism, disarmed with Agi, not deadly, 1 XP. A game ships its own copy with its traps.
+     AREA     OBJECT   KIND       DISARM  DEADLY  XP  NOTICE

@@ -65,6 +65,9 @@ Modules here so far:
   (GemRB.DCCSkillCheck and the scripts' DCCSkillCheck trigger and action).
 - FunnelEnd.py (M3.3): the funnel's end screen: the party, the reserves, the
   graveyard.
+- DCCThief.py: the message window's T, S and P buttons and hotkeys: Detect traps and
+  Stealth for the selected characters (anyone may use them under DCC), and the thieving
+  cursor (disarm a found trap, pick a lock or a pocket).
 - Game.py (M3.3): the demo's EnterGame with the party size of a DCC game (16
   in the funnel, DCC_PARTY_SIZE after it) and no protagonist (the game ends
   when the whole party is dead).

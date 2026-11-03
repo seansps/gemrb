@@ -3,7 +3,8 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 # ethren: the demo's message window (GUIScripts/demo/MessageWindow.py) plus an "R"
-# button for the DCC record screen, the party roster (Roster.py) and the autotest hooks.
+# button for the DCC record screen, the T, S and P buttons (Detect traps, Stealth, thieving;
+# DCCThief.py), the party roster (Roster.py) and the autotest hooks.
 
 import GemRB
 import Tests
@@ -13,6 +14,7 @@ import GUIClasses
 import GUIINV
 import GUIMA
 import GUIREC
+import DCCThief
 import DCCAutotest
 import FunnelAutotest
 import GameAutotest
@@ -65,6 +67,9 @@ def OnLoad():
 	RecordButton.SetTooltip ("Character record")
 	RecordButton.OnPress (lambda: GUIREC.OpenRecordsWindow ())
 	GUIREC.OnGameStart ()
+
+	# Detect traps, Stealth and the thieving cursor, left of the record button (DCCThief.py)
+	DCCThief.AddButtons (MessageWindow, RecordButton.GetFrame (), 7)
 
 	# co-op: the recent chat (the lobby's too) goes back into the new message window
 	NetChat.OnMessageWindow ()

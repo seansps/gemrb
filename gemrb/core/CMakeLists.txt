@@ -34,6 +34,7 @@ FILE(GLOB gemrb_core_LIB_SRCS
 	DCC/Magic.cpp
 	DCC/Rules.cpp
 	DCC/Skills.cpp
+	DCC/Thief.cpp
 	Debug.cpp
 	Dialog.cpp
 	DialogHandler.cpp
@@ -141,6 +142,7 @@ FILE(GLOB gemrb_core_LIB_SRCS
 	Scriptable/ActorDCCLuck.cpp
 	Scriptable/ActorDCCMagic.cpp
 	Scriptable/ActorDCCSkills.cpp
+	Scriptable/ActorDCCThief.cpp
 	Scriptable/CombatInfo.cpp
 	Scriptable/Container.cpp
 	Scriptable/Door.cpp

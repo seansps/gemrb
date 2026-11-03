@@ -250,6 +250,7 @@ IF (BUILD_TESTING)
     tests/core/DCC/Test_Learning.cpp
     tests/core/DCC/Test_Looks.cpp
     tests/core/DCC/Test_Skills.cpp
+    tests/core/DCC/Test_Thief.cpp
     tests/core/Test_BucketPriorityQueue.cpp
     tests/core/Test_Map.cpp
     tests/core/Test_Movement.cpp

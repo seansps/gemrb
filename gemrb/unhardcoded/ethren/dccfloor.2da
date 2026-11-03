@@ -1,0 +1,7 @@
+2DA V1.0
+*
+# ethren: regions that set the floor DC of sneak silently where they lie (docs/rules/classes.md: 5
+# cushioned, grass or carpet; 10 stone; 15 creaky wood; 20 very noisy: leaves, still water, gravel).
+# AREA is the area resref, REGION a region's script name (any type; an info point with no script does);
+# DC the floor's. Elsewhere the area's FLOOR in dccarea.2da holds, else 10. A game ships its own copy.
+     AREA     REGION   DC

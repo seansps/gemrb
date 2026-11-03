@@ -330,6 +330,8 @@ bool GameControl::CanRun(const Actor* actor) const
 	if (!actor) return false;
 	static bool hasRun = GenerateActionDirect("RunToPoint([0.0])", actor) != nullptr;
 	if (!hasRun) return false;
+	// DCC: a searcher can't run (traps.md)
+	if (core->HasFeature(GFFlags::RULES_DCC) && actor->Modal.State == Modal::DetectTraps) return false;
 	return actor->GetEncumbranceFactor(true) == 1;
 }
 
