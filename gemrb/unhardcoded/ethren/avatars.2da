@@ -8,9 +8,13 @@
 0x6511     CPF2       CPFL       CPFC       CPFP       0          2          0          F
 0x6512     CPFH       CPFH       CPFH       CPFH       0          2          0          *
 0x6520     CDM2       CDML       CDMC       CDMP       0          2          0          D
+0x6522     CDMH       CDMH       CDMH       CDMH       0          2          0          *
 0x6530     CDF2       CDFL       CDFC       CDFP       0          2          0          W
+0x6532     CDFH       CDFH       CDFH       CDFH       0          2          0          *
 0x6540     CEM2       CEML       CEMC       CEMP       0          2          0          E
+0x6542     CEMH       CEMH       CEMH       CEMH       0          2          0          *
 0x6550     CEF2       CEFL       CEFC       CEFP       0          2          0          V
+0x6552     CEFH       CEFH       CEFH       CEFH       0          2          0          *
 0x6560     CDM2       CDML       CDMC       CDMP       0          2          0          D
 0x6570     CDF2       CDFL       CDFC       CDFP       0          2          0          W
 0x6600     MHND       MHND       MHND       MHND       16         2          1          *
@@ -37,4 +41,5 @@
 # its own palette (PALETTE 1); MHND<stance>.BAM and MHND<stance>E.BAM, plus MHNDRN (the run) for DCC.
 # 0x6502 CPMH and 0x6512 CPFH: a peasant hung head down by one ankle in the trail's snare (art/sprites/hang.json,
 # tools/sprite_render/hang.py), one frame in every stance; SIZE * draws no overlays on it. A spell's animation change
-# (effect 53: DLHANGM, DLHANGF) puts the catch into it until it is cut down.
+# (effect 53: DLHANGM, DLHANGF) puts the catch into it until it is cut down. The same for the demihumans: 0x6522 CDMH
+# and 0x6532 CDFH the dwarves (and the halflings, who hang in their bodies), 0x6542 CEMH and 0x6552 CEFH the elves.

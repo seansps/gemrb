@@ -1289,11 +1289,12 @@ TEST(DCC_Tables, Looks)
 		ids.insert(avatars->GetRowName(row));
 		if (avatars->GetRowName(row) == "0x6600") continue; // the hound, below
 		EXPECT_EQ(avatars->QueryField(row, 4), "0"); // TYPE 0, IE_ANI_CODE_MIRROR
-		if (avatars->GetRowName(row) == "0x6502" || avatars->GetRowName(row) == "0x6512") continue; // hanging, below
+		if (avatars->GetRowName(row).substr(5) == "2" && avatars->QueryField(row, 0).substr(3) == "H") continue; // hanging, below
 		EXPECT_NE(avatars->QueryField(row, 7), "*"); // a SIZE letter: overlays on
 	}
 	// the snare's catch hanging head down (art/sprites/hang.json): one body in every armour, no overlays (SIZE *)
-	for (const auto& [id, body] : std::map<std::string, std::string> { { "0x6502", "CPMH" }, { "0x6512", "CPFH" } }) {
+	for (const auto& [id, body] : std::map<std::string, std::string> { { "0x6502", "CPMH" }, { "0x6512", "CPFH" }, { "0x6522", "CDMH" },
+		     { "0x6532", "CDFH" }, { "0x6542", "CEMH" }, { "0x6552", "CEFH" } }) {
 		TableMgr::index_t row = avatars->GetRowIndex(id);
 		for (TableMgr::index_t col = 0; col < 4; ++col) {
 			EXPECT_EQ(avatars->QueryField(row, col), body) << id << " " << col;
@@ -1332,8 +1333,8 @@ TEST(DCC_Tables, Looks)
 		EXPECT_EQ(avatars->QueryField(avatars->GetRowIndex("0x6560"), col), avatars->QueryField(avatars->GetRowIndex("0x6520"), col)) << col;
 		EXPECT_EQ(avatars->QueryField(avatars->GetRowIndex("0x6570"), col), avatars->QueryField(avatars->GetRowIndex("0x6530"), col)) << col;
 	}
-	EXPECT_EQ(ids, (std::set<std::string> { "0x6500", "0x6501", "0x6502", "0x6510", "0x6511", "0x6512", "0x6520", "0x6530", "0x6540", "0x6550",
-		"0x6560", "0x6570", "0x6600" }));
+	EXPECT_EQ(ids, (std::set<std::string> { "0x6500", "0x6501", "0x6502", "0x6510", "0x6511", "0x6512", "0x6520", "0x6522", "0x6530", "0x6532",
+		"0x6540", "0x6542", "0x6550", "0x6552", "0x6560", "0x6570", "0x6600" }));
 
 	// the looks roll (dcclooks.2da) only gives a body the styles rendered on its rig: hair 1-7 on the men,
 	// 8-13 on the women; the beards 1-3 on human men, 4-6 on dwarf men (S6: each species its own body).
