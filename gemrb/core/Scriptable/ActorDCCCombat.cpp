@@ -2133,7 +2133,7 @@ void Actor::DCCHealed(int oldHP, int newHP)
 		Modified[IE_DCC_BLEED] = 0;
 		// survivors keep a scar and lose 1 Stamina for good (combat.md)
 		SetBase(IE_CON, std::max(0, Signed(BaseStats[IE_CON]) - 1));
-		SetStance(IE_ANI_GET_UP);
+		DCCGetUp();
 		Feedback(fmt::format(u"{} is saved from bleeding out (-1 Stamina for good)", Name(this)), FT_COMBAT);
 	}
 	if (fxqueue.HasEffectWithParam(fx_dcc_combat_ref, static_cast<ieDword>(CombatEffect::Doomed))) {
@@ -2151,9 +2151,19 @@ void Actor::DCCHealed(int oldHP, int newHP)
 	if (fxqueue.HasEffectWithParam(fx_dcc_combat_ref, static_cast<ieDword>(CombatEffect::Subdued))) {
 		fxqueue.RemoveAllEffectsWithParam(fx_dcc_combat_ref, static_cast<ieDword>(CombatEffect::Subdued));
 		Modified[IE_DCC_SUBDUED] = 0;
-		SetStance(IE_ANI_GET_UP);
+		DCCGetUp();
 		Feedback(fmt::format(u"{} comes to", Name(this)), FT_COMBAT);
 	}
+}
+
+void Actor::DCCGetUp()
+{
+	SetStance(IE_ANI_GET_UP);
+	// the lying animation's switch to the next stance (sleep, then twitch) belongs to the old stance:
+	// a helpless actor skips UpdateActorState (Map::UpdateScripts), so it is still pending with the
+	// sleep animation's end reached, and the next tick would lay the actor down in twitch for good
+	// (idle in twitch runs no actions) before the get-up animation is even fetched
+	if (anims) anims->autoSwitchOnEnd = false;
 }
 
 void Actor::DCCCountdownOver(CombatEffect kind)
@@ -2613,7 +2623,7 @@ bool Actor::DCCRoundEffect(Effect& fx)
 			Feedback(fmt::format(u"{} tries to {}: {} check {}{} = {} vs DC {}: {}", Name(this), prone ? u"get up" : u"get free", abilities[ability], roll.natural,
 					     Plus(roll.total - roll.natural), roll.total, dc, roll.success ? (prone ? u"up" : u"free") : u"not yet"),
 				 FT_COMBAT);
-			if (roll.success && prone) SetStance(IE_ANI_GET_UP);
+			if (roll.success && prone) DCCGetUp();
 			return !roll.success;
 		}
 		case CombatEffect::Wound: {

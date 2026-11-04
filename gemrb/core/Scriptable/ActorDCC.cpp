@@ -311,7 +311,7 @@ void Actor::RefreshDCCStats(const stats_t& previous)
 	if (isOut && !wasOut) {
 		SetStance(IE_ANI_SLEEP);
 	} else if (!isOut && wasOut) {
-		SetStance(IE_ANI_GET_UP);
+		DCCGetUp();
 	}
 }
 
