@@ -164,6 +164,13 @@ TEST(DCC_CombatRules, ChargeAndHigherGround)
 	EXPECT_TRUE(ChargeRunUp(15, 30));
 	EXPECT_FALSE(ChargeRunUp(14, 30));
 	EXPECT_TRUE(ChargeRunUp(10, 20));
+	// a run is twice the walk: the step takes half the time (rate 9: 1500 / 9 = 166 -> 83)
+	EXPECT_EQ(RunStepTime(166), 83);
+	EXPECT_EQ(RunStepTime(250), 125); // rate 6, the dwarves'
+	EXPECT_EQ(RunStepTime(150), 75); // rate 10, the elves'
+	EXPECT_EQ(RunStepTime(333), 167); // a searcher's or a heavy load's double step time, rounded
+	EXPECT_EQ(RunStepTime(1), 1); // never 0, which would stop the creature
+	EXPECT_EQ(RunStepTime(0), 0); // a creature that can't walk can't run
 	Situational charge = SituationalModifiers(ATK_CHARGE, false);
 	EXPECT_EQ(charge.flat, CHARGE_ATTACK);
 	EXPECT_EQ(SituationalModifiers(ATK_CHARGE, true).flat, 0);

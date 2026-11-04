@@ -346,6 +346,12 @@ bool ChargeRunUp(int movedFeet, int speedFeet)
 	return movedFeet * 2 >= speedFeet;
 }
 
+int RunStepTime(int walkStepTime)
+{
+	if (walkStepTime <= 0) return walkStepTime; // can't move: running doesn't help
+	return std::max(1, (walkStepTime + RUN_SPEED_MULTIPLIER / 2) / RUN_SPEED_MULTIPLIER);
+}
+
 bool HigherGround(int attackerElevation, int defenderElevation)
 {
 	return attackerElevation - defenderElevation >= HIGHER_GROUND_STEP;
