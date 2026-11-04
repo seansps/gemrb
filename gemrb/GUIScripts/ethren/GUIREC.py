@@ -4,7 +4,9 @@
 
 # The ethren record screen: the DCC character sheet of the selected party member
 # as plain text (DCCSheet.Lines). Built from code like Prompt.py, so the demo's GUI
-# needs no CHU for it. Opened with the "R" button of the message window.
+# needs no CHU for it. Opened with the bar's "Rec" button or the C key (keymap.ini's Character Record:
+# ToggleRecordsWindow); while it is open it has the keyboard, so C closes it and I swaps it for the inventory
+# (its own hot keys).
 # "Luck" and "Deeds" open the M2.4 settings panels (DCCLuck), "Combat" the M2.3b one
 # (charge, grapple, subdual blows, battle rage), and "Roll body over" lets a living
 # party member roll a fallen one's body over (GemRB.DCCRecoverBody), "Spells" the M2.5
@@ -47,12 +49,13 @@ def OpenRecordsWindow (pc = None):
 		return
 
 	Shown = pc or GemRB.GameGetSelectedPCSingle () or 1
-	screen = GemRB.GetSystemVariable (SV_WIDTH), GemRB.GetSystemVariable (SV_HEIGHT)
-	frame = {'x': (screen[0] - Width) // 2, 'y': max (0, (screen[1] - Height) // 4), 'w': Width, 'h': Height}
+	import Roster
+	frame = Roster.Centred (Width, Height) # left of the party column, above the bar
 	win = Window = GemRB.CreateView (96, 255, frame)
 	win.AddAlias ("WIN_REC")
 	win.SetBackground (WindowColor)
 	Text = win.CreateTextArea (1, 12, 10, Width - 24, Height - 90, Font)
+	Text.SetColor ({'r': 235, 'g': 228, 'b': 210, 'a': 255}, TA_COLOR_NORMAL) # light on the dark window (was dark on dark)
 	_Button (win, 2, 12, Height - 38, 50, 28, "<", lambda: _Step (-1))
 	_Button (win, 3, 68, Height - 38, 50, 28, ">", lambda: _Step (1))
 	# M2.4: the Luck burn policy, and a warrior's or dwarf's Mighty Deeds
@@ -65,8 +68,28 @@ def OpenRecordsWindow (pc = None):
 	_Button (win, 9, 12, Height - 72, 106, 28, "Spells", lambda: DCCMagic.OpenSpellsWindow (Shown))
 	close = _Button (win, 4, Width - 112, Height - 38, 100, 28, "Close", CloseRecordsWindow)
 	close.MakeEscape ()
+	# the keymap's keys don't reach the game view while this window has the keyboard: C and I here too
+	key = win.CreateButton (10, 0, 0, 0, 0)
+	key.OnPress (lambda: CloseRecordsWindow ())
+	key.SetHotKey ('c')
+	key = win.CreateButton (11, 0, 0, 0, 0)
+	key.OnPress (lambda: SwapForInventory ())
+	key.SetHotKey ('i')
 	win.Focus ()
 	UpdateRecordsWindow ()
+
+def ToggleRecordsWindow ():
+	"""the keymap's Character_Record (C) and the bar's button: opens on the selected party member, or closes"""
+	OpenRecordsWindow ()
+
+def SwapForInventory ():
+	"""I with the record open: the inventory of the character on show instead"""
+	pc = Shown
+	CloseRecordsWindow ()
+	if pc <= GemRB.GetPartySize ():
+		GemRB.GameSelectPC (pc, 1, SELECT_REPLACE)
+	import GUIINV
+	GUIINV.OpenInventoryWindow ()
 
 def CloseRecordsWindow ():
 	global Window, Text, DeedsButton, BodyButton
@@ -107,6 +130,16 @@ def RecoverBody (dead):
 	result = GemRB.DCCRecoverBody (dead, helper)
 	UpdateRecordsWindow ()
 	return result
+
+def ShowRecord (pc):
+	"""the open record screen on another party member (a click on the party column)"""
+	global Shown
+	if not Window or pc > GemRB.GetPartySize ():
+		return
+	Shown = pc
+	DCCLuck.Close ()
+	DCCMagic.Close ()
+	UpdateRecordsWindow ()
 
 def _Step (step):
 	global Shown

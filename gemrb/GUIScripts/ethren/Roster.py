@@ -2,22 +2,27 @@
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-# ethren: the funnel's roster panel (M3.2, docs/architecture/ui-design.md, "The funnel: sixteen at
-# once"), in place of the portrait column the demo GUI doesn't have. Built from code (no CHU), in the
-# demo's plain colours until Phase 5 skins it; it refreshes itself on a timer.
-#   - the header: the party summary ("Alive 12 of 16, 2 dying, 2 dead"; a press opens the graveyard)
+# ethren: the party column (docs/architecture/ui-design.md, "Proposed: the party column and the slim bar"), in
+# place of the portrait column the demo GUI doesn't have: one narrow column down the right edge, built from code
+# (no CHU), in the demo's plain colours until Phase 5 skins it; it refreshes itself on a timer.
+#   - the header: the party summary ("Alive 12 of 16", "2 dying, 2 dead" under it; a press opens the graveyard)
 #     and the prompts waiting for this player ("3 waiting");
-#   - Select all, Select mine (co-op), the formation buttons (Block, Column: set the party's formation
-#     and line the selection up in it where its leader stands), the party settings (DCCParty.py), Rest
-#     (Camp.py: at a camp the camp's window with the reserves, else a night's rest);
 #   - saved groups 1-9: Ctrl+1-9 (or a right click) saves the selection, Alt+1-9 (or a click) selects it;
-#   - a tile for each party member (sixteen in the funnel: two columns of eight; the four after it: two
-#     rows of two): the name, the occupation, the worst status, an HP bar,
-#     the selection highlight, the owner's colour as a stripe down the left edge in co-op; a click selects one, a shift
-#     click (or a right click) adds or takes one away; hovering shows occupation, HP, Luck and weapon.
-#     The dying flash, the dead stay in the list, greyed and marked (dead).
+#   - a tile for each party member, one under the other. In the funnel (more than six) compact ones: the name and
+#     the worst status, the occupation, an HP bar; when they don't all fit the list scrolls (the mouse wheel over
+#     the column, or its scroll bar). After the funnel (six or fewer) portrait tiles, as the IE games': a portrait
+#     (until portraits can be picked: the character's own figure, as the game draws it), the name, class and
+#     level, HP, Luck and the status, the HP bar under them. Either kind: the selection highlight, the owner's
+#     colour as a stripe down the left edge in co-op; a click selects one (with the inventory or record open:
+#     shows that one), a shift click (or a right click) adds or takes one away, a double click centres on it;
+#     an item picked up in the inventory and clicked on a tile goes to that one; hovering shows occupation, HP,
+#     Luck and weapon. The dying flash, the dead stay in the list, greyed and marked (dead).
+# The bar's buttons (MessageWindow.py) hold the rest: select all and mine, the formations, the party settings, Rest.
+# The window ignores events itself, as the stock side windows do (its controls still take clicks), so the game
+# view keeps the keyboard and the keymap's keys work; a backdrop button eats the clicks between the tiles, and
+# the scroll bar takes the wheel turns over the column (the window's event proxy).
 # The tiles are rebuilt whenever the party changes (who is in which slot: the funnel's end, a dismissal,
-# a recruit, the dead taken out, a load, a co-op replica's party), so the panel shows the current party
+# a recruit, the dead taken out, a load, a co-op replica's party), so the column shows the current party
 # only. A hidden tile would not do: hiding a view doesn't redraw the window under it, so the old tiles'
 # pixels stayed (M3.3's "Alive 4 of 4" over sixteen tiles).
 # Drag-box selection works in the world as before.
@@ -29,7 +34,7 @@ from ie_stats import *
 
 Font = "INFOFONT"
 HeaderFont = "NORMAL"
-WindowColor = {'r': 24, 'g': 22, 'b': 30, 'a': 230}
+WindowColor = {'r': 24, 'g': 22, 'b': 30, 'a': 235}
 ButtonColor = {'r': 70, 'g': 60, 'b': 45, 'a': 255}
 TileColor = {'r': 52, 'g': 46, 'b': 38, 'a': 255}
 SelectedColor = {'r': 140, 'g': 120, 'b': 60, 'a': 255}
@@ -38,6 +43,7 @@ DyingColor = {'r': 150, 'g': 30, 'b': 25, 'a': 255}
 DeadText = {'r': 120, 'g': 120, 'b': 120, 'a': 255}
 LiveText = {'r': 235, 'g': 228, 'b': 210, 'a': 255}
 BarBack = {'r': 20, 'g': 20, 'b': 20, 'a': 255}
+PortraitBack = {'r': 30, 'g': 28, 'b': 34, 'a': 255}
 GroupSet = {'r': 90, 'g': 80, 'b': 55, 'a': 255}
 GroupEmpty = {'r': 45, 'g': 40, 'b': 40, 'a': 255}
 # each co-op player's colour (slot 0 the host), on the tiles they own and the rolling screen's cards
@@ -50,17 +56,22 @@ PLAYER_COLORS = [
 DEAD_MARK = "(dead)" # in place of the skull until Phase 5 draws one (the demo's font has no cross or skull)
 
 MAX_SLOTS = 16
-COLUMNS = 2
-ROWS = 8
-TILE_W = 150
-TILE_H = 36
+COLUMN_W = 176 # the column's width, at any screen size
 GAP = 4
 BAR_H = 4
 OWNER_W = 4 # the owner's colour: a stripe down the tile's left edge (co-op)
 SUMMARY_Y = 4
-BUTTONS_Y = 26
-GROUPS_Y = 52
-TILES_Y = 74
+SUMMARY_H = 30
+GROUPS_Y = 38
+GROUPS_H = 16
+LIST_Y = 58
+TILE_H = 38 # a funnel tile: name and status, occupation, the HP bar
+HERO_H = 100 # a portrait tile, after the funnel
+HERO_MAX = 6 # parties this size or smaller get portrait tiles
+PORTRAIT_W = 64
+SCROLL_ID = 120
+BACKDROP_ID = 99
+PORTRAIT_ID = 40 # + the tile's index
 GROUPS = 9
 # formatio.2da's rows (ethren): the names; the buttons offer the two of 16 (block and column)
 FORMATIONS = ["Block", "Column", "Line", "Threes", "Wedge"]
@@ -74,47 +85,62 @@ Header = {} # "Summary", "Waiting"
 Groups = {} # 1-9 -> [party slots]
 Built = None # the party the tiles were built for: each slot's global ID, in slot order
 Rebuilds = 0 # how often the tiles were rebuilt for a new party (for tests)
+Layout = {} # the tiles as built: "Hero", "Rows" (tiles on show), "Pitch", "TileW", "Count"
+Top = 0 # the first party member on show (0-based), when the list scrolls
+Portraits = {} # slot -> what its portrait shows (for tests): "figure" or "placeholder"
+
+def ColumnWidth ():
+	return COLUMN_W
+
+def PlayArea ():
+	"""the screen left of the party column and above the bar: where screens over the game (the inventory, the record)
+	go, so the column and the bar stay in sight and usable"""
+	import MessageWindow
+	screen = GemRB.GetSystemVariable (SV_WIDTH), GemRB.GetSystemVariable (SV_HEIGHT)
+	return {'x': 0, 'y': 0, 'w': screen[0] - COLUMN_W, 'h': screen[1] - MessageWindow.BAR_H}
+
+def Centred (w, h):
+	"""the frame of a w by h window centred in the play area (as far up as it must go when it is taller)"""
+	area = PlayArea ()
+	return {'x': max (0, area['x'] + (area['w'] - w) // 2), 'y': max (0, area['y'] + (area['h'] - h) // 2), 'w': w, 'h': h}
 
 def PartyKey ():
 	"""who is in the party, slot by slot (global IDs): the tiles are rebuilt when it changes"""
 	return tuple (GemRB.GetDCCFunnel (slot)["GlobalID"] for slot in range (1, min (_Size (), MAX_SLOTS) + 1))
 
-def _Rows (count):
-	"""rows of tiles for a party this size: two columns, filled down then across"""
-	return min (ROWS, max (1, (count + COLUMNS - 1) // COLUMNS))
+def _ListHeight ():
+	"""the column's height for tiles: from under the groups to the bottom of the screen"""
+	return GemRB.GetSystemVariable (SV_HEIGHT) - LIST_Y - GAP
 
 def OpenRoster ():
-	global RosterWindow, Built
+	global RosterWindow, Built, Top
 	if RosterWindow:
 		return RosterWindow
 	Built = PartyKey ()
 	count = len (Built)
-	rows = _Rows (count)
-	width = COLUMNS * TILE_W + (COLUMNS + 1) * GAP
-	height = TILES_Y + rows * (TILE_H + GAP) + GAP
+	hero = count <= HERO_MAX
+	pitch = (HERO_H if hero else TILE_H) + GAP
+	rows = min (count, max (1, (_ListHeight () + GAP) // pitch))
+	scrolls = rows < count
+	Top = min (Top, count - rows) if scrolls else 0
 	screen = GemRB.GetSystemVariable (SV_WIDTH), GemRB.GetSystemVariable (SV_HEIGHT)
-	frame = {'x': screen[0] - width, 'y': 4, 'w': width, 'h': height}
+	frame = {'x': screen[0] - COLUMN_W, 'y': 0, 'w': COLUMN_W, 'h': screen[1]}
 	win = GemRB.CreateView (95, 255, frame)
 	win.AddAlias ("ROSTWIN")
 	win.SetBackground (WindowColor)
-	inner = width - 2 * GAP
-	summary = _Button (win, 100, GAP, SUMMARY_Y, inner - 80, 20, "", OpenGraveyard, "The graveyard: who died, how and where", HeaderFont)
+	# like the stock side windows: the controls take clicks, the window never the keyboard (the game view keeps
+	# it, for the keymap's keys); the backdrop eats the clicks between the controls (they would fall through to
+	# the game view and walk the party)
+	win.SetFlags (IE_GUI_VIEW_IGNORE_EVENTS, OP_OR)
+	inner = COLUMN_W - 2 * GAP
+	summary = _Button (win, 100, GAP, SUMMARY_Y, inner - 56 - GAP, SUMMARY_H, "", OpenGraveyard, "The graveyard: who died, how and where")
 	summary.SetFlags (IE_GUI_BUTTON_ALIGN_LEFT, OP_OR)
-	waiting = _Button (win, 101, GAP + inner - 76, SUMMARY_Y, 76, 20, "", None, "Prompts waiting for you")
+	waiting = _Button (win, 101, COLUMN_W - GAP - 56, SUMMARY_Y, 56, SUMMARY_H, "", None, "Prompts waiting for you")
 	waiting.SetState (IE_GUI_BUTTON_LOCKED)
-	# the buttons: everyone, mine (co-op), the formations, the party settings
-	labels = [("All", SelectAll, "Select everyone"), ("Mine", SelectMine, "Select the characters you control"),
-		("Block", lambda: Formation (0), "Formation: block (four wide). Lines the selection up where its first one stands"),
-		("Column", lambda: Formation (1), "Formation: column of twos. Lines the selection up where its first one stands"),
-		("Set", OpenSettings, "Party settings: Luck, spellburn, prompts, the party AI"),
-		("Rest", RestPress, "Rest the night; at a camp: the camp, where the reserves wait")]
-	w = (inner - (len (labels) - 1) * GAP) // len (labels)
-	for i, (text, action, tip) in enumerate (labels):
-		_Button (win, 102 + i, GAP + i * (w + GAP), BUTTONS_Y, w, 22, text, action, tip)
 	# the saved groups: Ctrl+N saves the selection, Alt+N selects it (a click selects, a right click saves)
 	w = (inner - (GROUPS - 1) * 2) // GROUPS
 	for n in range (1, GROUPS + 1):
-		button = _Button (win, 110 + n, GAP + (n - 1) * (w + 2), GROUPS_Y, w, 18, str (n), lambda n = n: SelectGroup (n), None)
+		button = _Button (win, 110 + n, GAP + (n - 1) * (w + 2), GROUPS_Y, w, GROUPS_H, str (n), lambda n = n: SelectGroup (n), "Group %d: a click (Alt+%d) selects it, a right click (Ctrl+%d) saves the selection" % (n, n, n))
 		button.OnRightPress (lambda control, n = n: SaveGroup (n))
 		button.SetBackground (GroupEmpty)
 		# hot keys are the button's own (one key each), so the saving keys get buttons of their own, hidden
@@ -122,21 +148,94 @@ def OpenRoster ():
 		saver.OnPress (lambda control, n = n: SaveGroup (n))
 		saver.SetHotKey (str (n), GEM_MOD_CTRL, True)
 		button.SetHotKey (str (n), GEM_MOD_ALT, True)
-	for i in range (count):
-		column, row = divmod (i, rows)
-		x = GAP + column * (TILE_W + GAP)
-		y = TILES_Y + row * (TILE_H + GAP)
-		tile = _Button (win, i, x, y, TILE_W, TILE_H, "", lambda slot = i + 1: SelectOnly (slot), None)
+	scrollW = 0
+	if scrolls:
+		scroll = win.CreateScrollBar (SCROLL_ID, {'x': COLUMN_W - GAP - 20, 'y': LIST_Y, 'w': 20, 'h': rows * pitch - GAP})
+		scrollW = scroll.GetFrame ()['w']
+		scroll.SetFrame ({'x': COLUMN_W - GAP - scrollW, 'y': LIST_Y, 'w': scrollW, 'h': rows * pitch - GAP})
+		scroll.SetVarAssoc ("RosterTop", Top, 0, count - rows)
+		scroll.OnChange (lambda: ScrollTo (GemRB.GetVar ("RosterTop")))
+		# the wheel over the column (the tiles pass it up to the window): the scroll bar's
+		win.SetEventProxy (scroll)
+	tileW = inner - (scrollW + 2 if scrollW else 0)
+	tileH = pitch - GAP
+	# (a new view goes behind the ones before it: the backdrop last. Views must not overlap: a tile redrawn on
+	# its timer would paint over a sibling on top of it)
+	textX = GAP + (PORTRAIT_W + 2 if hero else 0) # a portrait tile: the picture on the left, the text tile beside it
+	for i in range (rows):
+		y = LIST_Y + i * pitch
+		if hero:
+			# the portrait: a button of its own left of the tile, with the tile's handlers
+			portrait = win.CreateButton (PORTRAIT_ID + i, GAP, y, PORTRAIT_W, tileH)
+			portrait.SetFlags (IE_GUI_BUTTON_NO_IMAGE | IE_GUI_BUTTON_PICTURE | IE_GUI_BUTTON_CENTER_PICTURES, OP_OR)
+			portrait.SetBackground (PortraitBack)
+			portrait.SetFont (HeaderFont)
+			portrait.OnPress (lambda control, i = i: _TileAction (SelectOnly, i))
+			_TileHandlers (portrait, i)
+		tile = _Button (win, i, textX, y, tileW - (textX - GAP), tileH, "", lambda i = i: _TileAction (SelectOnly, i), None)
 		tile.SetFlags (IE_GUI_BUTTON_ALIGN_LEFT | IE_GUI_BUTTON_ALIGN_TOP | IE_GUI_BUTTON_ALIGN_ANCHOR, OP_OR)
 		tile.SetFlags (IE_GUI_BUTTON_NO_IMAGE, OP_NAND) # its borders (the owner, the HP bar) need it off
-		tile.SetAnchor (OWNER_W + 4, 3)
-		tile.OnShiftPress (lambda control, slot = i + 1: ToggleSelect (slot))
-		tile.OnRightPress (lambda control, slot = i + 1: ToggleSelect (slot))
-		tile.OnDoublePress (lambda control, slot = i + 1: CenterOn (slot))
+		_TileHandlers (tile, i)
+		tile.SetAnchor (OWNER_W + 4, 4 if hero else 3)
+	tileW -= textX - GAP
+	Backdrop (win, COLUMN_W, screen[1])
+	Layout.clear ()
+	Layout.update ({"Hero": hero, "Rows": rows, "Pitch": pitch, "TileW": tileW, "TileH": tileH, "Count": count, "Scrolls": scrolls})
+	Portraits.clear ()
 	RosterWindow = win
 	_StartTimer ()
 	UpdateRoster ()
 	return win
+
+def Backdrop (win, w, h):
+	"""a locked button behind everything (create it last): the clicks between the controls stop there instead of
+	falling through a window that ignores events to the game view (and walking the party)"""
+	backdrop = win.CreateButton (BACKDROP_ID, 0, 0, w, h)
+	backdrop.SetFlags (IE_GUI_BUTTON_NO_IMAGE, OP_OR)
+	backdrop.SetState (IE_GUI_BUTTON_LOCKED)
+	return backdrop
+
+def _TileHandlers (button, i):
+	button.OnShiftPress (lambda control, i = i: _TileAction (ToggleSelect, i))
+	button.OnRightPress (lambda control, i = i: _TileAction (ToggleSelect, i))
+	button.OnDoublePress (lambda control, i = i: _TileAction (CenterOn, i))
+	# an item picked up in the inventory, dropped on the tile: to that party member
+	button.SetAction (lambda control, i = i: _TileAction (GiveItem, i), IE_ACT_DRAG_DROP_DST)
+
+def _TileAction (action, i):
+	"""a tile's click: what it does to the party member it shows now (the list may have scrolled)"""
+	slot = Top + i + 1
+	if slot <= len (Built or ()):
+		action (slot)
+
+def ScrollTo (top):
+	"""the list from party member top (0-based) on; clamped to the party"""
+	global Top
+	rows, count = Layout.get ("Rows", 0), Layout.get ("Count", 0)
+	top = max (0, min (int (top), count - rows))
+	if top == Top:
+		return
+	Top = top
+	if RosterWindow and Layout.get ("Scrolls"):
+		GemRB.SetVar ("RosterTop", Top)
+		scroll = RosterWindow.GetControl (SCROLL_ID)
+		if scroll:
+			scroll.SetVarAssoc ("RosterTop", Top, 0, count - rows)
+	Portraits.clear ()
+	UpdateRoster ()
+
+def TileControl (slot):
+	"""the tile showing party member slot, scrolling the list to it if need be (for tests and clicks)"""
+	rows = Layout.get ("Rows", 0)
+	if slot <= Top:
+		ScrollTo (slot - 1)
+	elif slot > Top + rows:
+		ScrollTo (slot - rows)
+	return RosterWindow.GetControl (slot - Top - 1) if RosterWindow else None
+
+def OnShow ():
+	"""the party members on show now: their slots, top to bottom"""
+	return list (range (Top + 1, Top + Layout.get ("Rows", 0) + 1))
 
 def Rebuild ():
 	"""the tiles again for the party as it is now (the window closed and made anew)"""
@@ -157,10 +256,14 @@ def Rebuild ():
 	return OpenRoster ()
 
 def TileCount ():
-	"""the tiles the window has (for tests: a tile beyond the party would be a stale one)"""
+	"""the party members the column has tiles for, on show or a scroll away (for tests: one beyond the party would
+	be a stale tile); tile controls past the list's rows would be stale too"""
 	if not RosterWindow:
 		return 0
-	return sum (1 for i in range (MAX_SLOTS) if RosterWindow.GetControl (i))
+	controls = sum (1 for i in range (MAX_SLOTS) if RosterWindow.GetControl (i))
+	if controls != Layout.get ("Rows"):
+		return -controls
+	return Layout.get ("Count", 0)
 
 def _Button (win, id, x, y, w, h, text, action, tooltip = None, font = None):
 	button = win.CreateButton (id, x, y, w, h)
@@ -190,6 +293,11 @@ def _Tick ():
 	except Exception:
 		# the window went with the game (back to the menu, a load)
 		RosterWindow = None
+	try:
+		import MessageWindow
+		MessageWindow.UpdateBar ()
+	except Exception:
+		pass
 	# M3.3: the end of the funnel and the reserves, when the game's state asks for them
 	try:
 		if RosterWindow:
@@ -204,10 +312,37 @@ def _Tick ():
 def _Size ():
 	return GemRB.GetPartySize ()
 
+def _ShowingOne ():
+	"""the inventory (a top window with a selection handler) or the record screen is open: a click shows that one"""
+	import GUIREC
+	return bool (GemRB.GetView ("WIN_INV")) or GUIREC.Window is not None
+
 def SelectOnly (slot):
-	if slot <= _Size ():
+	if slot > _Size ():
+		return
+	if _ShowingOne ():
+		GemRB.GameSelectPCSingle (slot)
+		import GUIREC
+		if GUIREC.Window:
+			GUIREC.ShowRecord (slot)
+	else:
 		GemRB.GameSelectPC (slot, 1, SELECT_REPLACE)
-		UpdateRoster ()
+	UpdateRoster ()
+
+def GiveItem (slot):
+	"""an item picked up in the inventory, clicked on a tile: into that party member's pack (too far away, or a full
+	pack, and it stays in hand)"""
+	if not GemRB.IsDraggingItem ():
+		SelectOnly (slot)
+		return
+	import InventoryCommon
+	import GUIINV
+	if GemRB.GetView ("MsgSys", 1):
+		InventoryCommon.OnDropItemToPC (slot)
+	else:
+		GemRB.DropDraggedItem (slot, -3)
+	GUIINV.Refresh ()
+	UpdateRoster ()
 
 def ToggleSelect (slot):
 	if slot <= _Size ():
@@ -383,6 +518,12 @@ def TileInfo (slot, owners = None):
 	if status and not dead:
 		first += "  [%s]" % status
 	text = "%s\n%s" % (first, occupation or "-")
+	if Layout.get ("Hero"):
+		# a portrait tile: class and level, HP and Luck on lines of their own
+		import DCCSheet
+		stats = GemRB.GetDCCStats (slot)
+		klass = DCCSheet.ClassText (stats) if stats else ""
+		text = "%s\n%s\nHP %d/%d\nLuck %d" % (first, klass or occupation or "-", max (hp, 0), hpMax, luck)
 	tooltip = "%s: %s, HP %d/%d, Luck %d, %s" % (name, OccupationName (record["Occupation"]) or "no occupation", max (hp, 0), hpMax, luck, _WeaponName (slot, record["Occupation"]))
 	if status:
 		tooltip += " (%s)" % status
@@ -424,13 +565,14 @@ def _ShowTile (button, info):
 	button.SetColor (DeadText if info["Dead"] else LiveText)
 	button.SetText (info["Text"])
 	button.SetTooltip (info["Tooltip"])
+	w, h = Layout["TileW"], Layout["TileH"]
 	# the owner's colour on the edge (co-op), the HP bar along the bottom
 	owner = info["Owner"]
 	if owner is not None:
-		button.SetBorder (0, PLAYER_COLORS[owner % len (PLAYER_COLORS)], 1, 1, {'x': 0, 'y': 0, 'w': OWNER_W, 'h': TILE_H})
+		button.SetBorder (0, PLAYER_COLORS[owner % len (PLAYER_COLORS)], 1, 1, {'x': 0, 'y': 0, 'w': OWNER_W, 'h': h})
 	else:
 		button.EnableBorder (0, 0)
-	bar = {'x': OWNER_W + 3, 'y': TILE_H - BAR_H - 2, 'w': TILE_W - OWNER_W - 6, 'h': BAR_H}
+	bar = {'x': OWNER_W + 3, 'y': h - BAR_H - 2, 'w': w - OWNER_W - 6, 'h': BAR_H}
 	button.SetBorder (1, BarBack, 1, 1, bar)
 	if info["Dead"] or info["MaxHP"] < 1 or info["HP"] < 1:
 		button.EnableBorder (2, 0)
@@ -440,6 +582,28 @@ def _ShowTile (button, info):
 	filled = dict (bar)
 	filled['w'] = max (1, int (bar['w'] * share))
 	button.SetBorder (2, colour, 1, 1, filled)
+
+def _ShowPortrait (button, slot, info):
+	"""the portrait tile's picture: the character's own figure until portraits can be picked (the funnel's paper
+	doll, GemRB.DCCAvatarFrame: the body with its hair and beard, standing, facing the viewer), drawn once"""
+	if Portraits.get (slot):
+		return
+	figure = None
+	try:
+		stats = GemRB.GetDCCStats (slot)
+		colours = [GemRB.GetPlayerStat (slot, stat) & 0xff for stat in range (IE_METAL_COLOR, IE_HAIR_COLOR + 1)]
+		figure = GemRB.DCCAvatarFrame (GemRB.GetPlayerStat (slot, IE_ANIMATION_ID), colours, stats["Hair"], stats["Beard"],
+			1, 0, 0, 2, PORTRAIT_DROP) # 1: IE_ANI_AWAKE, facing south, frame 0, twice the size
+	except Exception as error:
+		print ("[Roster] no figure for %d: %s" % (slot, error))
+	if figure:
+		button.SetPictures (figure[0])
+		Portraits[slot] = "figure"
+	else:
+		button.SetText (GemRB.GetPlayerName (slot, 0)[:1])
+		Portraits[slot] = "placeholder"
+
+PORTRAIT_DROP = 84 # the figure moved down (twice the size, centred): head and shoulders, about
 
 def UpdateRoster ():
 	global RosterWindow
@@ -457,21 +621,23 @@ def UpdateRoster ():
 	owners = _Owners ()
 	infos = []
 	for i in range (len (Built)):
-		button = win.GetControl (i)
 		slot = i + 1
 		info = TileInfo (slot, owners)
 		infos.append (info)
-		_ShowTile (button, info)
 		Shown[slot] = info["Text"]
 		Tiles[slot] = info
+	for row, slot in enumerate (OnShow ()):
+		info = Tiles[slot]
+		_ShowTile (win.GetControl (row), info)
+		if Layout["Hero"]:
+			portrait = win.GetControl (PORTRAIT_ID + row)
+			_ShowPortrait (portrait, slot, info)
+			portrait.SetTooltip (info["Tooltip"])
 	Header["Summary"] = Summary (infos)
 	Header["Waiting"] = WaitingText ()
-	win.GetControl (100).SetText (Header["Summary"])
-	win.GetControl (101).SetText (Header["Waiting"])
-	win.GetControl (103).SetVisible (bool (GemRB.NetGetMode ())) # Select mine: co-op only
-	formation = CurrentFormation ()
-	for i in (0, 1):
-		win.GetControl (104 + i).SetBackground (SelectedColor if formation == i else ButtonColor)
+	# the summary on two lines: who is alive, then the dying and the dead
+	win.GetControl (100).SetText (Header["Summary"].replace (", ", "\n", 1))
+	win.GetControl (101).SetText (Header["Waiting"].replace (" ", "\n"))
 	for n in range (1, GROUPS + 1):
 		win.GetControl (110 + n).SetBackground (GroupSet if Groups.get (n) else GroupEmpty)
 	if GraveyardWindow:

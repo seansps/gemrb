@@ -7809,6 +7809,103 @@ static PyObject* GemRB_TestClick(PyObject* /*self*/, PyObject* args)
 	Py_RETURN_NONE;
 }
 
+PyDoc_STRVAR(GemRB_TestDrag__doc,
+	     "===== TestDrag =====\n\
+\n\
+**Prototype:** GemRB.TestDrag (x1, y1, x2, y2[, button, mod, phase])\n\
+\n\
+**Description:** For autotests (ethren): a mouse drag through the event manager, as a player's \n\
+would be: the button pressed at (x1, y1), the mouse moved to (x2, y2) a few pixels at a time with it \n\
+held (a control's drag operation starts once it has left the drag radius), released there. button 1 is the \n\
+left (default); mod 1 shift. phase 1 only presses and moves, phase 2 only releases at (x2, y2): a \n\
+control starts its drag on a timer (an inventory slot picks its item up then), so a test lets a \n\
+frame pass between the two, as a real drag does.\n\
+\n\
+**Return value:** None\n\
+");
+
+static PyObject* GemRB_TestDrag(PyObject* /*self*/, PyObject* args)
+{
+	Point from;
+	Point to;
+	int button = GEM_MB_ACTION;
+	int mod = 0;
+	int phase = 0;
+	PARSE_ARGS(args, "iiii|iii", &from.x, &from.y, &to.x, &to.y, &button, &mod, &phase);
+	const WindowManager* wm = core->GetWindowManager();
+	if (phase != 2) {
+		wm->InjectEvent(EventMgr::CreateMouseMotionEvent(from, mod));
+		wm->InjectEvent(EventMgr::CreateMouseBtnEvent(from, EventButton(button), true, mod));
+		// a few pixels a step, as a hand moves: the drag only starts if the mouse leaves the drag radius while
+		// still over the control it was pressed on
+		int steps = std::max(1, int(Distance(from, to)) / 4);
+		for (int i = 1; i <= steps; ++i) {
+			Point step(from.x + (to.x - from.x) * i / steps, from.y + (to.y - from.y) * i / steps);
+			wm->InjectEvent(EventMgr::CreateMouseMotionEvent(step, mod));
+		}
+	}
+	if (phase != 1) {
+		wm->InjectEvent(EventMgr::CreateMouseBtnEvent(to, EventButton(button), false, mod));
+	}
+	Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(GemRB_TestKey__doc,
+	     "===== TestKey =====\n\
+\n\
+**Prototype:** GemRB.TestKey (key[, mod])\n\
+\n\
+**Description:** For autotests (ethren): a key pressed and released through the event manager, as a \n\
+player's would be (hot keys, then the focused window: the game view's keymap.ini keys only reach it \n\
+while no other window takes the keyboard). key is a character (\"i\") or a key code; mod 1 shift, \n\
+2 ctrl, 4 alt.\n\
+\n\
+**Return value:** None\n\
+");
+
+static PyObject* GemRB_TestKey(PyObject* /*self*/, PyObject* args)
+{
+	PyObject* pykey = nullptr;
+	int mod = 0;
+	PARSE_ARGS(args, "O|i", &pykey, &mod);
+	KeyboardKey key = 0;
+	if (PyUnicode_Check(pykey)) {
+		const char* text = PyUnicode_AsUTF8(pykey);
+		if (!text || !text[0]) {
+			return AttributeError("TestKey: an empty key");
+		}
+		key = KeyboardKey(text[0]);
+	} else {
+		key = KeyboardKey(PyLong_AsLong(pykey));
+	}
+	const WindowManager* wm = core->GetWindowManager();
+	wm->InjectEvent(EventMgr::CreateKeyEvent(key, true, mod));
+	wm->InjectEvent(EventMgr::CreateKeyEvent(key, false, mod));
+	Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(GemRB_TestWheel__doc,
+	     "===== TestWheel =====\n\
+\n\
+**Prototype:** GemRB.TestWheel (x, y, dy)\n\
+\n\
+**Description:** For autotests (ethren): the mouse moved to the screen point and its wheel turned dy \n\
+(negative: towards the user, scrolling down), through the event manager.\n\
+\n\
+**Return value:** None\n\
+");
+
+static PyObject* GemRB_TestWheel(PyObject* /*self*/, PyObject* args)
+{
+	Point pos;
+	int dy = 0;
+	PARSE_ARGS(args, "iii", &pos.x, &pos.y, &dy);
+	const WindowManager* wm = core->GetWindowManager();
+	wm->InjectEvent(EventMgr::CreateMouseMotionEvent(pos, 0));
+	wm->InjectEvent(EventMgr::CreateMouseWheelEvent(Point(0, dy), 0));
+	Py_RETURN_NONE;
+}
+
 PyDoc_STRVAR(GemRB_DCCAvatarFrame__doc,
 	     "===== DCCAvatarFrame =====\n\
 \n\
@@ -16595,6 +16692,9 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(DCCPose, METH_VARARGS),
 	METHOD(DCCAvatarFrame, METH_VARARGS),
 	METHOD(TestClick, METH_VARARGS),
+	METHOD(TestDrag, METH_VARARGS),
+	METHOD(TestKey, METH_VARARGS),
+	METHOD(TestWheel, METH_VARARGS),
 	METHOD(DCCAttack, METH_VARARGS),
 	METHOD(GetDCCLastAttack, METH_VARARGS),
 	METHOD(GetDCCCombatLog, METH_VARARGS),
