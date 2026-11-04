@@ -7092,6 +7092,7 @@ static PyObject* GemRB_GetDCCStats(PyObject* /*self*/, PyObject* args)
 	PyDict_SetItemString(dict, "BeardOverlay", DecRef(PyString_FromString, looks ? looks->GetBeardRef().c_str() : ""));
 	PyDict_SetItemString(dict, "WeaponOverlay", DecRef(PyString_FromString, looks ? looks->GetWeaponRef().c_str() : ""));
 	PyDict_SetItemString(dict, "OffhandOverlay", DecRef(PyString_FromString, looks ? looks->GetOffhandRef().c_str() : ""));
+	PyDict_SetItemString(dict, "HelmetOverlay", DecRef(PyString_FromString, looks ? looks->GetHelmetRef().c_str() : ""));
 	DictInt(dict, "Stance", actor->GetStance());
 	// the weapon's animation: its type (0 one-handed, 1 two-handed, 2 two weapons; a weapon held in
 	// both hands, dcchold.2da, is 1 with the off hand free), the ITM's overhand/backhand/thrust

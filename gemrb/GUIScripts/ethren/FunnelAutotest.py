@@ -60,7 +60,7 @@
 #   i. looks2: mannequins (FNTLOOKM/F, the bald bodies) with every funnel weapon class on both rigs, ready, attacking
 #      from four facings (the spear's thrust A6, A5 behind a shield; bows, crossbow and sling shooting) and lying dead;
 #      the spear from the five drawn facings; every hair style and beard on its rig; each helmet over long and short
-#      hair; the ten hair colours; the items' own colours on their overlays; two weapons (S5) on all 8 bodies (the
+#      hair; S7: the hood over the same heads (no hair, the beards whole) and the crop files; the ten hair colours; the items' own colours on their overlays; two weapons (S5) on all 8 bodies (the
 #      halflings' drawn with the dwarves') and the halflings' club and hand axe, attacking from four facings; the stance files and colour bytes checked,
 #      screenshots looks2_*.bmp
 # Phase 4 (areas), only when asked (--scenario area):
@@ -73,6 +73,7 @@ import GemRB
 import DCCSheet
 from GUIDefines import *
 from ie_stats import *
+from ie_restype import RES_BAM
 
 STATE_DEAD = 0x800
 SaveName = "funneltest"
@@ -885,6 +886,10 @@ def _Looks2 ():
 			_Check ("looks2: the helmets' colours (byte 3: kettle hat dark iron 2, nasal helm steel 1)", [(GemRB.GetPlayerStat (gids[i * len (wearers)], IE_METAL_COLOR) >> 24) & 0xff for i in (0, 1)], [2, 1])
 		else:
 			_Check ("looks2: the helmets' colours (byte 3: the cap brown leather 47; the full helm steel 1, dark leather 48)", [(GemRB.GetPlayerStat (gids[0], IE_LEATHER_COLOR) >> 24) & 0xff, (GemRB.GetPlayerStat (gids[len (wearers)], IE_METAL_COLOR) >> 24) & 0xff, (GemRB.GetPlayerStat (gids[len (wearers)], IE_LEATHER_COLOR) >> 24) & 0xff], [47, 1, 48])
+		if pair[0] == "FNTKHAT":
+			# S7: the open crops' files are there: the male dreads and ponytail (XD, XT, empty from S5 to S7) and a
+			# female long style, on each rig's size letter (L male, F female)
+			_Check ("looks2: the open-helmet crops' files (WQLXD, WQLXT, WQFXL)", [GemRB.HasResource (ref, RES_BAM) for ref in ("WQLXDG1", "WQLXTG1", "WQFXLG1")], [True] * 3)
 		tag = "kh_nh" if pair[0] == "FNTKHAT" else "lc_fh"
 		for face, label in ((0, "s"), (4, "w"), (8, "n")):
 			_Face (gids, face)
@@ -892,6 +897,23 @@ def _Looks2 ():
 			_LooksShot ("helmets_%s_%s" % (tag, label), gids[3])
 		_Clear ()
 		yield
+
+	# 4b. S7: the hood (RH, dcchelm.2da CLOSED 2) over the same heads: no hair at all under it (not even the long styles'
+	# crops), every beard whole (BD, not the closed helm's ZD)
+	gids = [_Mannequin (female, column, 0, hair, beard, [("helmet", "FNTHOOD")], hairColour = 41 if not female else 42) for column, (female, hair, beard) in enumerate (wearers)]
+	yield
+	yield
+	_Check ("looks2: the hood is worn (RH)", [GemRB.GetDCCStats (gid)["HelmetOverlay"] for gid in gids], ["RH"] * len (wearers))
+	_Check ("looks2: under the hood no hair, the beard whole", [(GemRB.GetDCCStats (gid)["HairOverlay"], GemRB.GetDCCStats (gid)["BeardOverlay"]) for gid in gids],
+		[("", "BD"), ("", ""), ("", "BC"), ("", ""), ("", ""), ("", ""), ("", ""), ("", "")])
+	_Check ("looks2: the hood's colour (byte 3 of the major colour: forest green 17)", (GemRB.GetPlayerStat (gids[0], IE_MAJOR_COLOR) >> 24) & 0xff, 17)
+	_Check ("looks2: the hood's files on both rigs (WQLRH, WQFRH: G1 and A1)", [GemRB.HasResource (ref, RES_BAM) for ref in ("WQLRHG1", "WQFRHG1", "WQLRHA1", "WQFRHA1")], [True] * 4)
+	for face, label in ((0, "s"), (4, "w"), (8, "n")):
+		_Face (gids, face)
+		yield
+		_LooksShot ("hood_%s" % label, gids[3])
+	_Clear ()
+	yield
 
 	# 5. colours: the ten hair rows on a man (mohawk, full beard) and a woman (long hair)
 	gids = [_Mannequin (False, column, 0, 5, 1, hairColour = 36 + column) for column in range (10)]

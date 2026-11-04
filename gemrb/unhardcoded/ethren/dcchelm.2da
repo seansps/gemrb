@@ -3,9 +3,12 @@
 # ethren (S5): the helmet overlays (art/sprites/overlays.json "helmets") and whether each is closed (DCC/Looks.h).
 # Rows by the helmet's 2-letter animation code (ITM 0x22). An open helmet draws the hair's crop at its rim
 # (dcchair.2da HELMET); a closed one covers the head down to the neck, so the open crop would poke out of it:
-# it draws the hair's CLOSED crop instead. CLOSED 1: closed, 0: open; a helmet not listed is open.
+# it draws the hair's CLOSED crop instead. S7: a hood (RH, the Ranger outfit's cloth hood with its mantle) covers all the
+# hair and leaves the face bare: no hair is drawn under it and a beard is drawn whole (its own CODE).
+# CLOSED 1: closed, 0: open, 2: a hood; a helmet not listed is open.
       CLOSED
 LC    0
 KH    0
 NH    0
 FH    1
+RH    2

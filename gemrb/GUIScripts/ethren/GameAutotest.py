@@ -14,18 +14,19 @@
 #      edge -> hall, each arrival checked (all sixteen in the new area);
 #   4. the roster's tiles answer real mouse clicks (GemRB.TestClick): select, shift-click, right click;
 #   5. the wooded trail's content (DL0300, the first visit; _Trail): the cart's bandits placed and hostile, the archer's cover,
-#      their loot, the carter and the cart; every info point's string, by a real click; the snare's data; a bandit's last words,
+#      their loot, their hoods (no hair under them, the beards whole), the carter and the cart; every info point's string, by a real click; the snare's data; a bandit's last words,
 #      a broken one's run up the trail and off the map, one taken alive and his dialog; a Detect traps searcher finds the snare
 #      (the notice line, the tip), a walker springs it (held, its weapon dropped, the coppers) and one with a knife cuts it
 #      down; the herb patch's check; the trail's mouth; the party walks up the trail;
 #   6. screenshots in the save path: game_looks (the paper doll), game_roll (the rolling screen), game_<area> (each area as drawn, the
-#      first visit), game_hall_screen (the hall with the GUI), game_trail_* (the cart, the archer, the hound alive and dead, an info point, the snare).
+#      first visit), game_hall_screen (the hall with the GUI), game_trail_* (the cart, the archer, the hound alive and dead, the hooded captive, an info point, the snare).
 # Every check logs "[ETH] ok ..." or "[ETH] FAIL ...", the end "[ETH] autotest done: N checks, F failed";
 # ETH_AT_DONE becomes 1 if all passed, 2 if not (run.sh's AutotestQuit).
 
 import GemRB
 from GUIDefines import *
 from ie_stats import *
+from ie_restype import RES_BAM
 
 Chosen = {} # what the rolling screen test chose for the first card (M3.5)
 Checks = 0
@@ -260,8 +261,15 @@ def _Trail ():
 	# AC: leather 12, padded 11 and the barricade's cover +2 while the archer keeps his post
 	_Check ("trail: AC cutthroats 12, the archer at his post 11 +2 cover", [GemRB.GetDCCStats (i)["AC"] for i in ids.values ()], [12, 12, 12, 13])
 	loot = [sorted (ref for ref, n in _Items (i)) for i in ids.values ()]
-	_Check ("trail: each bandit's weapon, armour and silver", loot, [["LEATHR", "SILVER", "SSWORD"], ["LEATHR", "SILVER", "SSWORD"],
-		["LEATHR", "SILVER", "SPEAR"], ["ARROW", "DAGGER", "PADDED", "SBOW", "SILVER"]])
+	_Check ("trail: each bandit's weapon, armour, hood and silver", loot, [["HOOD", "LEATHR", "SILVER", "SSWORD"], ["HOOD", "LEATHR", "SILVER", "SSWORD"],
+		["HOOD", "LEATHR", "SILVER", "SPEAR"], ["ARROW", "DAGGER", "HOOD", "PADDED", "SBOW", "SILVER"]])
+	# S7: the hood (RH, dcchelm.2da CLOSED 2): no hair drawn under it, each one's beard whole (mutton chops, moustache,
+	# full beard, moustache), and the hood's overlay files on the male rig (WQL)
+	looks = [GemRB.GetDCCStats (i) for i in ids.values ()]
+	_Check ("trail: the bandits wear the hood (RH)", [d["HelmetOverlay"] for d in looks], ["RH"] * 4)
+	_Check ("trail: no hair under the hood, the beard whole", [(d["HairOverlay"], d["BeardOverlay"]) for d in looks],
+		[("", "BC"), ("", "BM"), ("", "BD"), ("", "BM")])
+	_Check ("trail: the hood's overlay file is there (WQLRHG1)", GemRB.HasResource ("WQLRHG1", RES_BAM), True)
 	silver = [dict (_Items (i)).get ("SILVER", 0) for i in ids.values ()]
 	_Check ("trail: 2d6 sp each", all (2 <= n <= 12 for n in silver), True)
 	_Check ("trail: the archer's arrows (1d10)", 1 <= dict (_Items (arch)).get ("ARROW", 0) <= 10, True)
@@ -300,9 +308,12 @@ def _Trail ():
 	_Check ("trail: the snare's rope is off until it springs", GemRB.GetDCCTrap ("DlSnareRope")["Flags"] & 0x100, 0x100)
 
 	# a death: last words over its head (cutthroat 2); the first of their side to fall, so the others near check
-	# morale: cutthroat 1 breaks (a forced 1) and runs up the trail and off the map, cutthroat 3 stands (a 20)
+	# morale: cutthroat 1 breaks (a forced 1) and runs up the trail and off the map, cutthroat 3 and the hound stand (a 20)
 	GemRB.DCCForceDice (cut1, [1])
 	GemRB.DCCForceDice (cut3, [20])
+	if hound: # S7: the hound checks too; held to a 20, so its own flight (the dice stream moves with any loot change) can't
+		# crowd the runaway's path up the trail
+		GemRB.DCCForceDice (hound, [20])
 	GemRB.ClearActions (pc)
 	GemRB.ExecuteString ('Kill("DlCut2")', pc)
 	yield from _Wait (lambda: GemRB.GetGameVar ("DL_WORDS") >= 1, 20)
@@ -398,6 +409,11 @@ def _Trail ():
 		_Check ("trail: left tied", [GemRB.GetGameVar ("DL_CAPTIVE_TIED"), _InDialog ()], [1, False])
 		_Check ("trail: he gave up the camp for free", GemRB.GetGameVar ("DL_KNOW_CAMP"), 1)
 		_Check ("trail: and its watch, to a Per check (a 10, the most an untrained d10 gives)", GemRB.GetGameVar ("DL_KNOW_CAMPWATCH"), 1)
+	# S7: the captive in his hood (no hair under it, his full beard), with the one who questioned him beside him
+	for i in range (4):
+		yield
+	_Check ("trail: the captive's hood, no hair, his full beard", [GemRB.GetDCCStats (cut3)[k] for k in ("HelmetOverlay", "HairOverlay", "BeardOverlay")], ["RH", "", "BD"])
+	_Shot ("trail_captive", cut3)
 
 	# the info points, once the fight is over: each one's description, shown by a real click (the examine cursor's)
 	# the hare in the second snare, by the trail: first, from a spot clear of the snare (it springs only on the party)

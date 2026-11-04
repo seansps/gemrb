@@ -7,7 +7,8 @@
 # is what is drawn while a helmet is worn: a cropped style's code (X?: the style cut at the helmets' rim, so
 # what hangs below still shows), the style itself (beards), or * for nothing (short styles). S5: CLOSED is the
 # same under a closed helmet (dcchelm.2da: the armet, down to the neck): a crop of its own, Y? for the hair
-# cropped X? (* for the rest) and Z? for the beards. A code with no BAMs draws nothing.
+# cropped X? (* for the rest) and Z? for the beards. A code with no BAMs draws nothing. S7: under a hood (dcchelm.2da
+# CLOSED 2, RH) no hair is drawn at all and a beard is drawn as its CODE; neither column is read.
 # Each style is rendered on one rig only, so it draws only on that rig's bodies (the size letter): hair 1-7
 # and the beards on the male (L: CPM2), hair 8-13 on the female (F: CPF2). The looks roll (dcclooks.2da)
 # picks them by sex; elsewhere the file is missing and nothing is drawn. S6: every hair style is rendered on
