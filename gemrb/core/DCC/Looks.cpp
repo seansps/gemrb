@@ -35,6 +35,8 @@ bool HairTable::Load(const TableMgr& table)
 		cols[i] = table.GetColumnIndex(std::string(columns[i]));
 		if (cols[i] == TableMgr::npos) return false;
 	}
+	// S7: the code drawn under a hood; optional (without it, no hair under a hood and the beard whole)
+	TableMgr::index_t hoodCol = table.GetColumnIndex(std::string("HOOD"));
 	for (TableMgr::index_t r = 0; r < table.GetRowCount(); ++r) {
 		HairStyle style;
 		const std::string& id = table.QueryField(r, cols[0]);
@@ -49,6 +51,10 @@ bool HairTable::Load(const TableMgr& table)
 		if (style.code.size() != 2) return false;
 		style.underHelmet = Code(table.QueryField(r, cols[3]));
 		style.underClosed = Code(table.QueryField(r, cols[4]));
+		if (hoodCol != TableMgr::npos) {
+			style.hood = true;
+			style.underHood = Code(table.QueryField(r, hoodCol));
+		}
 		Set(style);
 	}
 	return true;
@@ -83,6 +89,7 @@ std::string HairOverlay(const HairStyle* style, Helmet helmet)
 		case Helmet::Closed:
 			return style->underClosed;
 		case Helmet::Hood:
+			if (style->hood) return style->underHood;
 			return style->beard ? style->code : std::string();
 		default:
 			return style->code;

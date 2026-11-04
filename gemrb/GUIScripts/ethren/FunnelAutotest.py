@@ -905,20 +905,36 @@ def _Looks2 ():
 		_Clear ()
 		yield
 
-	# 4b. S7: the hood (RH, dcchelm.2da CLOSED 2) over the same heads: no hair at all under it (not even the long styles'
-	# crops), every beard whole (BD, not the closed helm's ZD)
+	# 4b. S7: the hood (RH, dcchelm.2da CLOSED 2) over the same heads: no hair under it (not even the long styles' crops),
+	# only the hair rows' HOOD code EA, the elves' pointed ears, which the human rigs have no files for (nothing drawn);
+	# every beard whole (BD, not the closed helm's ZD). Row 1: the demihumans under it
 	gids = [_Mannequin (female, column, 0, hair, beard, [("helmet", "FNTHOOD")], hairColour = 41 if not female else 42) for column, (female, hair, beard) in enumerate (wearers)]
+	# (body, hair, beard): the dwarf man with the long and the spade beard, the dwarf woman's long hair, the elf man's
+	# ponytail, the elf woman's long hair, a bald elf (style 14, the ears alone)
+	hooded = [(0x6520, 6, 4), (0x6520, 4, 6), (0x6530, 11, 0), (0x6540, 6, 0), (0x6550, 11, 0), (0x6540, 14, 0)]
+	demi = [_Mannequin (anim & 0x10 != 0, column, 1, hair, beard, [("helmet", "FNTHOOD")], hairColour = 41, anim = anim) for column, (anim, hair, beard) in enumerate (hooded)]
 	yield
 	yield
-	_Check ("looks2: the hood is worn (RH)", [GemRB.GetDCCStats (gid)["HelmetOverlay"] for gid in gids], ["RH"] * len (wearers))
-	_Check ("looks2: under the hood no hair, the beard whole", [(GemRB.GetDCCStats (gid)["HairOverlay"], GemRB.GetDCCStats (gid)["BeardOverlay"]) for gid in gids],
-		[("", "BD"), ("", ""), ("", "BC"), ("", ""), ("", ""), ("", ""), ("", ""), ("", "")])
+	_Check ("looks2: the hood is worn (RH)", [GemRB.GetDCCStats (gid)["HelmetOverlay"] for gid in gids + demi], ["RH"] * (len (wearers) + len (hooded)))
+	_Check ("looks2: under the hood no hair (only the ears' code EA), the beard whole", [(GemRB.GetDCCStats (gid)["HairOverlay"], GemRB.GetDCCStats (gid)["BeardOverlay"]) for gid in gids],
+		[("EA", "BD"), ("EA", ""), ("EA", "BC"), ("EA", ""), ("EA", ""), ("EA", ""), ("EA", ""), ("EA", "")])
+	_Check ("looks2: the human rigs have no ears to draw under the hood (no WQLEA, WQFEA)", [GemRB.HasResource (ref, RES_BAM) for ref in ("WQLEAG1", "WQFEAG1")], [False] * 2)
+	_Check ("looks2: hooded demihumans: the ears' code for any hair, the dwarven beards whole", [(GemRB.GetDCCStats (gid)["HairOverlay"], GemRB.GetDCCStats (gid)["BeardOverlay"]) for gid in demi],
+		[("EA", "BL"), ("EA", "BS"), ("EA", ""), ("EA", ""), ("EA", ""), ("EA", "")])
+	# a hooded elf draws its pointed ears (WQEEA, WQVEA, every stance with the run) and no hair; a hooded dwarf no hair
+	# (the dwarf rigs have no EA files) and its beard (WQDBL, WQDBS); the hood itself on all four rigs
+	_Check ("looks2: a hooded elf draws the ears EA (WQEEA, WQVEA: G1, A1), not its hair style", [GemRB.HasResource (ref, RES_BAM) for ref in ("WQEEAG1", "WQVEAG1", "WQEEAA1", "WQVEAA1")], [True] * 4)
+	_Check ("looks2: a hooded dwarf draws no hair (no WQDEA, WQWEA) and its beard (WQDBL, WQDBS)", [GemRB.HasResource (ref, RES_BAM) for ref in ("WQDEAG1", "WQWEAG1", "WQDBLG1", "WQDBSG1")], [False, False, True, True])
+	_Check ("looks2: the hood's files on the demihuman rigs (WQDRH, WQWRH, WQERH, WQVRH: G1 and A1)", [GemRB.HasResource ("WQ%sRH%s" % (size, suffix), RES_BAM) for size in "DWEV" for suffix in ("G1", "A1")], [True] * 8)
 	_Check ("looks2: the hood's colour (byte 3 of the major colour: forest green 17)", (GemRB.GetPlayerStat (gids[0], IE_MAJOR_COLOR) >> 24) & 0xff, 17)
 	_Check ("looks2: the hood's files on both rigs (WQLRH, WQFRH: G1 and A1)", [GemRB.HasResource (ref, RES_BAM) for ref in ("WQLRHG1", "WQFRHG1", "WQLRHA1", "WQFRHA1")], [True] * 4)
 	for face, label in ((0, "s"), (4, "w"), (8, "n")):
 		_Face (gids, face)
 		yield
 		_LooksShot ("hood_%s" % label, gids[3])
+	_Face (demi, 2)
+	yield
+	_LooksShot ("hood_demi", demi[0])
 	_Clear ()
 	yield
 

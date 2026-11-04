@@ -67,7 +67,8 @@ TEST(DCC_Looks, ClosedHelmets)
 	EXPECT_EQ(table.Worn("RH"), Helmet::Open);
 }
 
-// S7: under a hood no hair at all, whatever its crops, and every beard whole (its own code, not a crop)
+// S7: under a hood no hair at all, whatever its crops, and every beard whole (its own code, not a crop), when the
+// table has no HOOD column (hood unset)
 TEST(DCC_Looks, Hood)
 {
 	HairTable table;
@@ -80,6 +81,22 @@ TEST(DCC_Looks, Hood)
 	EXPECT_EQ(HairOverlay(table.Find(1, true), Helmet::Hood), "BD");
 	EXPECT_EQ(HairOverlay(table.Find(4, true), Helmet::Hood), "BL");
 	EXPECT_EQ(HairOverlay(nullptr, Helmet::Hood), "");
+	// with the HOOD column: its code, whatever the style's crops (the elves' pointed ears EA for every hair style,
+	// drawn under the hood so only the tips out of its outline show; a beard its own code); "" for nothing
+	table.Set({ 4, false, "HD", "XD", "YD", true, "EA" });
+	table.Set({ 1, false, "HP", "", "", true, "EA" });
+	table.Set({ 14, false, "EA", "", "", true, "EA" });
+	table.Set({ 4, true, "BL", "", "ZL", true, "BL" });
+	table.Set({ 2, false, "HA", "", "", true, "" });
+	EXPECT_EQ(HairOverlay(table.Find(4, false), Helmet::Hood), "EA");
+	EXPECT_EQ(HairOverlay(table.Find(1, false), Helmet::Hood), "EA");
+	EXPECT_EQ(HairOverlay(table.Find(14, false), Helmet::Hood), "EA");
+	EXPECT_EQ(HairOverlay(table.Find(4, true), Helmet::Hood), "BL");
+	EXPECT_EQ(HairOverlay(table.Find(2, false), Helmet::Hood), "");
+	// the other helmets don't read it
+	EXPECT_EQ(HairOverlay(table.Find(4, false), Helmet::Open), "XD");
+	EXPECT_EQ(HairOverlay(table.Find(4, false), Helmet::Closed), "YD");
+	EXPECT_EQ(HairOverlay(table.Find(4, false), Helmet::None), "HD");
 }
 
 TEST(DCC_Looks, OverlayColourBytes)

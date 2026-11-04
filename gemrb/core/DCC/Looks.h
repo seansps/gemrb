@@ -46,6 +46,10 @@ struct HairStyle {
 	std::string code; // the overlay's animation code, 2 letters
 	std::string underHelmet; // the code drawn under a helmet, "" for nothing
 	std::string underClosed; // S5: the code drawn under a closed helmet, "" for nothing
+	// S7: the code drawn under a hood ("" for nothing) when hood is set: the elves' pointed ears (EA) for every hair
+	// style, a beard's own code. Unset (a table without the HOOD column): no hair, the beard's own code
+	bool hood = false;
+	std::string underHood {};
 };
 
 /** the helmet a character wears, for the hair drawn under it (Hood: a cloth hood with a mantle, the
@@ -54,7 +58,7 @@ enum class Helmet : uint8_t { None, Open, Closed, Hood };
 
 class GEM_EXPORT HairTable {
 public:
-	/** dcchair.2da: rows by name, columns ID KIND (HAIR or BEARD) CODE HELMET CLOSED */
+	/** dcchair.2da: rows by name, columns ID KIND (HAIR or BEARD) CODE HELMET CLOSED, and optionally HOOD */
 	bool Load(const TableMgr& table);
 	void Set(const HairStyle& style);
 	/** the style of this kind with this id, nullptr for 0 or an unknown one */
@@ -65,8 +69,8 @@ private:
 	std::vector<HairStyle> styles;
 };
 
-/** the overlay to draw for a style: its code, or the code for the helmet worn ("" none; under a hood
- * no hair and the beard's own code) */
+/** the overlay to draw for a style: its code, or the code for the helmet worn ("" none; under a hood its
+ * HOOD code, or without that column no hair and the beard's own code) */
 GEM_EXPORT std::string HairOverlay(const HairStyle* style, Helmet helmet);
 
 /**
