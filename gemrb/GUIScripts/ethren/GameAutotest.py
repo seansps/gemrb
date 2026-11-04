@@ -39,9 +39,12 @@ ROUTE = (
 	("DL0200", "ShrineDoor", "ShrineDoorExit", "DL0203"),
 	("DL0203", None, "ShrineExit", "DL0200"),
 	("DL0200", None, "ToWest", "DL0100"),
+	("DL0100", None, "ToTrail", "DL0300"),
+	("DL0300", None, "ToDelmord", "DL0100"),
 	("DL0100", "HallDoor", "HallDoorExit", "DL0101"),
 )
-NAMES = {"DL0100": "west", "DL0101": "hall", "DL0200": "east", "DL0201": "tavern", "DL0202": "smithy", "DL0203": "shrine"}
+NAMES = {"DL0100": "west", "DL0101": "hall", "DL0200": "east", "DL0201": "tavern", "DL0202": "smithy", "DL0203": "shrine",
+	"DL0300": "trail"}
 
 def Enabled ():
 	return GemRB.LoadTable ("ethauto", True) is not None
