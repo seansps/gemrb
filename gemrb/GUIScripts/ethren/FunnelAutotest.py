@@ -457,6 +457,22 @@ def _Encumbrance ():
 	_Check ("run: about twice as far", walked > 20 and 1.7 * walked <= ran <= 2.3 * walked, True)
 	_Check ("run: the body's run file, G10 after G19 (the overlays' G1)", running["StanceFiles"]["Run"], [running["StanceFiles"]["Ready"][0][:4] + "g10", "g1"])
 	_Check ("run: drawn with the run's own frames (G10 for the body and his hair and beard), not the walk", running["RunFrames"], 1)
+	# Always Run (the R key, MessageWindow.ToggleAlwaysRun): a click's move is a run while it is on, and
+	# the message log says which it is
+	import MessageWindow
+	GemRB.GameSelectPC (brin, 1, SELECT_REPLACE)
+	clicked = []
+	for on in (True, False):
+		MessageWindow.ToggleAlwaysRun ()
+		_Put (brin, start[0], start[1])
+		yield
+		GemRB.GameControlMoveSelected (far[0], far[1], 0)
+		yield
+		clicked.append ((GemRB.GetVar ("Always Run"), GemRB.GetDCCStats (brin)["Stance"]))
+		GemRB.ClearActions (brin)
+	_Check ("always run: a click runs while it is on, walks when off", clicked, [(1, 15), (0, 10)])
+	_Check ("always run: the log says it is off again", "Always run: off" in GemRB.GetView ("MsgSys", 0).QueryText (), True)
+	GemRB.GameSelectPC (0, 1)
 	# screenshots of him walking and running, the view on him (sprites_walk.bmp, sprites_run.bmp)
 	for run in (False, True):
 		_Put (brin, start[0], start[1])
