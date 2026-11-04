@@ -7781,7 +7781,9 @@ PyDoc_STRVAR(GemRB_TestClick__doc,
 \n\
 **Description:** For autotests (ethren): a mouse click at the screen point, moved to, pressed and \n\
 released through the event manager, as a player's would be (window order, focus, hit tests). button \n\
-1 is the left (default), 4 the right; mod 1 shift. Two calls in quick succession are a double click.\n\
+1 is the left (default), 4 the right; mod 1 shift. Two calls in quick succession are a double click. \n\
+button 0 only moves the mouse there: the game view works out what is under the cursor when it next \n\
+draws, so a click on a region or container wants a move and a frame first.\n\
 \n\
 **Return value:** None\n\
 ");
@@ -7796,6 +7798,7 @@ static PyObject* GemRB_TestClick(PyObject* /*self*/, PyObject* args)
 	const WindowManager* wm = core->GetWindowManager();
 	Point pos(x, y);
 	wm->InjectEvent(EventMgr::CreateMouseMotionEvent(pos, mod));
+	if (button == 0) Py_RETURN_NONE;
 	wm->InjectEvent(EventMgr::CreateMouseBtnEvent(pos, EventButton(button), true, mod));
 	wm->InjectEvent(EventMgr::CreateMouseBtnEvent(pos, EventButton(button), false, mod));
 	Py_RETURN_NONE;
@@ -8279,6 +8282,107 @@ static PyObject* GemRB_GameControlMoveSelected(PyObject* /*self*/, PyObject* arg
 	GET_GAMECONTROL();
 	gc->CommandSelectedMovement(Point(x, y), formation != 0);
 	Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(GemRB_GameControlMapToScreen__doc,
+	     "===== GameControlMapToScreen =====\n\
+\n\
+**Prototype:** GemRB.GameControlMapToScreen (x, y)\n\
+\n\
+**Description:** Where a point of the current area is on the screen (the game view's viewport and \n\
+zoom), for GemRB.TestClick. For scripts and tests.\n\
+\n\
+**Return value:** (x, y) in screen coordinates");
+
+static PyObject* GemRB_GameControlMapToScreen(PyObject* /*self*/, PyObject* args)
+{
+	int x;
+	int y;
+	PARSE_ARGS(args, "ii", &x, &y);
+	GET_GAMECONTROL();
+	Point offset = Point(x, y) - gc->Viewport().origin;
+	auto scale = gc->GetScalePercent();
+	if (scale != 100) {
+		offset.x = offset.x * 100 / int(scale);
+		offset.y = offset.y * 100 / int(scale);
+	}
+	Point screen = gc->ConvertPointToScreen(offset);
+	return Py_BuildValue("(ii)", screen.x, screen.y);
+}
+
+PyDoc_STRVAR(GemRB_GameControlGetHover__doc,
+	     "===== GameControlGetHover =====\n\
+\n\
+**Prototype:** GemRB.GameControlGetHover ()\n\
+\n\
+**Description:** What the game view last found under the cursor (as it draws): the script name of \n\
+the door, container or region there (\"\" for none), and the cursor it chose. For tests.\n\
+\n\
+**Return value:** (name, cursor)");
+
+static PyObject* GemRB_GameControlGetHover(PyObject* /*self*/, PyObject* /*args*/)
+{
+	GET_GAMECONTROL();
+	const Scriptable* over = gc->HoveredObject();
+	return Py_BuildValue("(si)", over ? over->GetScriptName().c_str() : "", gc->HoveredCursor());
+}
+
+PyDoc_STRVAR(GemRB_GameControlDebugFlags__doc,
+	     "===== GameControlDebugFlags =====\n\
+\n\
+**Prototype:** GemRB.GameControlDebugFlags ([flags])\n\
+\n\
+**Description:** The game view's debug drawing flags (GameControl::DebugFlags: 0x800 shows the \n\
+unexplored, 0x1000 draws what the party can't see, creatures too), set when given. For \n\
+screenshots in tests.\n\
+\n\
+**Return value:** int, the flags before");
+
+static PyObject* GemRB_GameControlDebugFlags(PyObject* /*self*/, PyObject* args)
+{
+	int flags = -1;
+	PARSE_ARGS(args, "|i", &flags);
+	ieDword before = GameControl::DebugFlags;
+	if (flags >= 0) GameControl::DebugFlags = ieDword(flags);
+	return PyLong_FromLong(long(before));
+}
+
+PyDoc_STRVAR(GemRB_GetOverheadText__doc,
+	     "===== GetOverheadText =====\n\
+\n\
+**Prototype:** GemRB.GetOverheadText (object)\n\
+\n\
+**Description:** The floating text of something in the current area: a creature (by global ID or \n\
+script name), or a region, door or container (by script name). An info point's is its \n\
+description. For scripts and tests.\n\
+\n\
+**Return value:** dict: Text, Displaying (shown now); None if there is no such object");
+
+static PyObject* GemRB_GetOverheadText(PyObject* /*self*/, PyObject* args)
+{
+	PyObject* which = nullptr;
+	PARSE_ARGS(args, "O", &which);
+	GET_GAME();
+	Map* map = game->GetCurrentArea();
+	if (!map) Py_RETURN_NONE;
+	const Scriptable* object = nullptr;
+	if (PyLong_Check(which)) {
+		object = map->GetScriptableByGlobalID(ieDword(PyLong_AsLong(which)));
+	} else {
+		ieVariable name = ASCIIStringFromPy<ieVariable>(which);
+		object = map->GetActorByScriptName(name);
+		const TileMap* tm = map->GetTileMap();
+		if (!object) object = tm->GetInfoPoint(name);
+		if (!object) object = tm->GetDoor(name);
+		if (!object) object = tm->GetContainer(name);
+	}
+	if (!object) Py_RETURN_NONE;
+	PyObject* dict = PyDict_New();
+	PyObject* text = PyString_FromStringObj(object->overHead.GetText());
+	PyDict_SetItemString(dict, "Text", text);
+	Py_DecRef(text);
+	PyDict_SetItemString(dict, "Displaying", DecRef(PyBool_FromLong, long(object->overHead.IsDisplaying())));
+	return dict;
 }
 
 PyDoc_STRVAR(GemRB_GameControlTravel__doc,
@@ -9219,7 +9323,8 @@ PyDoc_STRVAR(GemRB_GetDCCTrap__doc,
 **Description:** A region, door or container of the current area with that script name, its \n\
 trap and lock: Type ('region', 'door', 'container'), Trapped, Detected, FindDC, DisarmDC, \n\
 Locked, LockDC, Flags, Found, Disarm and Lock (the party slots that rolled, a bit each), Notice \n\
-(said), Kind, DisarmAbility, Deadly, XP (dcctrap.2da), ID (its global ID).\n\
+(said), Kind, DisarmAbility, Deadly, XP (dcctrap.2da), ID (its global ID); a container's Items \n\
+too, a list of (resref, count).\n\
 \n\
 **Return value:** dict, None if there is none");
 
@@ -9284,6 +9389,19 @@ static PyObject* GemRB_GetDCCTrap(PyObject* /*self*/, PyObject* args)
 	PyDict_SetItemString(dict, "DisarmAbility", DecRef(PyUnicode_FromString, info->disarmable ? DCCAbilityKeys[static_cast<int>(info->disarm)] : "NONE"));
 	DictInt(dict, "Deadly", info->deadly);
 	DictInt(dict, "XP", info->xp);
+	if (object->Type == ST_CONTAINER) {
+		const Container* container = static_cast<const Container*>(object);
+		PyObject* items = PyList_New(0);
+		for (int i = 0; i < container->inventory.GetSlotCount(); ++i) {
+			const CREItem* item = container->inventory.GetSlotItem(ieDword(i));
+			if (!item) continue;
+			PyObject* entry = Py_BuildValue("(si)", item->ItemResRef.c_str(), int(item->Usages[0]));
+			PyList_Append(items, entry);
+			Py_DecRef(entry);
+		}
+		PyDict_SetItemString(dict, "Items", items);
+		Py_DecRef(items);
+	}
 	return dict;
 }
 
@@ -16435,6 +16553,7 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(GetGameString, METH_VARARGS),
 	METHOD(GetGameTime, METH_NOARGS),
 	METHOD(GetGameVar, METH_VARARGS),
+	METHOD(GetOverheadText, METH_VARARGS),
 	METHOD(GetINIBeastsKey, METH_VARARGS),
 	METHOD(GetINIPartyCount, METH_NOARGS),
 	METHOD(GetINIPartyKey, METH_VARARGS),
@@ -16514,6 +16633,9 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(GetDCCGraveyard, METH_NOARGS),
 	METHOD(DCCWalk, METH_VARARGS),
 	METHOD(GameControlMoveSelected, METH_VARARGS),
+	METHOD(GameControlDebugFlags, METH_VARARGS),
+	METHOD(GameControlGetHover, METH_NOARGS),
+	METHOD(GameControlMapToScreen, METH_VARARGS),
 	METHOD(GameControlTravel, METH_VARARGS),
 	METHOD(GetActorPosition, METH_VARARGS),
 	METHOD(DCCSetPromptOptions, METH_VARARGS),

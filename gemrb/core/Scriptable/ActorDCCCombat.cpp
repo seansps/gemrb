@@ -1152,6 +1152,26 @@ static void DropAway(Actor* holder, const Actor* attacker, int feet)
 	if (holder->inventory.DropItemAtLocation(slot, 0, map, where)) holder->ReinitQuickSlots();
 }
 
+bool Actor::DCCDropHands()
+{
+	Map* map = GetCurrentArea();
+	if (!map) return false;
+	bool dropped = false;
+	if (HasWeapon(this, true)) {
+		dropped = inventory.DropItemAtLocation(inventory.GetEquippedSlot(), 0, map, Pos);
+	}
+	int offHand = inventory.GetShieldSlot();
+	const CREItem* held = offHand >= 0 ? inventory.GetSlotItem(offHand) : nullptr;
+	if (held && !(held->Flags & IE_INV_ITEM_UNDROPPABLE)) {
+		dropped = inventory.DropItemAtLocation(offHand, 0, map, Pos) || dropped;
+	}
+	if (dropped) {
+		ReinitQuickSlots();
+		Feedback(fmt::format(u"{} drops what it holds", Name(this)), FT_COMBAT);
+	}
+	return dropped;
+}
+
 // the living foes of a creature (another side) near a point, nearest first
 static std::vector<Actor*> FoesNear(const Actor* of, const Point& where, int feet, const Actor* except)
 {

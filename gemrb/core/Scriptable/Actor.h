@@ -828,6 +828,9 @@ public:
 	int DCCGrapple(Actor* target);
 	/** walking away from foes it's in melee with gives them a free attack each (DoStep) */
 	void DCCCheckWithdrawal(const Point& before);
+	/** DCC: whatever it holds falls at its feet (a snare's catch): the weapon in hand and the off
+	 * hand's shield or weapon; fists and undroppable items stay. True if anything fell */
+	bool DCCDropHands();
 	/** DCC: in melee with a living foe that swung at it (or it at the foe) in the last two rounds */
 	bool DCCEngaged() const;
 	/** DCC (M2.11): the hair and beard overlays for IE_DCC_HAIR and IE_DCC_BEARD (and the helmet) */
