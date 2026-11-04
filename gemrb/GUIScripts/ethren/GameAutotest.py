@@ -526,8 +526,9 @@ def _Trail ():
 	# full beard, moustache), and the hood's overlay files on the male rig (WQL)
 	looks = [GemRB.GetDCCStats (i) for i in ids.values ()]
 	_Check ("trail: the bandits wear the hood (RH)", [d["HelmetOverlay"] for d in looks], ["RH"] * 4)
-	_Check ("trail: no hair under the hood, the beard whole", [(d["HairOverlay"], d["BeardOverlay"]) for d in looks],
-		[("", "BC"), ("", "BM"), ("", "BD"), ("", "BM")])
+	# (a hair style under the hood draws its HOOD code EA, the elves' pointed ears: the human rig has no such files)
+	_Check ("trail: no hair under the hood (EA or none, no WQLEA), the beard whole", [(d["HairOverlay"] in ("", "EA"), d["BeardOverlay"]) for d in looks] + [GemRB.HasResource ("WQLEAG1", RES_BAM)],
+		[(True, "BC"), (True, "BM"), (True, "BD"), (True, "BM"), False])
 	_Check ("trail: the hood's overlay file is there (WQLRHG1)", GemRB.HasResource ("WQLRHG1", RES_BAM), True)
 	# the gang's colours (CRE pal16 rows): the forest green tunic under the hood (major 17; the hood itself is the HOOD
 	# item's forest green, the helmet's major range, colour byte 3), faded black breeches (minor 27), oxblood leather (49);
@@ -701,7 +702,7 @@ def _Trail ():
 	# S7: the captive in his hood (no hair under it, his full beard), with the one who questioned him beside him
 	for i in range (4):
 		yield
-	_Check ("trail: the captive's hood, no hair, his full beard", [GemRB.GetDCCStats (cut3)[k] for k in ("HelmetOverlay", "HairOverlay", "BeardOverlay")], ["RH", "", "BD"])
+	_Check ("trail: the captive's hood, no hair (EA or none: nothing on the human rig), his full beard", [GemRB.GetDCCStats (cut3)[k] if k != "HairOverlay" else GemRB.GetDCCStats (cut3)[k] in ("", "EA") for k in ("HelmetOverlay", "HairOverlay", "BeardOverlay")], ["RH", True, "BD"])
 	_Shot ("trail_captive", cut3)
 
 	# the info points, once the fight is over: each one's description, shown by a real click (the examine cursor's)
