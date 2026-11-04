@@ -23,6 +23,10 @@
 //                                 outline shows and it gets Detected, as if a searcher had found it
 //   object DCCLowestLuck(...)     the party member in the caller's area with the lowest Luck; called
 //                                 from a region (a trap), only those inside its outline
+//   DCCDropHands(O:Object*)       what the creature holds falls at its feet: the weapon in hand and
+//                                 the off hand's shield or weapon (a snare yanks its catch off its feet)
+//   DCCDropItem(O:Object*,S:Item*,I:Count*)  that many of a new item lie on the ground at the object's
+//                                 feet (the caller's without one): a ground pile, as a dropped item is
 
 #include "ie_stats.h"
 
@@ -245,6 +249,31 @@ void GameScript::DCCRevealTrap(Scriptable* Sender, Holder<Action> parameters)
 		return;
 	}
 	trap->DCCRevealTrap(Sender->GetGlobalID());
+}
+
+void GameScript::DCCDropHands(Scriptable* Sender, Holder<Action> parameters)
+{
+	if (!DCCScripts()) return;
+	Actor* actor = Scriptable::As<Actor>(GetScriptableFromObject(Sender, parameters));
+	if (!actor) {
+		Log(WARNING, "GameScript", "DCCDropHands: no creature");
+		return;
+	}
+	actor->DCCDropHands();
+}
+
+void GameScript::DCCDropItem(Scriptable* Sender, Holder<Action> parameters)
+{
+	if (!DCCScripts()) return;
+	const Scriptable* where = parameters->objects[1] ? GetScriptableFromObject(Sender, parameters) : Sender;
+	Map* map = where ? where->GetCurrentArea() : nullptr;
+	if (!map || parameters->int0Parameter <= 0) return;
+	CREItem* item = new CREItem();
+	if (!CreateItemCore(item, parameters->resref0Parameter, parameters->int0Parameter, 0, 0)) {
+		delete item;
+		return;
+	}
+	map->AddItemToLocation(where->Pos, item);
 }
 
 Targets* GameScript::DCCLowestLuck(const Scriptable* Sender, Targets* parameters, int ga_flags)

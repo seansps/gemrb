@@ -13,8 +13,13 @@
 #      hall -> western edge -> village east -> tavern -> east -> smithy -> east -> shrine -> east -> western
 #      edge -> hall, each arrival checked (all sixteen in the new area);
 #   4. the roster's tiles answer real mouse clicks (GemRB.TestClick): select, shift-click, right click;
-#   5. screenshots in the save path: game_looks (the paper doll), game_roll (the rolling screen), game_<area> (each area as drawn, the
-#      first visit), game_hall_screen (the hall with the GUI).
+#   5. the wooded trail's content (DL0300, the first visit; _Trail): the cart's bandits placed and hostile, the archer's cover,
+#      their loot, the carter and the cart; every info point's string, by a real click; the snare's data; a bandit's last words,
+#      a broken one's run up the trail and off the map, one taken alive and his dialog; a Detect traps searcher finds the snare
+#      (the notice line, the tip), a walker springs it (held, its weapon dropped, the coppers) and one with a knife cuts it
+#      down; the herb patch's check; the trail's mouth; the party walks up the trail;
+#   6. screenshots in the save path: game_looks (the paper doll), game_roll (the rolling screen), game_<area> (each area as drawn, the
+#      first visit), game_hall_screen (the hall with the GUI), game_trail_* (the cart, the archer, an info point, the snare).
 # Every check logs "[ETH] ok ..." or "[ETH] FAIL ...", the end "[ETH] autotest done: N checks, F failed";
 # ETH_AT_DONE becomes 1 if all passed, 2 if not (run.sh's AutotestQuit).
 
@@ -164,6 +169,310 @@ def _Run ():
 		if to not in seen:
 			seen.add (to)
 			_Shot (NAMES[to], 1)
+			if to == "DL0300":
+				yield from _Trail ()
+
+# --- the wooded trail (DL0300): docs/world/funnel-adventure.md, area 3 -------------------------------------------------
+
+TRAIL_BANDITS = ("DlCut1", "DlCut2", "DlCut3", "DlArch")
+TRAIL_INFO = ("DlTollBoard", "DlHeadMan", "DlHeadGranny", "DlHeadYoung", "DlBarricade", "DlCartInfo", "DlBirches", "DlHare", "DlHerbs")
+LAST_WORDS = ("Tell Bess she owes me four silver.", "It's warm. Why is it warm?", "Not the face. I'm getting married.",
+	"Ha! Missed m--", "I can hear it counting.", "Bury me face down. It can't find you face down.")
+MS_NONE, MS_DETECTTRAPS = 0, 2
+Hover = ["", 0] # what _ClickMap's hover found under the cursor
+
+def _Logged (text):
+	return any (text in line for line in GemRB.GetDCCCombatLog ())
+
+def _Items (actor):
+	"""the resrefs (upper case) and counts (1 for an item that isn't a stack) of what a creature carries, fists aside"""
+	items = []
+	for slot in GemRB.GetSlots (actor, 0, 1):
+		item = GemRB.GetSlotItem (actor, slot)
+		if item and item["ItemResRef"].upper () != "FIST":
+			items.append ((item["ItemResRef"].upper (), item["Usages0"] or 1))
+	return items
+
+def _Pile (name):
+	"""a named container's items, as _Items"""
+	trap = GemRB.GetDCCTrap (name)
+	return [(ref.upper (), count or 1) for ref, count in trap["Items"]] if trap else None
+
+def _GroundAt (pc):
+	"""the ground pile at a party member's feet, as _Items"""
+	pile = GemRB.GetContainer (pc, 1)
+	items = []
+	for i in range (pile["ItemCount"] if pile else 0):
+		item = GemRB.GetContainerItem (pc, i)
+		if item:
+			items.append ((item["ItemResRef"].upper (), item["Usages0"] or 1))
+	return items
+
+def _AreaVar (name):
+	"""a MYAREA variable of the current area (0-20)"""
+	for value in range (21):
+		if GemRB.EvaluateString ('Global("%s","MYAREA",%d)' % (name, value), True):
+			return value
+	return -1
+
+def _Unpause ():
+	if GemRB.GamePause (3, 1):
+		GemRB.GamePause (0, 1)
+
+def _ClickMap (x, y, pc, name = None):
+	"""a real click on the area at (x, y), with pc selected: the view moves there first. With name, the hover is
+	tried again (the view may still be settling) until the game view finds that region or container under the cursor"""
+	GemRB.GameSelectPC (pc, 1, SELECT_REPLACE)
+	GemRB.ClearActions (pc)
+	GemRB.ExecuteString ("MoveViewPoint([%d.%d],0)" % (x, y), pc)
+	for i in range (3):
+		yield
+	for i in range (5):
+		sx, sy = GemRB.GameControlMapToScreen (x, y)
+		GemRB.TestClick (sx, sy, 0) # the hover first: the game view finds what is under the cursor as it draws
+		yield
+		Hover[:] = GemRB.GameControlGetHover ()
+		if not name or Hover[0] == name:
+			break
+	sx, sy = GemRB.GameControlMapToScreen (x, y)
+	GemRB.TestClick (sx, sy)
+	yield
+
+def _Jump (actor, x, y):
+	GemRB.ClearActions (actor)
+	GemRB.ExecuteString ("JumpToPoint([%d.%d])" % (x, y), actor)
+
+def _Trail ():
+	"""the wooded trail's content, on the party's first visit"""
+	party = _Party ()
+	# the test looks everywhere at once: the whole map explored (the clicks need it, the screenshots too)
+	GemRB.ExploreArea (True)
+	yield
+	ids = dict ((name, GemRB.DCCFindActor (name)) for name in TRAIL_BANDITS)
+	_Check ("trail: the cart's four bandits are placed", all (ids.values ()), True)
+	if not all (ids.values ()):
+		return
+	cut1, cut2, cut3, arch = [ids[name] for name in TRAIL_BANDITS]
+	_Check ("trail: the bandits are hostile (EA enemy)", [GemRB.GetPlayerStat (i, IE_EA) for i in ids.values ()], [255] * 4)
+	_Check ("trail: they haven't noticed the party yet", _AreaVar ("DL_CART_ALERT"), 0)
+	for i in range (4):
+		yield
+	# AC: leather 12, padded 11 and the barricade's cover +2 while the archer keeps his post
+	_Check ("trail: AC cutthroats 12, the archer at his post 11 +2 cover", [GemRB.GetDCCStats (i)["AC"] for i in ids.values ()], [12, 12, 12, 13])
+	loot = [sorted (ref for ref, n in _Items (i)) for i in ids.values ()]
+	_Check ("trail: each bandit's weapon, armour and silver", loot, [["LEATHR", "SILVER", "SSWORD"], ["LEATHR", "SILVER", "SSWORD"],
+		["LEATHR", "SILVER", "SPEAR"], ["ARROW", "DAGGER", "PADDED", "SBOW", "SILVER"]])
+	silver = [dict (_Items (i)).get ("SILVER", 0) for i in ids.values ()]
+	_Check ("trail: 2d6 sp each", all (2 <= n <= 12 for n in silver), True)
+	_Check ("trail: the archer's arrows (1d10)", 1 <= dict (_Items (arch)).get ("ARROW", 0) <= 10, True)
+	carter = GemRB.DCCFindActor ("DlCarter")
+	_Check ("trail: the carter lies dead by his cart", bool (carter and GemRB.GetPlayerStat (carter, IE_STATE_ID) & STATE_DEAD), True)
+	_Check ("trail: the carter's 14 cp and knife", _Pile ("DlCarter"), [("COINS", 14), ("KNIFE", 1)])
+	_Check ("trail: the cart's loot", _Pile ("DlCart"), [("FLOUR", 1), ("FLOUR", 1), ("BARREL", 1), ("ROPE", 1), ("TORCH", 2), ("FLINT", 1), ("CROWBR", 1)])
+	_Check ("trail: the dropped waterskin at the trail's mouth", _Pile ("DlWaterskin"), [("WSKIN", 1)])
+	# the screenshots: the hostile are drawn only in the party's sight, and nobody has come near them yet (they would
+	# notice), so the game view draws the unseen for these two (its debug flag 0x1000)
+	fog = GemRB.GameControlDebugFlags ()
+	GemRB.GameControlDebugFlags (fog | 0x1000)
+	yield
+	_Shot ("trail_cart", cut1)
+	_Shot ("trail_archer", arch)
+	GemRB.GameControlDebugFlags (fog)
+	_Check ("trail: still unnoticed", _AreaVar ("DL_CART_ALERT"), 0)
+
+	# the info points: each one's description, shown by a real click (the examine cursor's click)
+	pc = party[0]
+	for name in TRAIL_INFO:
+		region = GemRB.GetDCCTrap (name)
+		text = GemRB.GetOverheadText (name)
+		_Check ("trail: info point %s with its string" % name, bool (region and region["Type"] == "region" and text and text["Text"]), True)
+	_Check ("trail: the toll board's prices", "TOLL. CART 5 SP. MULE 2 SP. GRANNY 1 SP. ARGUING 1 HEAD." in GemRB.GetOverheadText ("DlTollBoard")["Text"], True)
+
+	# the snare's data (dcctrap.2da SNARE, the ARE's DCs)
+	snare = GemRB.GetDCCTrap ("DlSnare")
+	_Check ("trail: the snare, woodland, find DC 8, disarm DC 8 by Agi, not deadly, armed", snare and [snare["Kind"], snare["FindDC"], snare["DisarmDC"],
+		snare["DisarmAbility"], snare["Deadly"], snare["Trapped"], snare["Detected"]], ["WOODLAND", 8, 8, "AGI", 0, 1, 0])
+	_Check ("trail: the snare's rope is off until it springs", GemRB.GetDCCTrap ("DlSnareRope")["Flags"] & 0x100, 0x100)
+
+	# a death: last words over its head (cutthroat 2); the first of their side to fall, so the others near check
+	# morale: cutthroat 1 breaks (a forced 1) and runs up the trail and off the map, cutthroat 3 stands (a 20)
+	GemRB.DCCForceDice (cut1, [1])
+	GemRB.DCCForceDice (cut3, [20])
+	GemRB.ClearActions (pc)
+	GemRB.ExecuteString ('Kill("DlCut2")', pc)
+	yield from _Wait (lambda: GemRB.GetGameVar ("DL_WORDS") >= 1, 20)
+	said = GemRB.GetOverheadText (cut2)
+	first = said["Text"] if said else ""
+	_Check ("trail: a dying bandit barks its last words", [first in LAST_WORDS, GemRB.GetGameVar ("DL_WORDS")], [True, 1])
+	_Check ("trail: the word is marked said", first in LAST_WORDS and GemRB.GetGameVar ("DL_WORD%d" % (LAST_WORDS.index (first) + 1)), 1)
+	_Check ("trail: the dead drop their things", _Items (cut2), [])
+	yield from _Wait (lambda: _AreaVar ("DL_CART_RAN") == 1, 20)
+	_Check ("trail: cutthroat 1's morale breaks: he runs for the trail", [_AreaVar ("DL_CART_RAN"), _Logged ("checks morale")], [1, True])
+	yield from _Wait (lambda: GemRB.GetGameVar ("DL_CART_FLED") == 1, 120)
+	if GemRB.DCCFindActor ("DlCut1"):
+		_Log ("the runaway: %s" % GemRB.GetActorPosition (cut1))
+	_Check ("trail: up the trail and off the map, counted for the camp", [GemRB.GetGameVar ("DL_CART_FLED"), bool (GemRB.DCCFindActor ("DlCut1"))], [1, False])
+	_Check ("trail: the runaway strode over the snare", GemRB.GetDCCTrap ("DlSnare")["Trapped"], 1)
+	GemRB.DCCForceDice (cut3, [])
+
+	# taken alive: cutthroat 3 knocked out (the subdual blow's state), then neutral, a captive
+	GemRB.DCCForceDice (arch, [20])
+	GemRB.DCCForceDice (cut3, [20]) # hurt and alone, he checks morale too: he stands
+	# (from where the party stands: DCCAttack needs no reach, and nobody comes within the 30' that would warn them)
+	boxer = party[6]
+	GemRB.ExecuteString ("DCCDropHands(Myself)", boxer)
+	GemRB.ApplyEffect (cut3, "CurrentHPModifier", -3, 0)
+	yield
+	yield
+	GemRB.DCCSetCombat (boxer, DCC_OPT_SUBDUAL)
+	GemRB.DCCForceDice (boxer, [19, 1])
+	rolls = GemRB.DCCAttack (boxer, cut3)
+	GemRB.DCCForceDice (boxer, [])
+	GemRB.DCCSetCombat (boxer, 0)
+	_Check ("trail: a subdual blow with fists knocks cutthroat 3 out", [rolls[0]["Hit"], rolls[0]["Subdual"], GemRB.GetDCCStats (cut3)["Subdued"]], [1, 1, 1])
+	yield from _Wait (lambda: GemRB.GetGameVar ("DL_CART_TAKEN") == 1, 20)
+	_Check ("trail: knocked out, cutthroat 3 is taken alive (neutral)", [GemRB.GetGameVar ("DL_CART_TAKEN"), GemRB.GetPlayerStat (cut3, IE_EA)], [1, 128])
+	# the archer dies: a second, different line
+	GemRB.ClearActions (pc)
+	GemRB.ExecuteString ('Kill("DlArch")', pc)
+	yield from _Wait (lambda: GemRB.GetGameVar ("DL_WORDS") >= 2, 20)
+	said = GemRB.GetOverheadText (arch)
+	second = said["Text"] if said else ""
+	_Check ("trail: the archer's last words, not the first's", [second in LAST_WORDS, second != first, GemRB.GetGameVar ("DL_WORDS")], [True, True, 2])
+	GemRB.DCCForceDice (arch, [])
+	yield from _Wait (lambda: _AreaVar ("DL_CART_OVER") == 1, 20)
+	_Check ("trail: the fight is over (dead, run off, taken)", [_AreaVar ("DL_CART_OUT"), _AreaVar ("DL_CART_OVER")], [4, 1])
+	_Check ("trail: one ran, so no tracks check", _AreaVar ("DL_TRACKS"), 0)
+
+	# the captive comes to and talks (DLCAPT): the camp for free, the watch by a Per check, then he is left tied
+	where = GemRB.GetActorPosition (cut3)
+	_Jump (pc, where["X"] + 30, where["Y"] + 20)
+	GemRB.ApplyEffect (cut3, "CurrentHPModifier", 2, 0)
+	yield from _Wait (_InDialog, 30)
+	_Check ("trail: the captive starts talking", _InDialog (), True)
+	if _InDialog ():
+		_Reply (0) # Where's your camp?
+		yield
+		yield
+		_Reply (GemRB.GetVar ("DialogOption")) # his answer, then on
+		yield
+		yield
+		# (a transition's actions run once the conversation lets the clock go on: checked at its end)
+		GemRB.DCCForceDice (pc, [10])
+		_Reply (1) # [Military or Deception, Per 10] How is it guarded?
+		yield
+		yield
+		_Reply (GemRB.GetVar ("DialogOption")) # the check: the passing branch
+		yield
+		yield
+		GemRB.DCCForceDice (pc, [])
+		_Reply (GemRB.GetVar ("DialogOption")) # his answer, then on
+		yield
+		yield
+		_Reply (4) # Leave him tied.
+		yield
+		yield
+		_Reply (GemRB.GetVar ("DialogOption"))
+		yield from _Wait (lambda: not _InDialog () and GemRB.GetGameVar ("DL_CAPTIVE_TIED") == 1, 20)
+		_Check ("trail: left tied", [GemRB.GetGameVar ("DL_CAPTIVE_TIED"), _InDialog ()], [1, False])
+		_Check ("trail: he gave up the camp for free", GemRB.GetGameVar ("DL_KNOW_CAMP"), 1)
+		_Check ("trail: and its watch, to a Per check (a 10, the most an untrained d10 gives)", GemRB.GetGameVar ("DL_KNOW_CAMPWATCH"), 1)
+
+	# the info points, once the fight is over: each one's description, shown by a real click (the examine cursor's)
+	# the hare in the second snare, by the trail: first, from a spot clear of the snare (it springs only on the party)
+	_Jump (pc, 1245, 165)
+	for i in range (3):
+		yield
+	yield from _ClickMap (1284, 98, pc, "DlHare")
+	_Check ("trail: a click on DlHare shows its string", [Hover[0], GemRB.GetOverheadText ("DlHare")["Displaying"]], ["DlHare", True])
+	clicks = {"DlTollBoard": (617, 160), "DlHeadMan": (110, 300), "DlHeadGranny": (270, 170), "DlHeadYoung": (425, 52), "DlBarricade": (380, 220),
+		"DlCartInfo": (1032, 772), "DlBirches": (1100, 1300)}
+	for name, (x, y) in clicks.items ():
+		# the one who looks stands near enough to see it (a click where the party can't see does nothing)
+		# (and off to one side and below: its own sprite would take the click)
+		_Jump (pc, x + 60, y + 150)
+		for i in range (3):
+			yield
+		yield from _ClickMap (x, y, pc, name)
+		_Check ("trail: a click on %s shows its string" % name, [Hover[0], GemRB.GetOverheadText (name)["Displaying"]], [name, True])
+		if name == "DlTollBoard":
+			_Shot ("trail_toll")
+
+
+	# Detect traps: a searcher by the snare finds it (a 20), with the notice line and the game's first tell's tip
+	searcher, walker, cutter = party[1], party[2], party[3]
+	_Jump (searcher, 1300, 300)
+	yield
+	yield
+	GemRB.DCCForceDice (searcher, [20])
+	GemRB.SetModalState (searcher, MS_DETECTTRAPS)
+	yield from _Wait (lambda: GemRB.GetDCCTrap ("DlSnare")["Detected"], 20)
+	GemRB.DCCForceDice (searcher, [])
+	_Unpause ()
+	name = GemRB.GetPlayerName (searcher, 0)
+	_Check ("trail: a Detect traps searcher finds the snare", [GemRB.GetDCCTrap ("DlSnare")["Detected"], _Logged (name + " finds a trap: 20")], [1, True])
+	_Check ("trail: the notice line, once", [GemRB.GetDCCTrap ("DlSnare")["Notice"], _Logged ("That birch is bent over the trail like a fishing rod.")], [1, True])
+	yield
+	_Check ("trail: the snare's script got Detected; the tip was given", [GemRB.GetGameVar ("DL_SNARE_FOUND"), GemRB.GetGameVar ("DCC_TRAP_TIP")], [1, 1])
+	GemRB.SetModalState (searcher, MS_NONE)
+
+	# sprung on a walker: held by one ankle, what it holds falls, 1d10 cp out of the purse onto the ground
+	gold = GemRB.GameGetPartyGold ()
+	held = _Items (walker)
+	_Jump (walker, 1362, 186)
+	yield from _Wait (lambda: GemRB.GetGameVar ("DL_SNARE") == 1 and GemRB.GetGameVar ("DL_SNARE_CP") > 0, 20)
+	cp = GemRB.GetGameVar ("DL_SNARE_CP")
+	_Check ("trail: the walker springs the snare and hangs, held", [GemRB.GetGameVar ("DL_SNARE"), GemRB.GetPlayerStat (walker, IE_HELD), GemRB.GetDCCTrap ("DlSnare")["Trapped"]], [1, 1, 0])
+	ground = _GroundAt (walker)
+	_Check ("trail: 1d10 cp fall from the purse onto the ground", [1 <= cp <= 10, gold - GemRB.GameGetPartyGold (), ("COINS", cp) in ground], [True, cp, True])
+	dropped = [item for item in held if item not in _Items (walker)]
+	_Check ("trail: it drops what it held, there too", bool (dropped) and all (item in ground for item in dropped) or not held, True)
+	_Check ("trail: the rope can be clicked now", GemRB.GetDCCTrap ("DlSnareRope")["Flags"] & 0x100, 0)
+	_Shot ("trail_snare", walker)
+	# cut down by one with a knife: a click on the rope, a round's sawing
+	GemRB.CreateItem (cutter, "KNIFE")
+	_Jump (cutter, 1450, 270)
+	for i in range (3):
+		yield
+	yield from _ClickMap (1420, 195, cutter, "DlSnareRope")
+	yield from _Wait (lambda: GemRB.GetGameVar ("DL_SNARE") == 4, 60)
+	yield
+	_Check ("trail: cut down with a knife", [GemRB.GetGameVar ("DL_SNARE"), GemRB.GetPlayerStat (walker, IE_HELD)], [4, 0])
+
+	# the herb patch: a click is the party's Herbalism check (Int DC 10); a pass leaves two poultices
+	_Jump (pc, 910, 1450)
+	for i in range (3):
+		yield
+	yield from _ClickMap (900, 1370, pc, "DlHerbs")
+	yield from _Wait (lambda: _AreaVar ("DL_HERBS") in (1, 2), 20)
+	herbs = _AreaVar ("DL_HERBS")
+	_Check ("trail: the herb patch's Herbalism check", [herbs in (1, 2), _Logged ("Herbalism check for the party")], [True, True])
+	yield
+	yield
+	_Check ("trail: the poultices to the one who looked, on a pass", ("POULTC", 2) in _Items (pc), herbs == 1)
+
+	# the trail's mouth: the prints, then the deer path check (Outdoors, Per DC 12)
+	_Jump (party[4], 953, 513)
+	yield from _Wait (lambda: _AreaVar ("DL_GAP") == 2 and _AreaVar ("DL_DEERPATH_ROLL") in (1, 2), 20)
+	_Check ("trail: the prints at the trail's mouth, the deer path check", [_AreaVar ("DL_GAP"), _AreaVar ("DL_DEERPATH_ROLL") in (1, 2)], [2, True])
+
+	# the party walks up the trail, past the sprung snare, to its top
+	GemRB.GameSelectPC (0, 1)
+	for p in party:
+		GemRB.ClearActions (p)
+	GemRB.GameControlMoveSelected (1480, 90)
+	near = lambda: any (abs (GemRB.GetActorPosition (p)["X"] - 1480) + abs (GemRB.GetActorPosition (p)["Y"] - 90) < 120 for p in party)
+	yield from _Wait (near, 80)
+	_Check ("trail: the party walks up the trail", near (), True)
+	_Shot ("trail_top", party[0])
+
+def _InDialog ():
+	import GUIWORLD
+	return GUIWORLD.ContinueWindow is not None
+
+def _Reply (transition):
+	"""picks a transition of the dialog's current state, as a click on a reply (or Continue) does"""
+	GemRB.SetVar ("DialogChoose", transition)
 
 def _Click (win, control, button = 1, mod = 0):
 	"""a real click on a control (GemRB.TestClick: through the windows as a player's would go)"""

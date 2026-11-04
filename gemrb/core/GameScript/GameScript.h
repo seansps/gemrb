@@ -1309,6 +1309,8 @@ public: //Script Functions
 	static void DCCPartySkillCheck(Scriptable* Sender, Holder<Action> parameters);
 	static void DCCAddSkill(Scriptable* Sender, Holder<Action> parameters);
 	static void DCCRevealTrap(Scriptable* Sender, Holder<Action> parameters);
+	static void DCCDropHands(Scriptable* Sender, Holder<Action> parameters);
+	static void DCCDropItem(Scriptable* Sender, Holder<Action> parameters);
 
 	//Objects
 	static Targets* BestAC(const Scriptable* Sender, Targets* parameters, int ga_flags);

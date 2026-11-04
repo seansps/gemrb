@@ -176,6 +176,9 @@ public:
 	Point ConvertPointFromScreen(const Point&) const override;
 	void MoveViewportUnlockedTo(Point, bool center);
 	bool MoveViewportTo(Point, bool center, int speed = 0);
+	/** what the cursor was last found over (UpdateCursor): a door, container or region; and the cursor, for tests */
+	const Scriptable* HoveredObject() const { return overMe; }
+	int HoveredCursor() const { return lastCursor; }
 	Region Viewport() const;
 
 	/** Selects one or all PC */
