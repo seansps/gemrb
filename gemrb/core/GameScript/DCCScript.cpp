@@ -11,6 +11,10 @@
 //   DCCPartySkillCheck(S:Tags*,I:Ability*DCCAbil,I:DC*)        the party member best placed rolls
 //   DCCHasSkill(O:Object*,S:Tags*)                            trained in any of the tags
 //   DCCPartyHasSkill(S:Tags*)                                 someone here is
+//   DCCNoticesParty(I:Running*,I:Walking*,I:Sneaking*)        a party member in the caller's area is within
+//                                 the range its gait is noticed at, sight aside (a hound's nose, a sentry's ears;
+//                                 DCC::NoticeRange: a run, a walk or standing, a sneak unheard in Stealth; 0 never).
+//                                 LastTrigger is the nearest noticed. The funnel's quiet approach
 // Actions (the world form: the result goes into a variable, 1 success, 2 failure, 3 waiting for a
 // Luck answer; "NAME" is a GLOBAL, "LOCALS:NAME", "MYAREA:NAME" and "GLOBAL:NAME" name the scope):
 //   DCCSkillCheck(O:Object*,S:Tags*,I:Ability*DCCAbil,I:DC*,I:Flags*DCCSkFl,S:Variable*)
@@ -35,6 +39,7 @@
 #include "Map.h"
 
 #include "DCC/Skills.h"
+#include "DCC/Thief.h"
 #include "GameScript/GSUtils.h"
 #include "GameScript/GameScript.h"
 #include "GameScript/Matching.h"
@@ -159,6 +164,34 @@ int GameScript::DCCPartyHasSkill(Scriptable* Sender, const Trigger* parameters)
 		if (HasSkill(pc, tags)) return 1;
 	}
 	return 0;
+}
+
+int GameScript::DCCNoticesParty(Scriptable* Sender, const Trigger* parameters)
+{
+	if (!DCCScripts() || !Sender) return 0;
+	const Game* game = core->GetGame();
+	const Map* area = Sender->GetCurrentArea();
+	if (!game || !area) return 0;
+	SearchmapPoint from(Sender->Pos);
+	const Actor* nearest = nullptr;
+	unsigned int best = 0;
+	for (int i = 0; i < game->GetPartySize(false); ++i) {
+		const Actor* pc = game->GetPC(i, false);
+		if (!pc || pc == Sender || pc->GetCurrentArea() != area || !pc->ValidTarget(GA_NO_DEAD)) continue;
+		bool running = (pc->GetInternalFlag() & IF_RUNNING) && pc->HasMovementInProgress();
+		Gait gait = GaitOf(running, pc->Modal.State == Modal::Stealth, pc->dccStealth.silent);
+		int range = NoticeRange(gait, parameters->int0Parameter, parameters->int1Parameter, parameters->int2Parameter);
+		if (range <= 0) continue;
+		unsigned int distance = SquaredDistance(from, SearchmapPoint(pc->Pos));
+		if (distance > unsigned((range + 1) * (range + 1))) continue;
+		if (!nearest || distance < best) {
+			nearest = pc;
+			best = distance;
+		}
+	}
+	if (!nearest) return 0;
+	Sender->SetLastTrigger(trigger_range, nearest->GetGlobalID());
+	return 1;
 }
 
 // "NAME" is a GLOBAL; "LOCALS:NAME", "MYAREA:NAME", "GLOBAL:NAME" (or an area's six letters) name the scope

@@ -9442,6 +9442,43 @@ static PyObject* GemRB_DCCSetTrapRolls(PyObject* /*self*/, PyObject* args)
 	Py_RETURN_TRUE;
 }
 
+PyDoc_STRVAR(GemRB_DCCSetTrap__doc,
+	     "===== DCCSetTrap =====\n\
+\n\
+**Prototype:** GemRB.DCCSetTrap (scriptName, trapped, detected)\n\
+\n\
+**Description:** Arms or disarms a region, door or container of the current area and marks it found \n\
+or not, for tests that try a trap more than one way: armed, a region is switched on again (its \n\
+TRAP_DEACTIVATED flag cleared) and the party's find and disarm rolls are forgotten.\n\
+\n\
+**Return value:** bool (False if there is no such object)");
+
+static PyObject* GemRB_DCCSetTrap(PyObject* /*self*/, PyObject* args)
+{
+	char* name = nullptr;
+	int trapped;
+	int detected;
+	PARSE_ARGS(args, "sii", &name, &trapped, &detected);
+	GET_GAME();
+	const Map* map = game->GetCurrentArea();
+	if (!map) Py_RETURN_FALSE;
+	const char* type = "";
+	int lockDC = 0;
+	ieDword flags = 0;
+	Highlightable* object = DCCFindTrapObject(map, name, type, lockDC, flags);
+	if (!object) Py_RETURN_FALSE;
+	object->Trapped = trapped ? 1 : 0;
+	object->TrapDetected = detected ? 1 : 0;
+	if (trapped) {
+		object->dccRolls.found = 0;
+		object->dccRolls.disarm = 0;
+		if (object->Type == ST_PROXIMITY || object->Type == ST_TRIGGER || object->Type == ST_TRAVEL) {
+			static_cast<InfoPoint*>(object)->Flags &= ~TRAP_DEACTIVATED;
+		}
+	}
+	Py_RETURN_TRUE;
+}
+
 PyDoc_STRVAR(GemRB_GetDCCStealth__doc,
 	     "===== GetDCCStealth =====\n\
 \n\
@@ -16620,6 +16657,7 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(DCCThiefCheck, METH_VARARGS),
 	METHOD(GetDCCLastThiefCheck, METH_NOARGS),
 	METHOD(GetDCCTrap, METH_VARARGS),
+	METHOD(DCCSetTrap, METH_VARARGS),
 	METHOD(DCCSetTrapRolls, METH_VARARGS),
 	METHOD(GetDCCStealth, METH_VARARGS),
 	METHOD(GetDCCAware, METH_VARARGS),

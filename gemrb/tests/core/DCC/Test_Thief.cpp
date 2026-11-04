@@ -247,6 +247,22 @@ TEST(DCC_Thief, BackstabWeapons)
 	EXPECT_FALSE(BackstabWeapon(false, false, false)); // a sling, a bow
 }
 
+TEST(DCC_Thief, NoticingByGait)
+{
+	EXPECT_EQ(GaitOf(true, false, false), Gait::Running);
+	EXPECT_EQ(GaitOf(true, true, true), Gait::Running); // a run is never silent
+	EXPECT_EQ(GaitOf(false, false, false), Gait::Walking);
+	EXPECT_EQ(GaitOf(false, true, false), Gait::Walking); // in Stealth but heard
+	EXPECT_EQ(GaitOf(false, false, true), Gait::Walking); // a sneak roll means nothing out of Stealth
+	EXPECT_EQ(GaitOf(false, true, true), Gait::Sneaking);
+	// the trail's hound: a run at 40', a walk at 20', a sneak at 10'
+	EXPECT_EQ(NoticeRange(Gait::Running, 40, 20, 10), 40);
+	EXPECT_EQ(NoticeRange(Gait::Walking, 40, 20, 10), 20);
+	EXPECT_EQ(NoticeRange(Gait::Sneaking, 40, 20, 10), 10);
+	EXPECT_EQ(NoticeRange(Gait::Sneaking, 40, 20, 0), 0); // never by that gait
+	EXPECT_EQ(NoticeRange(Gait::Walking, 40, -5, 0), 0);
+}
+
 TEST(DCC_Thief, HidingAgainInAFight)
 {
 	const int round = 90;

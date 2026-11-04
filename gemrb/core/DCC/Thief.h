@@ -247,6 +247,18 @@ GEM_EXPORT bool BackstabWeapon(bool melee, bool fists, bool hasBackstabDice);
 /** hiding again in a fight (classes.md): broken away for a full round, hidden, and lost for a full round */
 GEM_EXPORT bool LosesTrack(int brokenAwayTicks, bool hidden, int lostTicks, int roundTicks);
 
+// noticing by noise and scent (docs/world/funnel-adventure.md, "The first bandit encounter": the quiet approach): how a
+// creature moves sets how near a watcher (a hound's nose, a sentry's ears) must be to notice it, sight aside
+enum class Gait : uint8_t {
+	Running, // a run (IF_RUNNING) while it moves
+	Walking, // walking or standing, Stealth or not, unless it sneaks unheard
+	Sneaking, // in Stealth with a successful sneak silently
+};
+/** the gait of a creature: running beats sneaking (a run is never silent) */
+GEM_EXPORT Gait GaitOf(bool running, bool stealth, bool silent);
+/** the range (feet, search cells) a watcher notices this gait at, from its three ranges; 0 never */
+GEM_EXPORT int NoticeRange(Gait gait, int running, int walking, int sneaking);
+
 }
 }
 

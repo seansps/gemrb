@@ -315,5 +315,24 @@ bool LosesTrack(int brokenAwayTicks, bool hidden, int lostTicks, int roundTicks)
 	return hidden && brokenAwayTicks >= roundTicks && lostTicks >= roundTicks;
 }
 
+Gait GaitOf(bool running, bool stealth, bool silent)
+{
+	if (running) return Gait::Running;
+	return stealth && silent ? Gait::Sneaking : Gait::Walking;
+}
+
+int NoticeRange(Gait gait, int running, int walking, int sneaking)
+{
+	switch (gait) {
+		case Gait::Running:
+			return std::max(running, 0);
+		case Gait::Sneaking:
+			return std::max(sneaking, 0);
+		case Gait::Walking:
+		default:
+			return std::max(walking, 0);
+	}
+}
+
 }
 }
