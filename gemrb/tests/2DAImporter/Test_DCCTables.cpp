@@ -1247,6 +1247,15 @@ TEST(DCC_Tables, Looks)
 		EXPECT_EQ(HairOverlay(style, Helmet::Closed), open.empty() ? "" : "Y" + open.substr(1)) << id;
 		EXPECT_TRUE(open.empty() || open[0] == 'X') << id;
 	}
+	// S7: under a hood every hair style draws the elves' pointed ears (EA: only the elf rigs have its files, so
+	// elsewhere nothing) and every beard its own code
+	for (int id = 1; id <= 14; ++id) {
+		EXPECT_EQ(HairOverlay(hair.Find(id, false), Helmet::Hood), "EA") << id;
+	}
+	for (int id = 1; id <= 6; ++id) {
+		const HairStyle* style = hair.Find(id, true);
+		EXPECT_EQ(HairOverlay(style, Helmet::Hood), style->code) << id;
+	}
 
 	// S5: the closed helmets (dcchelm.2da): the armet; the cap, kettle hat and nasal helm are open, as is
 	// any helmet not listed
@@ -1259,10 +1268,11 @@ TEST(DCC_Tables, Looks)
 		EXPECT_EQ(helmets.Worn(code), Helmet::Open) << code;
 	}
 	EXPECT_EQ(helmets.Worn(""), Helmet::None);
-	// S7: the hood (RH): no hair under it, every beard whole
+	// S7: the hood (RH): no hair under it, only the elves' pointed ears (EA, which only the elf rigs draw), every
+	// beard whole
 	EXPECT_EQ(helmets.Worn("RH"), Helmet::Hood);
 	for (int id = 1; id <= 14; ++id) {
-		EXPECT_EQ(HairOverlay(hair.Find(id, false), helmets.Worn("RH")), "") << id;
+		EXPECT_EQ(HairOverlay(hair.Find(id, false), helmets.Worn("RH")), "EA") << id;
 	}
 	for (int id = 1; id <= 6; ++id) {
 		const HairStyle* style = hair.Find(id, true);
