@@ -35,6 +35,8 @@ public:
 	bool InitDialog(Scriptable* speaker, Scriptable* target, const ResRef& dlgref, ieDword si = -1);
 	void EndDialog(bool try_to_break = false);
 	bool DialogChoose(unsigned int choose);
+	/** the conversation's current dialog file and the text of its current state (for tests); none: false */
+	bool CurrentLine(ResRef& dialog, ieStrRef& text) const;
 
 private:
 	/** this function safely retrieves an Actor by ID */

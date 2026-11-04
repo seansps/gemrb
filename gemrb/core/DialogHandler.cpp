@@ -129,6 +129,14 @@ bool DialogHandler::InitDialog(Scriptable* spk, Scriptable* tgt, const ResRef& d
 }
 
 /*try to break will only try to break it, false means unconditional stop*/
+bool DialogHandler::CurrentLine(ResRef& dialog, ieStrRef& text) const
+{
+	if (!dlg || !ds) return false;
+	dialog = dlg->resRef;
+	text = ds->StrRef;
+	return true;
+}
+
 void DialogHandler::EndDialog(bool try_to_break)
 {
 	if (dlg == nullptr) {

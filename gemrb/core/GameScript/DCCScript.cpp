@@ -20,6 +20,8 @@
 //   DCCSkillCheck(O:Object*,S:Tags*,I:Ability*DCCAbil,I:DC*,I:Flags*DCCSkFl,S:Variable*)
 //   DCCPartySkillCheck(S:Tags*,I:Ability*DCCAbil,I:DC*,I:Flags*DCCSkFl,S:Variable*)
 //   DCCAddSkill(O:Object*,S:Tag*)                             an acquired tag (at most two)
+//   DCCChangeLuck(O:Object*,I:Amount*,I:Reason*)              a gain (or, negative, a loss) of Luck to the
+//                                 score, with its reason (a TLK string): a log line and a journal note
 // The token <DCCSKILLER> names who rolled the last check, for the dialog's next line.
 //
 // Traps (docs/rules/traps.md):
@@ -270,6 +272,19 @@ void GameScript::DCCAddSkill(Scriptable* Sender, Holder<Action> parameters)
 	if (!actor->DCCAddSkill(tags.bits)) {
 		Log(WARNING, "GameScript", "DCCAddSkill: {} can't learn {} (two acquired skills already?)", fmt::WideToChar { actor->GetName() }, SkillTagsKey(tags));
 	}
+}
+
+void GameScript::DCCChangeLuck(Scriptable* Sender, Holder<Action> parameters)
+{
+	if (!DCCScripts()) return;
+	Actor* actor = Scriptable::As<Actor>(GetScriptableFromObject(Sender, parameters));
+	if (!actor || !actor->IsDCCCharacter()) {
+		Log(WARNING, "GameScript", "DCCChangeLuck: no DCC character");
+		return;
+	}
+	String reason;
+	if (parameters->int1Parameter > 0) reason = core->GetString(ieStrRef(parameters->int1Parameter));
+	actor->DCCChangeLuck(parameters->int0Parameter, reason);
 }
 
 void GameScript::DCCRevealTrap(Scriptable* Sender, Holder<Action> parameters)

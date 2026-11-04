@@ -103,5 +103,10 @@ int LuckLossAfterNight(int classID, int level, int loss)
 	return std::max(0, loss - NightlyLuckRecovery(classID, level));
 }
 
+int ChangedLuckScore(int score, int amount)
+{
+	return std::max(0, score + amount);
+}
+
 }
 }
