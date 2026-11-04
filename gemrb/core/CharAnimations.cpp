@@ -2605,7 +2605,14 @@ void CharAnimations::AddMMR2Suffix(ResRef& dest, unsigned char stance,
 			break;
 
 			//Unknown... maybe only a transparency effect apply
-		case IE_ANI_HIDE:
+		case IE_ANI_HIDE: // == IE_ANI_RUN
+			// DCC: the run, its own file (rn, and rne) if there is one, else the walk's
+			if (core->HasFeature(GFFlags::RULES_DCC)) {
+				ResRef run = dest;
+				run.Append("rn");
+				dest.Append(gamedata->Exists(run, IE_BAM_CLASS_ID, true) ? "rn" : "wk");
+				Cycle = (Orient / 2);
+			}
 			break;
 
 		case IE_ANI_SLEEP:

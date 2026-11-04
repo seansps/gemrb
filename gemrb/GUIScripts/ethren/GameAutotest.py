@@ -19,7 +19,7 @@
 #      (the notice line, the tip), a walker springs it (held, its weapon dropped, the coppers) and one with a knife cuts it
 #      down; the herb patch's check; the trail's mouth; the party walks up the trail;
 #   6. screenshots in the save path: game_looks (the paper doll), game_roll (the rolling screen), game_<area> (each area as drawn, the
-#      first visit), game_hall_screen (the hall with the GUI), game_trail_* (the cart, the archer, an info point, the snare).
+#      first visit), game_hall_screen (the hall with the GUI), game_trail_* (the cart, the archer, the hound alive and dead, an info point, the snare).
 # Every check logs "[ETH] ok ..." or "[ETH] FAIL ...", the end "[ETH] autotest done: N checks, F failed";
 # ETH_AT_DONE becomes 1 if all passed, 2 if not (run.sh's AutotestQuit).
 
@@ -265,6 +265,9 @@ def _Trail ():
 	silver = [dict (_Items (i)).get ("SILVER", 0) for i in ids.values ()]
 	_Check ("trail: 2d6 sp each", all (2 <= n <= 12 for n in silver), True)
 	_Check ("trail: the archer's arrows (1d10)", 1 <= dict (_Items (arch)).get ("ARROW", 0) <= 10, True)
+	# the bandits' hound by the cart's tail: its own sprite (avatars.2da 0x6600, the IWD monster layout MHND*)
+	hound = GemRB.DCCFindActor ("DlHound")
+	_Check ("trail: the bandits' hound is placed, its sprite 0x6600", bool (hound) and GemRB.GetPlayerStat (hound, IE_ANIMATION_ID), 0x6600)
 	carter = GemRB.DCCFindActor ("DlCarter")
 	_Check ("trail: the carter lies dead by his cart", bool (carter and GemRB.GetPlayerStat (carter, IE_STATE_ID) & STATE_DEAD), True)
 	_Check ("trail: the carter's 14 cp and knife", _Pile ("DlCarter"), [("COINS", 14), ("KNIFE", 1)])
@@ -277,6 +280,8 @@ def _Trail ():
 	yield
 	_Shot ("trail_cart", cut1)
 	_Shot ("trail_archer", arch)
+	if hound:
+		_Shot ("trail_hound", hound)
 	GemRB.GameControlDebugFlags (fog)
 	_Check ("trail: still unnoticed", _AreaVar ("DL_CART_ALERT"), 0)
 
@@ -343,6 +348,16 @@ def _Trail ():
 	yield from _Wait (lambda: _AreaVar ("DL_CART_OVER") == 1, 20)
 	_Check ("trail: the fight is over (dead, run off, taken)", [_AreaVar ("DL_CART_OUT"), _AreaVar ("DL_CART_OVER")], [4, 1])
 	_Check ("trail: one ran, so no tracks check", _AreaVar ("DL_TRACKS"), 0)
+	# the hound goes down with its band (its fall, DE, then lying dead, TW); alive it would chase the party through
+	# the rest of the visit
+	if hound:
+		GemRB.ClearActions (pc)
+		GemRB.ExecuteString ('Kill("DlHound")', pc)
+		yield from _Wait (lambda: GemRB.GetPlayerStat (hound, IE_STATE_ID) & STATE_DEAD, 20)
+		for i in range (30):  # the 18 frames of its fall, played out
+			yield
+		_Check ("trail: the hound dies", bool (GemRB.GetPlayerStat (hound, IE_STATE_ID) & STATE_DEAD), True)
+		_Shot ("trail_hound_dead", hound)
 
 	# the captive comes to and talks (DLCAPT): the camp for free, the watch by a Per check, then he is left tied
 	where = GemRB.GetActorPosition (cut3)
