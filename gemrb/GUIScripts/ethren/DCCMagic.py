@@ -172,6 +172,13 @@ def TurnUnholy ():
 	GemRB.DCCTurnUnholy (Shown)
 	_Refresh ()
 
+def ToggleSpellsWindow ():
+	"""the keymap's Spellbook (W) and the bar's Spells: the selected character's spells, or closes them"""
+	if Window:
+		Close ()
+		return
+	OpenSpellsWindow ()
+
 def OpenSpellsWindow (pc = None):
 	global Window, Shown, Text
 	Shown = pc or GemRB.GameGetSelectedPCSingle () or 1
@@ -223,6 +230,10 @@ def OpenSpellsWindow (pc = None):
 		_Button (win, 51, 12, height - 38, 160, 28, "New spells...", OpenLearn, True)
 	close = _Button (win, 50, Width - 112, height - 38, 100, 28, "Close", Close)
 	close.MakeEscape ()
+	# W closes it again (the keymap's keys don't reach the game view while this window has the keyboard)
+	key = win.CreateButton (52, 0, 0, 0, 0)
+	key.OnPress (lambda: Close ())
+	key.SetHotKey ('w')
 	win.Focus ()
 	return win
 

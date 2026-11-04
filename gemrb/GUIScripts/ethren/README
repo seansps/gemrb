@@ -11,8 +11,16 @@ use it to pick the demo's window layouts; use GameCheck.IsEthren () for
 anything that should differ from the demo.
 
 Modules here so far:
-- MessageWindow.py: the demo's, plus an "R" button for the record screen, the
-  party roster and the dcctest and funneltest autotest hooks.
+- MessageWindow.py: the slim bottom bar (the proposed layout, docs/architecture/
+  ui-design.md): the demo's message window resized to the log, left of the party
+  column, with two rows of buttons (map, inventory, record, spells, rest, pause,
+  the formations, the thief's T S P, the party settings), taller during a
+  dialog; and the autotest hooks. It ignores events itself, as the stock side
+  windows do, so the game view keeps the keyboard for keymap.ini's keys.
+- GUIINV.py: the demo's inventory with its feedback line kept ("MsgSys" 1: the
+  shared item code clears it on every pick-up, and without it nothing could be
+  moved), centred in the play area, the ground slots draggable both ways, I and
+  C as its own keys.
 - GUIREC.py: the DCC record screen, plain text in a window built from code.
 - DCCSheet.py: formats GemRB.GetDCCStats for the record screen and logs.
 - DCCLuck.py: the record screen's Luck panel (burn policy, the Luck to keep,
@@ -26,8 +34,11 @@ Modules here so far:
   unholy; plus the record sheet's magic lines.
 - DCCAutotest.py: the DCC checks of testdata/dcctest's autotest; idle unless
   the DCC_AUTOTEST global is 1.
-- Roster.py (M2.9, the real one in M3.2): the funnel's roster panel, since the
-  demo GUI has no portrait window: the summary ("Alive 12 of 16, 2 dying, 2
+- Roster.py (M2.9, the real one in M3.2, the party column since): the party
+  column down the right edge, full height, since the demo GUI has no portrait
+  window; compact tiles that scroll in the funnel, portrait tiles (the figure
+  as a placeholder portrait) after it; a click on a tile gives it an item picked
+  up in the inventory. It started as the funnel's roster panel: the summary ("Alive 12 of 16, 2 dying, 2
   dead"), the prompts waiting, select all and mine, Block and Column on the
   selection, the party settings, groups 1-9 (Ctrl+N saves, Alt+N selects),
   a tile per party member, rebuilt whenever the party changes (name,
@@ -81,3 +92,6 @@ Modules here so far:
 - Game.py (M3.3): the demo's EnterGame with the party size of a DCC game (16
   in the funnel, DCC_PARTY_SIZE after it) and no protagonist (the game ends
   when the whole party is dead).
+- UIAutotest.py: the party column, the bar, the keys and the inventory by real
+  clicks, drags, wheel turns and key presses (GemRB.TestClick, TestDrag,
+  TestWheel, TestKey); funneltest-auto's ui and ui4 scenarios.

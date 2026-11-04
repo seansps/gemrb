@@ -10,7 +10,7 @@ Map                   GUIMA            ToggleMapWindow                     0
 Wizard_Spells         GUIMG            ToggleSpellWindow                   0
 Mage_Spells           GUIMG            ToggleSpellWindow                   0
 Priest_Spells         GUIPR            TogglePriestWindow                  0
-Spellbook             GUISPL           ToggleSpellBookWindow               0
+Spellbook             DCCMagic         ToggleSpellsWindow                0
 Options               GUIOPT           ToggleOptionsWindow                 0
 Character_Arbitration GUIMP            * 
 Guard_/_Protect       ActionsWindow    ActionDefendPressed               0
@@ -75,4 +75,6 @@ Default               GUICommon        ResolveKey                        0
 # a mapping between keymap.ini key names (here as row names) and our python code
 # GROUP can be used to limit keys to a context, but it requires code changes
 # ethren: the shared keymap.2da, except that Toggle_Always_Run also says in the message log whether it is on
-# (MessageWindow.ToggleAlwaysRun); the key is in game/src/keymap.ini
+# (MessageWindow.ToggleAlwaysRun) and Spellbook opens the DCC spells window (DCCMagic.ToggleSpellsWindow);
+# Character_Record is the DCC record screen (GUIREC.ToggleRecordsWindow, ethren's). The keys are in
+# game/src/keymap.ini (I, C, M, W, R, G); a screen that doesn't exist yet (the journal, the options) has none

@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-# ethren: the thief buttons of the message window's bar (DCC rules, docs/rules/traps.md and
+# ethren: the thief buttons of the bottom bar (MessageWindow.py) (DCC rules, docs/rules/traps.md and
 # classes.md): Detect traps (T) and Stealth (S) for the selected characters, and the thieving
 # cursor (P: disarm a found trap, pick a lock, pick a pocket). Everyone may use all three: under
 # DCC anyone searches and disarms (d20 + Int, d20 + Agi), and the other skills fall back to the
@@ -46,17 +46,13 @@ def Stealth ():
 def Thieving ():
 	GemRB.GameControlSetTargetMode (TARGET_MODE_PICK, GA_NO_DEAD | GA_NO_SELF | GA_NO_ENEMY | GA_NO_HIDDEN)
 
-def AddButtons (window, frame, firstID):
-	"""three buttons left of the frame given (the record button's), with their hotkeys"""
-	buttons = (("T", "Detect traps (T): search at half speed; rolls Int for hidden traps nearby", DetectTraps),
+def Specs ():
+	"""the three buttons: (label, tooltip, action); the label's letter is the hot key"""
+	return (("T", "Detect traps (T): search at half speed; rolls Int for hidden traps nearby", DetectTraps),
 		("S", "Stealth (S): hide in shadows and sneak silently", Stealth),
 		("P", "Thieving (P): disarm a found trap, pick a lock or a pocket", Thieving))
-	for i, (text, tip, action) in enumerate (buttons):
-		x = frame["x"] - (len (buttons) - i) * (frame["w"] + 4)
-		button = window.CreateButton (firstID + i, x, frame["y"], frame["w"], frame["h"])
-		button.SetFlags (IE_GUI_BUTTON_NO_IMAGE, OP_OR)
-		button.SetBackground ({'r': 50, 'g': 60, 'b': 45, 'a': 255})
-		button.SetText (text)
-		button.SetTooltip (tip)
-		button.OnPress (action)
+
+def SetHotKeys (*buttons):
+	"""the bar's T, S and P buttons (MessageWindow.py): each its letter, a global hot key"""
+	for button, (text, tip, action) in zip (buttons, Specs ()):
 		button.SetHotKey (text.lower (), 0, True)

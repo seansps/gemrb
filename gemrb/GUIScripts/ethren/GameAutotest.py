@@ -518,7 +518,7 @@ def _Click (win, control, button = 1, mod = 0):
 
 def _ClickTile (slot, button = 1, mod = 0):
 	import Roster
-	_Click (Roster.RosterWindow, Roster.RosterWindow.GetControl (slot - 1), button, mod)
+	_Click (Roster.RosterWindow, Roster.TileControl (slot), button, mod) # the party column's tile, scrolled to it
 
 def _RosterClicks ():
 	"""the roster's tiles by the mouse (U2): a click selects that one, shift-click and a right click add or

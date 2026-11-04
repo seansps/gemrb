@@ -240,6 +240,9 @@ View::UniqueDragOp Control::DragOperation()
 	if (SupportsAction(key)) {
 		// we have to use a timer so that the dragop is set before the callback is called
 		EventHandler h = [this, key]() {
+			// a one-shot: forget it, or the next drag from this control never starts (the drop's mouse up goes
+			// to another control, so nothing else clears it; an inventory slot could be dragged from only once)
+			actionTimer = nullptr;
 			return actions[key](this);
 		};
 

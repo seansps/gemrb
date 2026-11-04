@@ -66,6 +66,9 @@
 # Phase 4 (areas), only when asked (--scenario area):
 #   j. area: Delmord's western edge (DL0100, tools/area_builder): the party moves there; peasants behind and in
 #      front of the hall and two oaks; the hall door opened; night (the night tiles); screenshots area_*.bmp
+# The UI (the proposed party column and slim bar, UIAutotest.py):
+#   k. ui: the layout, the column's scrolling and tile clicks, the keys, the inventory by real drags and clicks;
+#      ui4 (after choose): the portrait tiles of the four, the inventory and record over them; screenshots ui_*.bmp
 # Every check logs "[FNT] ok ..." or "[FNT] FAIL ...", the end "[FNT] autotest done: N checks,
 # F failed"; FNT_AT_DONE becomes 1 if all passed, 2 if not.
 
@@ -1619,6 +1622,27 @@ def _Skills ():
 	GUIREC.CloseRecordsWindow ()
 	yield
 
+def _UI ():
+	"""the party column, the bar, the keys and the inventory by real clicks, drags and keys (UIAutotest.py)"""
+	import UIAutotest
+	UIAutotest.Check, UIAutotest.Log = _Check, _Log
+	yield from UIAutotest.Funnel16 ()
+
+UI4Steps = None
+
+def _StepUI4 ():
+	"""after the funnel's end: the column's portrait tiles for the four (UIAutotest.Party4)"""
+	global UI4Steps
+	if UI4Steps is None:
+		import UIAutotest
+		UIAutotest.Check, UIAutotest.Log = _Check, _Log
+		UI4Steps = UIAutotest.Party4 ()
+	try:
+		next (UI4Steps)
+		return "ui4"
+	except StopIteration:
+		return "reserves" if _Wanted ("reserves") else "done"
+
 # Scenarios (scripts/run.sh funneltest-auto --scenario NAMES, default all): the engine sets AT_ONLY
 # and AT_<NAME> for the ones picked. Each runs with the ones it needs before it.
 SCENARIOS = (
@@ -1639,6 +1663,8 @@ SCENARIOS = (
 	("rolling", None), # e (M3.1): a new game through the rolling screen
 	("choose", None), # f (M3.3): the funnel's end in the rolled game: choose your four, the class picks, the end screen
 	("reserves", None), # g (M3.3, inns and camps): the inn's Reserves tab, benching, no XP while benched, the camp's rest button, save and load
+	("ui", _UI), # the party column, the bar, the keys, the inventory: real clicks, drags and keys (UIAutotest.py)
+	("ui4", None), # the party column after the funnel's end: portrait tiles for the four (UIAutotest.Party4)
 )
 NEEDS = {
 	"roster": ["classpicks"], # a level-1 character to bleed out
@@ -1649,6 +1675,7 @@ NEEDS = {
 	# M3.3: the funnel's end happens in the game the rolling screen makes
 	"choose": ["rolling"],
 	"reserves": ["rolling", "choose"],
+	"ui4": ["rolling", "choose"],
 }
 # not part of a full run: they leave the party in another area, at night
 OPT_IN = {"area"}
@@ -2090,6 +2117,8 @@ def _StepChoose ():
 		next (ChooseSteps)
 		return "choose"
 	except StopIteration:
+		if _Wanted ("ui4"):
+			return "ui4"
 		return "reserves" if _Wanted ("reserves") else "done"
 
 ReserveSave = "funnelend"
@@ -2372,6 +2401,7 @@ StepTable = {
 	"rolled": _StepRolled,
 	"choose": _StepChoose,
 	"reserves": _StepReserves,
+	"ui4": _StepUI4,
 	"rsvloaded": _StepReservesLoaded,
 }
 
