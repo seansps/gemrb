@@ -890,6 +890,8 @@ public:
 	int DCCPolicyRollBurn(DCC::RollResult& roll, DCC::BurnReason reason, const char16_t* what);
 	/** a night's rest: thieves and halflings get back their level in Luck, up to the natural maximum */
 	void DCCRecoverLuck();
+	/** a scripted gain or loss of Luck with its reason (luck.md's change log): the score moves, a log line and a journal note */
+	void DCCChangeLuck(int amount, const String& reason);
 	/** the signature deed (IE_DCC_DEED) and the one-off deed queued for the next attack */
 	DCC::Deed GetDCCSignatureDeed() const;
 	DCC::Deed GetDCCQueuedDeed() const;

@@ -169,6 +169,21 @@ TEST(DCC_Luck, NightlyRecovery)
 	EXPECT_EQ(LuckLossAfterNight(WIZARD, 1, 7), 7);
 }
 
+TEST(DCC_Luck, ScriptedChange)
+{
+	// an award raises the score (the natural maximum), so a thief's nightly recovery reaches the new one
+	EXPECT_EQ(ChangedLuckScore(10, 1), 11);
+	EXPECT_EQ(ChangedLuckScore(17, 2), 19); // no cap: Luck may go past 18
+	// a loss lowers it, never below 0 (Luck 0 is cursed by fortune)
+	EXPECT_EQ(ChangedLuckScore(10, -1), 9);
+	EXPECT_EQ(ChangedLuckScore(2, -4), 0);
+	EXPECT_EQ(ChangedLuckScore(0, -1), 0);
+	EXPECT_EQ(ChangedLuckScore(7, 0), 7);
+	// the current score is the score minus the Luck already lost: it moves by the same amount
+	int score = 12, loss = 3;
+	EXPECT_EQ(ChangedLuckScore(score, 1) - loss, score - loss + 1);
+}
+
 TEST(DCC_Luck, Defaults)
 {
 	LuckPolicy policy;

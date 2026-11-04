@@ -34,6 +34,7 @@
 #include "GUI/Console.h"
 #include "GUI/EventMgr.h"
 #include "GUI/GUIScriptInterface.h"
+#include "DialogHandler.h"
 #include "GUI/GameControl.h"
 #include "GUI/Label.h"
 #include "GUI/MapControl.h"
@@ -8449,6 +8450,31 @@ static PyObject* GemRB_GameControlDebugFlags(PyObject* /*self*/, PyObject* args)
 	return PyLong_FromLong(long(before));
 }
 
+PyDoc_STRVAR(GemRB_GetDialogLine__doc,
+	     "===== GetDialogLine =====\n\
+\n\
+**Prototype:** GemRB.GetDialogLine ()\n\
+\n\
+**Description:** The conversation going on: its current dialog file and the text of its current \n\
+state (tokens resolved), for tests that follow a conversation of several speakers (EXTERN, CHAIN).\n\
+\n\
+**Return value:** dict: Dialog (resref), Text; None outside a conversation");
+
+static PyObject* GemRB_GetDialogLine(PyObject* /*self*/, PyObject* /*args*/)
+{
+	const GameControl* gc = core->GetGameControl();
+	if (!gc || !gc->dialoghandler) Py_RETURN_NONE;
+	ResRef dialog;
+	ieStrRef text = ieStrRef::INVALID;
+	if (!gc->dialoghandler->CurrentLine(dialog, text)) Py_RETURN_NONE;
+	PyObject* dict = PyDict_New();
+	PyDict_SetItemString(dict, "Dialog", DecRef(PyString_FromResRef, dialog));
+	PyObject* line = PyString_FromStringObj(core->GetString(text, STRING_FLAGS::RESOLVE_TAGS));
+	PyDict_SetItemString(dict, "Text", line);
+	Py_DecRef(line);
+	return dict;
+}
+
 PyDoc_STRVAR(GemRB_GetOverheadText__doc,
 	     "===== GetOverheadText =====\n\
 \n\
@@ -8533,7 +8559,8 @@ PyDoc_STRVAR(GemRB_GetActorPosition__doc,
 For scripts and tests.\n\
 \n\
 **Return value:** dict: Area, X, Y, DestX, DestY, Moving, Busy (has an action), Attacking (the \n\
-global ID of the actor its current attack swings at, 0 none)");
+global ID of the actor its current attack swings at, 0 none), Orientation (0 south .. 15, clockwise), \n\
+Stance (the IE_ANI_* stance it is drawn in: 1 awake, 9 lying after a fall, 17 getting up)");
 
 static PyObject* GemRB_GetActorPosition(PyObject* /*self*/, PyObject* args)
 {
@@ -8553,6 +8580,8 @@ static PyObject* GemRB_GetActorPosition(PyObject* /*self*/, PyObject* args)
 	bool busy = actor->GetCurrentAction() != nullptr || actor->GetNextAction() != nullptr;
 	DictInt(dict, "Busy", busy);
 	DictInt(dict, "Attacking", busy ? int(actor->objects.LastTarget) : 0);
+	DictInt(dict, "Orientation", actor->GetOrientation());
+	DictInt(dict, "Stance", actor->GetStance());
 	return dict;
 }
 
@@ -16693,6 +16722,7 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(GetGameTime, METH_NOARGS),
 	METHOD(GetGameVar, METH_VARARGS),
 	METHOD(GetOverheadText, METH_VARARGS),
+	METHOD(GetDialogLine, METH_NOARGS),
 	METHOD(GetINIBeastsKey, METH_VARARGS),
 	METHOD(GetINIPartyCount, METH_NOARGS),
 	METHOD(GetINIPartyKey, METH_VARARGS),

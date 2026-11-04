@@ -102,6 +102,11 @@ GEM_EXPORT int NightlyLuckRecovery(int classID, int level);
 /** the Luck loss left after a night: recovered up to the natural maximum (loss 0), never below */
 GEM_EXPORT int LuckLossAfterNight(int classID, int level, int loss);
 
+/** a scripted gain or loss of Luck (luck.md, "Gaining and losing Luck" and the Ethren awards): it
+ * changes the score (the natural maximum, IE_DCC_LUCK base), so the current score and its modifier
+ * move with it, while the frozen augur modifier and the Luck already lost stay; never below 0 */
+GEM_EXPORT int ChangedLuckScore(int score, int amount);
+
 }
 }
 

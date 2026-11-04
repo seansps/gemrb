@@ -149,6 +149,25 @@ void Actor::DCCRecoverLuck()
 	DCCFeedback(fmt::format(u"{} gets {} Luck back overnight", GetName(), loss - left), FT_MISC);
 }
 
+void Actor::DCCChangeLuck(int amount, const String& reason)
+{
+	if (!IsDCCCharacter() || amount == 0) return;
+	int before = GetDCCLuck();
+	int score = Signed(BaseStats[IE_DCC_LUCK]);
+	// SetBase moves the current (modified) score by the same difference
+	SetBase(IE_DCC_LUCK, ChangedLuckScore(score, amount));
+	int after = GetDCCLuck();
+	String why = reason.empty() ? String() : fmt::format(u" ({})", reason);
+	String line = fmt::format(u"{}: {:+} Luck{}, {} -> {}", GetName(), amount, why, before, after);
+	DCCFeedback(line, FT_MISC);
+	// luck.md's change log: every gain or loss is a journal note with its source (a custom string,
+	// saved with the game as the map notes' are)
+	Game* game = core->GetGame();
+	if (!game) return;
+	ieStrRef note = core->UpdateString(ieStrRef::INVALID, line);
+	if (note != ieStrRef::INVALID) game->AddJournalEntry(note, JournalSection::Main, 0);
+}
+
 Deed Actor::GetDCCSignatureDeed() const
 {
 	return static_cast<Deed>(std::min<ieDword>(BaseStats[IE_DCC_DEED], DEED_COUNT - 1));

@@ -1309,6 +1309,7 @@ public: //Script Functions
 	static void DCCSkillCheck(Scriptable* Sender, Holder<Action> parameters);
 	static void DCCPartySkillCheck(Scriptable* Sender, Holder<Action> parameters);
 	static void DCCAddSkill(Scriptable* Sender, Holder<Action> parameters);
+	static void DCCChangeLuck(Scriptable* Sender, Holder<Action> parameters);
 	static void DCCRevealTrap(Scriptable* Sender, Holder<Action> parameters);
 	static void DCCDropHands(Scriptable* Sender, Holder<Action> parameters);
 	static void DCCDropItem(Scriptable* Sender, Holder<Action> parameters);

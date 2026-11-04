@@ -606,6 +606,7 @@ static const ActionLink actionnames[] = {
 	{ "damage", GameScript::Damage, 0 },
 	{ "daynight", GameScript::DayNight, 0 },
 	{ "dccaddskill", GameScript::DCCAddSkill, 0 }, // DCC games (M3.4)
+	{ "dccchangeluck", GameScript::DCCChangeLuck, 0 }, // DCC games (Luck awards)
 	{ "dccdrophands", GameScript::DCCDropHands, 0 }, // DCC games (the funnel's snare)
 	{ "dccdropitem", GameScript::DCCDropItem, 0 },
 	{ "dccpartyskillcheck", GameScript::DCCPartySkillCheck, 0 },
