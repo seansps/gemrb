@@ -1265,7 +1265,8 @@ TEST(DCC_Tables, Looks)
 	// S6: each species walks at its own stride's rate: humans 9, dwarves 6, elves 10; halflings walk the
 	// dwarves' walk (their bodies), at 6 too
 	const std::map<std::string, int> speeds { { "0x6500", 9 }, { "0x6501", 9 }, { "0x6510", 9 }, { "0x6511", 9 },
-		{ "0x6520", 6 }, { "0x6530", 6 }, { "0x6540", 10 }, { "0x6550", 10 }, { "0x6560", 6 }, { "0x6570", 6 } };
+		{ "0x6520", 6 }, { "0x6530", 6 }, { "0x6540", 10 }, { "0x6550", 10 }, { "0x6560", 6 }, { "0x6570", 6 },
+		{ "0x6600", 12 } }; // the bandits' hound: 40', its trot's stride (art/creatures/mastiff)
 	ASSERT_EQ(rates->GetRowCount(), speeds.size());
 	for (TableMgr::index_t row = 0; row < rates->GetRowCount(); ++row) {
 		const std::string& id = rates->QueryField(row, 0);
@@ -1277,9 +1278,16 @@ TEST(DCC_Tables, Looks)
 	std::set<std::string> ids;
 	for (TableMgr::index_t row = 0; row < avatars->GetRowCount(); ++row) {
 		ids.insert(avatars->GetRowName(row));
+		if (avatars->GetRowName(row) == "0x6600") continue; // the hound, below
 		EXPECT_EQ(avatars->QueryField(row, 4), "0"); // TYPE 0, IE_ANI_CODE_MIRROR
 		EXPECT_NE(avatars->QueryField(row, 7), "*"); // a SIZE letter: overlays on
 	}
+	// the bandits' hound: the IWD monster layout (TYPE 16, IE_ANI_TWO_FILES_3B), its own palette, no overlays
+	TableMgr::index_t hound = avatars->GetRowIndex("0x6600");
+	EXPECT_EQ(avatars->QueryField(hound, 0), "MHND");
+	EXPECT_EQ(avatars->QueryField(hound, 4), "16");
+	EXPECT_EQ(avatars->QueryField(hound, 6), "1");
+	EXPECT_EQ(avatars->QueryField(hound, 7), "*");
 	EXPECT_EQ(avatars->QueryField(avatars->GetRowIndex("0x6510"), 7), "F"); // the female rig's own overlays
 	EXPECT_EQ(avatars->QueryField(avatars->GetRowIndex("0x6511"), 7), "F"); // the bald female body: her rig's hair
 	EXPECT_EQ(avatars->QueryField(avatars->GetRowIndex("0x6511"), 0), "CPF2");
@@ -1306,7 +1314,8 @@ TEST(DCC_Tables, Looks)
 		EXPECT_EQ(avatars->QueryField(avatars->GetRowIndex("0x6560"), col), avatars->QueryField(avatars->GetRowIndex("0x6520"), col)) << col;
 		EXPECT_EQ(avatars->QueryField(avatars->GetRowIndex("0x6570"), col), avatars->QueryField(avatars->GetRowIndex("0x6530"), col)) << col;
 	}
-	EXPECT_EQ(ids, (std::set<std::string> { "0x6500", "0x6501", "0x6510", "0x6511", "0x6520", "0x6530", "0x6540", "0x6550", "0x6560", "0x6570" }));
+	EXPECT_EQ(ids, (std::set<std::string> { "0x6500", "0x6501", "0x6510", "0x6511", "0x6520", "0x6530", "0x6540", "0x6550", "0x6560", "0x6570",
+		"0x6600" }));
 
 	// the looks roll (dcclooks.2da) only gives a body the styles rendered on its rig: hair 1-7 on the men,
 	// 8-13 on the women; the beards 1-3 on human men, 4-6 on dwarf men (S6: each species its own body).

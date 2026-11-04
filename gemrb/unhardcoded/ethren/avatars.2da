@@ -11,6 +11,7 @@
 0x6550     CEF2       CEFL       CEFC       CEFP       0          2          0          V
 0x6560     CDM2       CDML       CDMC       CDMP       0          2          0          D
 0x6570     CDF2       CDFL       CDFC       CDFP       0          2          0          W
+0x6600     MHND       MHND       MHND       MHND       16         2          1          *
 # ethren (M2.11): our character animations (tools/sprite_render writes the rows; the test games merge
 # them into the demo's table). The engine uses the row with the largest id not above the CRE's, so each
 # body owns a block of 16 ids (variants, outfits) and each species and gender a block of 0x10 bodies:
@@ -30,3 +31,5 @@
 # animation 2A/3A/4A, IE_ARMOR_TYPE), its prefix's last letter L, C or P (CPM2 CPML CPMC CPMP); built from whole
 # Quaternius outfits (art/sprites/armour.json). The hair, beard, helmet and weapon overlays serve every level.
 # The baked-hair bodies (CPM1, CPF1) have no armour sets.
+# 0x6600 MHND: the bandits' hound (art/creatures/mastiff), the IWD monster layout (TYPE 16, IE_ANI_TWO_FILES_3B) with
+# its own palette (PALETTE 1); MHND<stance>.BAM and MHND<stance>E.BAM, plus MHNDRN (the run) for DCC.
