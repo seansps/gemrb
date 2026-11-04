@@ -202,7 +202,7 @@ def _Run ():
 TRAIL_BANDITS = ("DlCut1", "DlCut2", "DlCut3", "DlArch")
 TRAIL_INFO = ("DlTollBoard", "DlHeadMan", "DlHeadGrannyY", "DlHeadYoung", "DlBarricade", "DlCartInfo", "DlBirches", "DlHare", "DlHerbs")
 LAST_WORDS = ("Tell Bess she owes me four silver.", "It's warm. Why is it warm?", "Not the face. I'm getting married.",
-	"Ha! Missed m--", "I can hear it counting.", "Bury me face down. It can't find you face down.")
+	"Ha! Missed m-", "I can hear it counting.", "Bury me face down. It can't find you face down.")
 MS_NONE, MS_DETECTTRAPS, MS_STEALTH = 0, 2, 3
 Hover = ["", 0] # what _ClickMap's hover found under the cursor
 
