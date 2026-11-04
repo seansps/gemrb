@@ -15,7 +15,8 @@
  * nothing, and CLOSED (S5) the same under a closed helmet, which covers the head down to the neck
  * (a crop of its own, Y? for the hair, Z? for the beards). KIND is HAIR or BEARD. The layers take
  * the body's palette: the hair range colours them. unhardcoded/ethren/dcchelm.2da lists which
- * helmet overlays are closed.
+ * helmet overlays are closed, and which are hoods: under a hood no hair is drawn and a beard is
+ * drawn whole (its own CODE).
  *
  * The weapon, off-hand and helmet overlays take their own colour bytes in DCC games, as in the
  * IE games: byte 1, 2 or 3 of each CRE colour (effect 7's locations 0x10-0x36), so an item's
@@ -47,8 +48,9 @@ struct HairStyle {
 	std::string underClosed; // S5: the code drawn under a closed helmet, "" for nothing
 };
 
-/** the helmet a character wears, for the hair drawn under it */
-enum class Helmet : uint8_t { None, Open, Closed };
+/** the helmet a character wears, for the hair drawn under it (Hood: a cloth hood with a mantle, the
+ * Ranger outfit's, which covers all the hair but leaves the face and beard bare) */
+enum class Helmet : uint8_t { None, Open, Closed, Hood };
 
 class GEM_EXPORT HairTable {
 public:
@@ -63,24 +65,27 @@ private:
 	std::vector<HairStyle> styles;
 };
 
-/** the overlay to draw for a style: its code, or the code for the helmet worn ("" none) */
+/** the overlay to draw for a style: its code, or the code for the helmet worn ("" none; under a hood
+ * no hair and the beard's own code) */
 GEM_EXPORT std::string HairOverlay(const HairStyle* style, Helmet helmet);
 
 /**
  * S5: which helmet overlays are closed (the armet, FH: down to the neck, so the open helmets' crop of
- * the hair would poke out of it). unhardcoded/ethren/dcchelm.2da: rows by the helmet's 2-letter
- * animation code (ITM 0x22), column CLOSED 1 or 0. A helmet that isn't listed is open.
+ * the hair would poke out of it) or hoods (RH: no hair under it, the beard whole).
+ * unhardcoded/ethren/dcchelm.2da: rows by the helmet's 2-letter animation code (ITM 0x22), column
+ * CLOSED 0 (open), 1 (closed) or 2 (a hood). A helmet that isn't listed is open.
  */
 class GEM_EXPORT HelmetTable {
 public:
 	bool Load(const TableMgr& table);
 	void Set(const std::string& code, bool closed);
+	void Set(const std::string& code, Helmet kind);
 	/** the helmet worn with this overlay code: None for "" */
 	Helmet Worn(const std::string& code) const;
-	bool Empty() const { return closed.empty(); }
+	bool Empty() const { return kinds.empty(); }
 
 private:
-	std::map<std::string, bool> closed; // upper case
+	std::map<std::string, Helmet> kinds; // upper case
 };
 
 /** the CRE colour byte an overlay's palette takes (CharAnimations' PaletteType: 5 weapon, 6

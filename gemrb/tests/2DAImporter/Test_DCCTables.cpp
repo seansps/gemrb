@@ -1259,6 +1259,15 @@ TEST(DCC_Tables, Looks)
 		EXPECT_EQ(helmets.Worn(code), Helmet::Open) << code;
 	}
 	EXPECT_EQ(helmets.Worn(""), Helmet::None);
+	// S7: the hood (RH): no hair under it, every beard whole
+	EXPECT_EQ(helmets.Worn("RH"), Helmet::Hood);
+	for (int id = 1; id <= 14; ++id) {
+		EXPECT_EQ(HairOverlay(hair.Find(id, false), helmets.Worn("RH")), "") << id;
+	}
+	for (int id = 1; id <= 6; ++id) {
+		const HairStyle* style = hair.Find(id, true);
+		EXPECT_EQ(HairOverlay(style, helmets.Worn("RH")), style->code) << id;
+	}
 
 	auto rates = Open2DA("moverate");
 	ASSERT_TRUE(rates);

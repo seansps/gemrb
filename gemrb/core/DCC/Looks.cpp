@@ -82,6 +82,8 @@ std::string HairOverlay(const HairStyle* style, Helmet helmet)
 			return style->underHelmet;
 		case Helmet::Closed:
 			return style->underClosed;
+		case Helmet::Hood:
+			return style->beard ? style->code : std::string();
 		default:
 			return style->code;
 	}
@@ -164,30 +166,36 @@ bool HeldTable::BothHands(const std::string& resref, const std::string& animCode
 
 bool HelmetTable::Load(const TableMgr& table)
 {
-	closed.clear();
+	kinds.clear();
 	TableMgr::index_t column = table.GetColumnIndex("CLOSED");
 	if (column == TableMgr::npos) return false;
 	for (TableMgr::index_t r = 0; r < table.GetRowCount(); ++r) {
 		const std::string& value = table.QueryField(r, column);
-		if (value != "0" && value != "1") return false;
+		if (value != "0" && value != "1" && value != "2") return false;
 		const std::string& code = table.GetRowName(r);
 		if (code.size() != 2) return false;
-		Set(code, value == "1");
+		Set(code, value == "2" ? Helmet::Hood : value == "1" ? Helmet::Closed : Helmet::Open);
 	}
 	return true;
 }
 
 void HelmetTable::Set(const std::string& code, bool isClosed)
 {
-	closed[Upper(code)] = isClosed;
+	Set(code, isClosed ? Helmet::Closed : Helmet::Open);
+}
+
+void HelmetTable::Set(const std::string& code, Helmet kind)
+{
+	kinds[Upper(code)] = kind;
 }
 
 Helmet HelmetTable::Worn(const std::string& code) const
 {
 	std::string key = Code(code);
 	if (key.empty()) return Helmet::None;
-	auto row = closed.find(key);
-	return row != closed.end() && row->second ? Helmet::Closed : Helmet::Open;
+	auto row = kinds.find(key);
+	if (row == kinds.end() || row->second == Helmet::None) return Helmet::Open;
+	return row->second;
 }
 
 unsigned char WeaponAnimType(bool twoHandedFlag, bool heldInBothHands, OffHand offHand)

@@ -61,6 +61,25 @@ TEST(DCC_Looks, ClosedHelmets)
 	EXPECT_EQ(table.Worn(""), Helmet::None);
 	table.Set("FH", false); // a row again replaces it
 	EXPECT_EQ(table.Worn("FH"), Helmet::Open);
+	table.Set("rh", Helmet::Hood); // S7: a hood
+	EXPECT_EQ(table.Worn("RH"), Helmet::Hood);
+	table.Set("RH", Helmet::None); // a row can't make a worn helmet none: it is open
+	EXPECT_EQ(table.Worn("RH"), Helmet::Open);
+}
+
+// S7: under a hood no hair at all, whatever its crops, and every beard whole (its own code, not a crop)
+TEST(DCC_Looks, Hood)
+{
+	HairTable table;
+	table.Set({ 4, false, "HD", "XD", "YD" });
+	table.Set({ 1, false, "HP", "", "" });
+	table.Set({ 1, true, "BD", "BD", "ZD" });
+	table.Set({ 4, true, "BL", "", "ZL" });
+	EXPECT_EQ(HairOverlay(table.Find(4, false), Helmet::Hood), "");
+	EXPECT_EQ(HairOverlay(table.Find(1, false), Helmet::Hood), "");
+	EXPECT_EQ(HairOverlay(table.Find(1, true), Helmet::Hood), "BD");
+	EXPECT_EQ(HairOverlay(table.Find(4, true), Helmet::Hood), "BL");
+	EXPECT_EQ(HairOverlay(nullptr, Helmet::Hood), "");
 }
 
 TEST(DCC_Looks, OverlayColourBytes)
