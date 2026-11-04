@@ -86,6 +86,13 @@ def OnLoad():
 	# ethren-auto: the real game's smoke test (game/), when its autotest table is there
 	GameAutotest.OnGameStart ()
 
+def ToggleAlwaysRun():
+	# the keymap's Toggle_Always_Run (unhardcoded/ethren/keymap.2da): every move is a run while it is on
+	# (combat.md "Movement"), so say which it is now
+	GemRB.GameControlToggleAlwaysRun ()
+	state = "on" if GemRB.GetVar ("Always Run") else "off"
+	GemRB.GetView ("MsgSys", 0).Append ("[color=d8c890]Always run: " + state + "[/color]\n")
+
 def UpdateControlStatus():
 	pass
 
