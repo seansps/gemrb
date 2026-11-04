@@ -890,6 +890,10 @@ def _Looks2 ():
 			# S7: the open crops' files are there: the male dreads and ponytail (XD, XT, empty from S5 to S7) and a
 			# female long style, on each rig's size letter (L male, F female)
 			_Check ("looks2: the open-helmet crops' files (WQLXD, WQLXT, WQFXL)", [GemRB.HasResource (ref, RES_BAM) for ref in ("WQLXDG1", "WQLXTG1", "WQFXLG1")], [True] * 3)
+			# and on the demihuman rigs (dwarves D W, elves E V), cut with the same rule: the elf man's dreads and
+			# ponytail (empty before), every female long style, and the closed helm's long-dreads and long crops
+			demi = ["WQ%s%sG1" % (size, code) for size, codes in (("D", ("XD", "XT")), ("E", ("XD", "XT")), ("W", ("XO", "XL", "XR", "XQ", "YR")), ("V", ("XO", "XL", "XR", "XQ", "YL", "YR"))) for code in codes]
+			_Check ("looks2: the demihumans' crop files (%s)" % ", ".join (demi), [GemRB.HasResource (ref, RES_BAM) for ref in demi], [True] * len (demi))
 		tag = "kh_nh" if pair[0] == "FNTKHAT" else "lc_fh"
 		for face, label in ((0, "s"), (4, "w"), (8, "n")):
 			_Face (gids, face)
