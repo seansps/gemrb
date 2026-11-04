@@ -848,7 +848,10 @@ def _Steps (what, steps):
 		if snippet not in _Line ():
 			_Check ("%s: the line \"%s\"" % (what, snippet), _Line ()[:90], snippet)
 			return False
-		_Reply (GemRB.GetVar ("DialogOption") if pick is None else pick)
+		if pick is None:
+			yield from _ClickContinue (what, snippet)
+		else:
+			_Reply (pick)
 		yield
 		yield
 	# a conversation can leave the game paused (the dialog's pause): the scripts its actions wake must run
@@ -1130,6 +1133,25 @@ def _InDialog ():
 def _Reply (transition):
 	"""picks a transition of the dialog's current state, as a click on a reply (or Continue) does"""
 	GemRB.SetVar ("DialogChoose", transition)
+
+EndShot = False
+
+def _ClickContinue (what, snippet):
+	"""a real click on the dialog's Continue or End dialog button (GUIWORLD.ContinueWindow), as a player's would go: it must
+	be on show and in front of the bar, or the conversation can't go on"""
+	import GUIWORLD
+	yield
+	win = GUIWORLD.ContinueWindow
+	button = win.GetControl (0) if win else None
+	if not button or not button.IsVisible ():
+		_Check ("%s: the Continue or End button after \"%s\"" % (what, snippet), False, True)
+		_Reply (GemRB.GetVar ("DialogOption"))
+		return
+	if not EndShot and "end" in button.QueryText ().lower ():
+		# the first End dialog button: a full-window shot, so it can be seen in front of the bar
+		globals ()["EndShot"] = True
+		_Shot ("dialog_end_button", 0, 1)
+	_Click (win, button)
 
 def _Click (win, control, button = 1, mod = 0):
 	"""a real click on a control (GemRB.TestClick: through the windows as a player's would go)"""

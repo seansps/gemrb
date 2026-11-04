@@ -184,6 +184,14 @@ def _WrapDialog ():
 		ended ()
 		Layout (False)
 	GUIWORLD.DialogStarted, GUIWORLD.DialogEnded = DialogStarted, DialogEnded
+	# the End dialog button (unlike Continue) never brought its window to the front: NextDialogState focuses the
+	# bar, whose backdrop then took the click, so a conversation that ends without a reply couldn't be left
+	opened = GUIWORLD.OpenEndMessageWindow
+	def OpenEndMessageWindow ():
+		opened ()
+		if GUIWORLD.ContinueWindow:
+			GUIWORLD.ContinueWindow.Focus ()
+	GUIWORLD.OpenEndMessageWindow = OpenEndMessageWindow
 
 def UpdateBar ():
 	"""what the buttons show now (the roster's timer calls it): pause, the formation"""
