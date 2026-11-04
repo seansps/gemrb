@@ -906,6 +906,22 @@ const CharAnimations::PartAnim* CharAnimations::GetAnimation(unsigned char stanc
 
 	stanceID = MaybeOverrideStance(stanceID);
 
+	// DCC (run frames): a body or overlay without the run walks instead, sharing the walk's
+	// animations, so a running creature never vanishes (the speed stays the run's)
+	if (stanceID == IE_ANI_RUN && AnimType == IE_ANI_CODE_MIRROR && core->HasFeature(GFFlags::RULES_DCC) &&
+	    Anims[IE_ANI_RUN][Orient].empty() && !DCCHasRunFrames(Orient)) {
+		static std::set<ResRef> reported;
+		if (reported.insert(ResRefBase).second) {
+			Log(WARNING, "CharAnimations", "DCC: no run frames for {} ({:#x}) or one of its overlays: it runs with the walk", ResRefBase, GetAnimationID());
+		}
+		const PartAnim* walk = GetAnimation(IE_ANI_WALK, Orient);
+		if (!walk) return nullptr;
+		Anims[IE_ANI_RUN][Orient] = *walk;
+		stanceID = nextStanceID = IE_ANI_RUN;
+		autoSwitchOnEnd = false;
+		return &Anims[IE_ANI_RUN][Orient];
+	}
+
 	bool lastFrameOnly = false;
 	//pst (and some other) animations don't have separate animations for sleep/die
 	if (stance == IE_ANI_TWITCH &&
@@ -1412,6 +1428,33 @@ ResRef CharAnimations::DCCStanceFile(unsigned char stance, orient_t orient, std:
 	return file;
 }
 
+bool CharAnimations::DCCHasRunFrames(orient_t orient) const
+{
+	EquipResRefData equipment;
+	ResRef file = ResRefBase;
+	unsigned char cycle = 0;
+	AddVHRSuffix(file, IE_ANI_RUN, cycle, orient, equipment);
+	auto has = [](const ResRef& ref, unsigned char c) {
+		auto af = gamedata->GetFactoryResourceAs<const AnimationFactory>(ref, IE_BAM_CLASS_ID, true);
+		return af && af->GetCycleSize(c) > 0;
+	};
+	if (!has(file, cycle)) return false;
+	if (GetSize() == 0) return true;
+	// the overlays the body draws (GetAnimation's parts), each checked only if it has a walk: a layer
+	// missing altogether is missing from the walk too
+	auto overlay = [&](const AnimRef& ref, bool offhand) {
+		if (ref[0] == 0) return true;
+		ResRef dest;
+		unsigned char c = 0;
+		GetEquipmentResRef(ref, offhand, dest, c, equipment);
+		if (!has(dest, SixteenToNine[orient])) return true;
+		return has(dest, c);
+	};
+	bool offhandDrawn = WeaponType != IE_ANI_WEAPON_2H;
+	return overlay(WeaponRef, false) && (!offhandDrawn || overlay(OffhandRef, WeaponType == IE_ANI_WEAPON_2W)) &&
+		overlay(HelmetRef, false) && overlay(HairRef, false) && overlay(BeardRef, false);
+}
+
 void CharAnimations::GetEquipmentResRef(AnimRef equipRef, bool offhand,
 					ResRef& dest, unsigned char& Cycle,
 					const EquipResRefData& equip) const
@@ -1896,6 +1939,13 @@ void CharAnimations::AddVHRSuffix(ResRef& dest, unsigned char stance,
 
 			//Unknown... maybe only a transparency effect apply
 		case IE_ANI_HIDE:
+			// DCC (run frames): IE_ANI_RUN is IE_ANI_HIDE; the run is ours, G10 after G19's cycles,
+			// and the overlays' G1 file has the same cycles (WQ<size><code>OG1 keeps to 8 letters)
+			if (core->HasFeature(GFFlags::RULES_DCC)) {
+				dest.Append("g10");
+				EquipData.Suffix = "g1";
+				Cycle += 90;
+			}
 			break;
 
 		case IE_ANI_READY:

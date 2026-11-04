@@ -7106,7 +7106,7 @@ static PyObject* GemRB_GetDCCStats(PyObject* /*self*/, PyObject* args)
 	Py_DecRef(weights);
 	PyObject* files = PyDict_New();
 	if (looks && looks->GetAnimType() == IE_ANI_CODE_MIRROR) {
-		static const std::array<std::pair<const char*, unsigned char>, 4> stances { { { "Ready", IE_ANI_READY }, { "Overhand", IE_ANI_ATTACK_BACKSLASH }, { "Backhand", IE_ANI_ATTACK_SLASH }, { "Thrust", IE_ANI_ATTACK_JAB } } };
+		static const std::array<std::pair<const char*, unsigned char>, 5> stances { { { "Ready", IE_ANI_READY }, { "Overhand", IE_ANI_ATTACK_BACKSLASH }, { "Backhand", IE_ANI_ATTACK_SLASH }, { "Thrust", IE_ANI_ATTACK_JAB }, { "Run", IE_ANI_RUN } } };
 		for (const auto& stance : stances) {
 			std::string suffix;
 			ResRef file = looks->DCCStanceFile(stance.second, actor->GetOrientation(), &suffix);
@@ -7117,6 +7117,8 @@ static PyObject* GemRB_GetDCCStats(PyObject* /*self*/, PyObject* args)
 	}
 	PyDict_SetItemString(dict, "StanceFiles", files);
 	Py_DecRef(files);
+	// the run: are its frames there for the body and every worn layer (else the walk is drawn)
+	DictInt(dict, "RunFrames", looks && looks->GetAnimType() == IE_ANI_CODE_MIRROR && looks->DCCHasRunFrames(actor->GetOrientation()));
 	DictInt(dict, "Engaged", actor->DCCEngaged());
 	DictInt(dict, "GameTicks", core->GetGame()->GameTime); // for tests that time things in ticks
 

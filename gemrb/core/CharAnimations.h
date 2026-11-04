@@ -189,6 +189,10 @@ public:
 	// DCC (tests): the body's file a stance draws with the current weapon type (eg. CHMB1A6), and the
 	// suffix its weapon overlay takes (WQ<size><code><suffix>, eg. A6); loads nothing
 	ResRef DCCStanceFile(unsigned char stance, orient_t orient, std::string* overlaySuffix = nullptr) const;
+	// DCC (run frames): type 0 bodies run (IE_ANI_RUN) with <prefix>G10, cycles 90-98, and their
+	// overlays with the same cycles of their G1 file; false while the body or a worn overlay has no
+	// run for this orientation, and then the walk is drawn instead
+	bool DCCHasRunFrames(orient_t orient) const;
 	void SetColors(const ieDword* Colors);
 	void CheckColorMod();
 	void SetupColors(PaletteType type);

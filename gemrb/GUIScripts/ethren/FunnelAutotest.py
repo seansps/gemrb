@@ -433,6 +433,31 @@ def _Encumbrance ():
 	_Check ("light: Str 15 and a light load walk (no strmod.2da gap)", GemRB.GetDCCStats (brin)["LoadName"], "light")
 	light = yield from walk ()
 	speed = GemRB.GetDCCStats (brin)["WalkSpeed"]
+
+	# the run (combat.md "Movement"): twice the walk, drawn with G10, or with the walk while the body
+	# or a worn layer has no run frames (funneltest's sprites have none yet), never with nothing
+	far = (1650, 1200)
+	def move (run):
+		_Put (brin, start[0], start[1])
+		yield
+		if run:
+			GemRB.ExecuteString ("RunToPoint([%d.%d])" % far, brin)
+		else:
+			GemRB.DCCWalk (brin, far[0], far[1])
+		yield
+		yield
+		stats = GemRB.GetDCCStats (brin)
+		where = GemRB.GetActorPosition (brin)
+		GemRB.ClearActions (brin)
+		return int (((where["X"] - start[0]) ** 2 + (where["Y"] - start[1]) ** 2) ** 0.5), stats
+	walked, walking = yield from move (False)
+	ran, running = yield from move (True)
+	_Log ("run: %d px walking, %d px running; step times %d and %d" % (walked, ran, walking["WalkSpeed"], running["WalkSpeed"]))
+	_Check ("run: the stance is the run (IE_ANI_RUN 15), the walk's 10", [walking["Stance"], running["Stance"]], [10, 15])
+	_Check ("run: half the walk's step time", running["WalkSpeed"], (walking["WalkSpeed"] + 1) // 2)
+	_Check ("run: about twice as far", walked > 20 and 1.7 * walked <= ran <= 2.3 * walked, True)
+	_Check ("run: the body's run file, G10 after G19 (the overlays' G1)", running["StanceFiles"]["Run"], [running["StanceFiles"]["Ready"][0][:4] + "g10", "g1"])
+	_Check ("run: funneltest has no run frames, so it is drawn with the walk", running["RunFrames"], 0)
 	# stones up to just past a third of 120 lb: half speed
 	stones = 0
 	while carried + 20 * stones <= 39:

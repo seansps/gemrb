@@ -36,6 +36,7 @@
 #include "StringMgr.h"
 #include "TableMgr.h"
 
+#include "DCC/Combat.h"
 #include "DCC/Rules.h"
 #include "GUI/GameControl.h"
 #include "GameScript/GSUtils.h" //needed for DisplayStringCore
@@ -5405,6 +5406,12 @@ int Actor::CalculateSpeed(bool feedback) const
 		speed = CalculateSpeedFromINI(feedback);
 	} else {
 		speed = CalculateSpeedFromRate(feedback);
+	}
+	// DCC: a run (IF_RUNNING) covers twice the walk (combat.md "Movement"); the ini-speed games
+	// have their own RunScale. Only while it moves: the flag stays set after the run until the next move
+	if (core->HasFeature(GFFlags::RULES_DCC) && (GetInternalFlag() & IF_RUNNING) && HasMovementInProgress() &&
+	    !core->HasFeature(GFFlags::RESDATA_INI)) {
+		speed = DCC::RunStepTime(speed);
 	}
 	// DCC: a searcher walks at half speed (traps.md); the value is the time a step takes
 	if (core->HasFeature(GFFlags::RULES_DCC) && Modal.State == Modal::DetectTraps) speed *= 2;

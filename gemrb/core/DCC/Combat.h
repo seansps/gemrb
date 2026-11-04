@@ -262,6 +262,12 @@ constexpr int CHARGE_ATTACK = 2;
 constexpr int CHARGE_AC = -2;
 GEM_EXPORT bool ChargeRunUp(int movedFeet, int speedFeet);
 
+// running (combat.md "Movement"): a creature that gives up its action moves its speed again, so a run
+// covers twice the walk. The engine's speed is the time a step takes (Actor::CalculateSpeed), so a run's
+// is half the walk's, never 0 for a creature that can walk
+constexpr int RUN_SPEED_MULTIPLIER = 2;
+GEM_EXPORT int RunStepTime(int walkStepTime);
+
 // higher ground (Table 4-1, +1 melee): the attacker two steps up the area's height map (-7..+7) from the defender
 constexpr int HIGHER_GROUND_STEP = 2;
 GEM_EXPORT bool HigherGround(int attackerElevation, int defenderElevation);
