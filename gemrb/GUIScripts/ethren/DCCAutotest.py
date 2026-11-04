@@ -12,7 +12,8 @@
 #   2. rolls saves and checks with fixed dice through GemRB.DCCRoll
 #   3. drains abilities (DCC:AbilityLoss) and checks the states at 0
 #   4. saves, loads that save and checks that Luck, augurs and loss came back
-#   5. rests in the field, then in bed, and checks what healed (never Luck)
+#   5. rests in the field, then in bed, and checks what healed (never Luck); Brak, out cold at Sta 0,
+#      gets up after the bed rest and walks when told to (at the start of the fight)
 #   6. levels a peasant up, and kills one character with a lethal drain
 #   7. opens the record screen (GUIREC) and pages through the party
 #   8. fights (M2.3): goblins and a few DCC fighters outside the party attack with forced
@@ -1119,6 +1120,9 @@ def _Fights ():
 	GemRB.GetDCCCombatLog (1)
 	# the M2.3 checks run without Luck burns (Korg, a warrior, would cancel his fumble by default)
 	GemRB.DCCSetLuckPolicy (_ID ("dctkorg"), DCC_BURN_NEVER, 10, DCC_LUCK_PAUSE | DCC_LUCK_ALLIES)
+	# Brak, out cold at Sta 0 in the sheet scenario and woken by the bed rest: he stands and acts
+	if _Wanted ("sheet"):
+		yield from _Woken ()
 	# traps and thief skills first: the party is as the sheet left it, and everything it changes is put back
 	if _Wanted ("thief"):
 		yield from _Thief ()
@@ -1609,8 +1613,7 @@ def _Thief ():
 	_Check ("log: sly stops", _Logged ("Sly stops searching"), True)
 
 	# --- disarming: a miss by 1-4 only fails, by 5 or more (or a natural 1) it springs; one try each ---
-	# (Brak, out cold earlier in the sheet scenario, runs no actions after it: see the report; Grub and the
-	# protagonist stand in)
+	# (Grub and the protagonist try it)
 	hero = 1
 	_Jump (grub, 575, 500)
 	yield
@@ -1834,6 +1837,33 @@ def _Thief ():
 	for line in GemRB.GetDCCCombatLog ():
 		if "trap" in line or "Stealth" in line or "pocket" in line or "lock" in line or "hides" in line or "sneaks" in line or "backstab" in line or "track" in line:
 			_Log ("thief: " + line)
+
+IE_ANI_AWAKE = 1
+IE_ANI_READY = 7
+IE_ANI_SLEEP = 16
+IE_ANI_TWITCH = 9
+IE_ANI_GET_UP = 17
+
+def _Woken ():
+	"""one knocked out (Brak: Sta drained to 0) and then rested gets up and runs his actions again"""
+	brak = _Party ()["dctbrak"]
+	stats = GemRB.GetDCCStats (brak)
+	_Log ("woken: brak's stance %d, states %d, state id 0x%x" % (stats["Stance"], stats["States"], GemRB.GetPlayerStat (brak, IE_STATE_ID)))
+	_Check ("woken: brak, rested, is awake (no DCC state, no sleep)", [stats["States"], GemRB.GetPlayerStat (brak, IE_STATE_ID) & STATE_SLEEP], [0, 0])
+	yield from _Wait (lambda: GemRB.GetDCCStats (brak)["Stance"] not in (IE_ANI_SLEEP, IE_ANI_TWITCH, IE_ANI_GET_UP), 10)
+	_Check ("woken: brak stands (not lying, not getting up)", GemRB.GetDCCStats (brak)["Stance"] in (IE_ANI_AWAKE, IE_ANI_READY), True)
+	start = GemRB.GetActorPosition (brak)
+	to = (start["X"] + 60, start["Y"] + 20)
+	GemRB.ClearActions (brak)
+	GemRB.ExecuteString ("MoveToPoint([%d.%d])" % to, brak)
+	# near the point (the others may stand in the way of the very spot); lying in twitch he never moves
+	moved = lambda: ((GemRB.GetActorPosition (brak)["X"] - start["X"]) ** 2 + (GemRB.GetActorPosition (brak)["Y"] - start["Y"]) ** 2) ** 0.5
+	yield from _Wait (lambda: moved () >= 40, 20)
+	where = GemRB.GetActorPosition (brak)
+	_Check ("woken: brak runs a queued action (walks towards the point)", moved () >= 40, True)
+	_Log ("woken: brak at %d.%d (from %d.%d), stance %d" % (where["X"], where["Y"], start["X"], start["Y"], GemRB.GetDCCStats (brak)["Stance"]))
+	_Jump (brak, start["X"], start["Y"])
+	yield
 
 FightSteps = None
 

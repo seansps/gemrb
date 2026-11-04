@@ -8742,7 +8742,7 @@ int fx_dcc_combat(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 		case CombatEffect::Prone:
 			if (fx->FirstApply) target->SetStance(IE_ANI_SLEEP);
 			if (over) {
-				target->SetStance(IE_ANI_GET_UP);
+				target->DCCGetUp();
 				return FX_NOT_APPLIED;
 			}
 			STAT_SET(IE_DCC_PRONE, 1);
@@ -8783,7 +8783,7 @@ int fx_dcc_combat(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 			if (over) {
 				// wakes at 1 hp
 				if (static_cast<ieDwordSigned>(target->GetBase(IE_HITPOINTS)) < 1) target->SetBase(IE_HITPOINTS, 1);
-				target->SetStance(IE_ANI_GET_UP);
+				target->DCCGetUp();
 				return FX_NOT_APPLIED;
 			}
 			STAT_SET(IE_DCC_SUBDUED, 1);
@@ -8798,7 +8798,7 @@ int fx_dcc_combat(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 		case CombatEffect::Pinned:
 			{
 				if (over) {
-					if (kind == ieDword(CombatEffect::StandCheck) && (fx->Parameter1 & DCC::STAND_PRONE)) target->SetStance(IE_ANI_GET_UP);
+					if (kind == ieDword(CombatEffect::StandCheck) && (fx->Parameter1 & DCC::STAND_PRONE)) target->DCCGetUp();
 					return FX_NOT_APPLIED;
 				}
 				// the round's work (an ability check, the wound's damage, ...) once a round, from the next one on

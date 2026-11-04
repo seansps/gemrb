@@ -47,7 +47,7 @@
 #   g. the reserves (reserves; at inns and camps, decided 2026-11-03): none outside them; the inn (Marta's
 #      dialog, the Glade Inn's window: Rent room, the Reserves tab): a hero benched with everything, a reserve
 #      into its place next to the party and its class pick; no XP while benched (a quest, an award by name, a
-#      kill); a death: short-handed, no pop-up, the rest button just rests; the camp (DCC_CAMP, the rest
+#      kill); a death: short-handed, no pop-up, the rest button just rests (refused, it says why); the camp (DCC_CAMP, the rest
 #      button): bury, the benched hero back as it left, another benched, a night's rest; save and load (the
 #      benched hero, the free place, the reserves, the graveyard), the hero back after the load
 # M3.4:
@@ -2244,6 +2244,23 @@ def _Reserves ():
 	yield
 	_Check ("short-handed: the rest button rests here (no camp)", [Camp.Window, Reserves.Window, "Rested" in Camp.Shown], [None, None, True])
 	_Log ("the rest away from a camp: %s" % Camp.Shown.get ("Rested"))
+	# a refused rest says why in the message log (the party too scattered: one of them far away)
+	stray = 2
+	strayFrom = GemRB.GetActorPosition (stray)
+	leader = GemRB.GetActorPosition (1)
+	_Put (stray, leader["X"] - 700 if leader["X"] > 900 else leader["X"] + 700, leader["Y"])
+	yield
+	Camp.Shown.pop ("Rested", None)
+	try:
+		refused = Roster.RestPress ()
+	except Exception as e:
+		refused = "raised %s: %s" % (type (e).__name__, e)
+	_Check ("refused rest: no rest, and why", [refused, Camp.Shown.get ("Rested", "")[:4]], [False, "no: "])
+	why = Camp.Shown.get ("Rested", "")[4:]
+	_Check ("refused rest: the reason in the message log", [len (why) > 0, why in GemRB.GetView ("MsgSys", 0).QueryText ()], [True, True])
+	_Log ("the refused rest: %s" % Camp.Shown.get ("Rested"))
+	_Put (stray, strayFrom["X"], strayFrom["Y"])
+	yield
 	# the camp: its area script sets DCC_CAMP, the rest button opens the camp's window
 	GemRB.ExecuteString ('SetGlobal("DCC_CAMP","GLOBAL",1)')
 	yield

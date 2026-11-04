@@ -805,6 +805,8 @@ public:
 	void DCCHealed(int oldHP, int newHP);
 	/** a bleed-out or crit countdown ran out */
 	void DCCCountdownOver(DCC::CombatEffect kind);
+	/** up from lying (knocked out, unconscious at Sta 0, bleeding out, prone): the get-up stance */
+	void DCCGetUp();
 	/** an ally rolls the body over: a Luck check brings a level 1+ character back at 1 hp;
 	 * returns -1 if not allowed, else 1 on a success and 0 on a failure */
 	int DCCRecoverBody(const Actor* ally, int natural = 0);

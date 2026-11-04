@@ -89,8 +89,14 @@ def Rest ():
 		return True
 	info = GemRB.RestParty (REST_CHECKS, -1, CAMP_HP)
 	if info and info["Error"]:
-		why = GemRB.GetString (info["ErrorMsg"]) if info["ErrorMsg"] >= 0 else "not now"
-		GemRB.DisplayString (why, ColorRed)
+		# the reason is a strref (DisplayString takes one, not text); Ethren's dialog.tlk has none of the stock
+		# refusals yet, so an empty one becomes a line of our own in the message log
+		why = GemRB.GetString (info["ErrorMsg"]) if info["ErrorMsg"] >= 0 else ""
+		if why:
+			GemRB.DisplayString (info["ErrorMsg"], ColorRed)
+		else:
+			why = "You may not rest here and now."
+			GemRB.GetView ("MsgSys", 0).Append ("[color=ff0000]" + why + "[/color]\n")
 		Shown["Rested"] = "no: " + why
 		_Log ("no rest: %s" % why)
 		return False
