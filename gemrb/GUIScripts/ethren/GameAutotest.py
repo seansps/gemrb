@@ -407,7 +407,7 @@ def _SnareWays (party, cutter):
 	for i in range (3):
 		yield
 	_Shot ("trail_snare_hen", henner)
-	yield from _ShotAt ("trail_snare_hen_quiet", 1362, 186)
+	yield from _ShotAt ("trail_snare_hen_quiet", 1344, 179)
 	GemRB.CreateItem (cutter, "KNIFE")
 	_Jump (cutter, 1450, 270)
 	for i in range (3):
@@ -740,12 +740,24 @@ def _Trail ():
 	for i in range (3):
 		yield
 	female = GemRB.GetPlayerStat (walker, IE_SEX) == 2
+	race = GemRB.GetPlayerStat (walker, IE_RACE)
+	body = {4: 0x6522, 5: 0x6522, 2: 0x6542}.get (race, 0x6502) + (0x10 if female else 0)  # the dwarves' bodies for halflings too
 	at = GemRB.GetActorPosition (walker)
-	_Check ("trail: it hangs head down, at the noose under the birch's tip, the birch stood up",
-		[GemRB.GetPlayerStat (walker, IE_ANIMATION_ID), abs (at["X"] - 1362) + abs (at["Y"] - 186) < 24, _AreaVar ("DL_SPRUNG_SHOWN") in (1, 2)],
-		[0x6512 if female else 0x6502, True, True])
+	_Check ("trail: it hangs head down in its race's and sex's hanging body, at the spot under the birch's tip, the birch stood up",
+		[GemRB.GetPlayerStat (walker, IE_ANIMATION_ID), abs (at["X"] - 1344) + abs (at["Y"] - 179) < 24, _AreaVar ("DL_SPRUNG_SHOWN") in (1, 2)],
+		[body, True, True])
+	# what it held lies on the ground under it (the pile's icon), not in its hand: the hanging body draws no overlays
+	_Check ("trail: hanging, it holds nothing (no weapon overlay)", GemRB.GetDCCStats (walker)["WeaponOverlay"], "")
 	_Shot ("trail_snare", walker)
-	yield from _ShotAt ("trail_snare_quiet", 1362, 186)
+	yield from _ShotAt ("trail_snare_quiet", 1344, 179)
+	# by night: the night tiles and the sprung birch's night patch (DayNight: to 23:00, then back to the next morning)
+	GemRB.ExecuteString ("DayNight(23)", 1)
+	yield from _Wait (lambda: _AreaVar ("DL_SPRUNG_SHOWN") == 2, 30)
+	_Check ("trail: by night, the night patch", _AreaVar ("DL_SPRUNG_SHOWN"), 2)
+	yield from _ShotAt ("trail_snare_night", 1344, 179, 6)
+	GemRB.ExecuteString ("DayNight(10)", 1)
+	yield from _Wait (lambda: _AreaVar ("DL_SPRUNG_SHOWN") == 1, 30)
+	_Check ("trail: and back by day, the day patch", _AreaVar ("DL_SPRUNG_SHOWN"), 1)
 	# cut down by one with a knife: a click on the rope, a round's sawing
 	GemRB.CreateItem (cutter, "KNIFE")
 	_Jump (cutter, 1450, 270)
@@ -755,7 +767,7 @@ def _Trail ():
 	yield from _Wait (lambda: GemRB.GetGameVar ("DL_SNARE") == 4, 60)
 	yield
 	_Check ("trail: cut down with a knife", [GemRB.GetGameVar ("DL_SNARE"), GemRB.GetPlayerStat (walker, IE_HELD)], [4, 0])
-	_Check ("trail: cut down, its own body again", GemRB.GetPlayerStat (walker, IE_ANIMATION_ID) not in (0x6502, 0x6512), True)
+	_Check ("trail: cut down, its own body again", GemRB.GetPlayerStat (walker, IE_ANIMATION_ID), anim)
 
 	# the herb patch: a click is the party's Herbalism check (Int DC 10); a pass leaves two poultices
 	_Jump (pc, 910, 1450)
