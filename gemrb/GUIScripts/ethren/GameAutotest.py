@@ -308,6 +308,12 @@ def _Trail ():
 	_Check ("trail: the dead drop their things", _Items (cut2), [])
 	yield from _Wait (lambda: _AreaVar ("DL_CART_RAN") == 1, 20)
 	_Check ("trail: cutthroat 1's morale breaks: he runs for the trail", [_AreaVar ("DL_CART_RAN"), _Logged ("checks morale")], [1, True])
+	# he runs (RunToPoint, IE_ANI_RUN 15) with the run's own frames (G10, the run frames found), not the walk's fallback
+	yield from _Wait (lambda: GemRB.GetDCCStats (cut1)["Stance"] == 15, 20)
+	ran = GemRB.GetDCCStats (cut1)
+	_Check ("trail: the runaway runs with the run's frames (stance 15, RunFrames, the G10 file)",
+		[ran["Stance"], ran["RunFrames"], ran["StanceFiles"]["Run"][0][-3:].upper ()], [15, 1, "G10"])
+	_Check ("trail: at twice the walk (half the step time)", ran["WalkSpeed"] * 2 <= 1500 // 9 + 1, True)
 	yield from _Wait (lambda: GemRB.GetGameVar ("DL_CART_FLED") == 1, 120)
 	if GemRB.DCCFindActor ("DlCut1"):
 		_Log ("the runaway: %s" % GemRB.GetActorPosition (cut1))

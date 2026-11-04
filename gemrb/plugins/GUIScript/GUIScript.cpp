@@ -7273,6 +7273,8 @@ static PyObject* GemRB_SaveScreenshot(PyObject* /*self*/, PyObject* args)
 	const Game* game = core->GetGame();
 	if (globalID && game) {
 		center = globalID > 1000 ? game->GetActorByGlobalID(globalID) : game->FindPC(globalID);
+		// an area actor's id (DCCFindActor) can be small too: not a party slot, so look it up
+		if (!center && globalID <= 1000) center = game->GetActorByGlobalID(globalID);
 	}
 	if (!core->WriteScreenshot(path_t(cpath), center, screen != 0)) {
 		Py_RETURN_FALSE;
