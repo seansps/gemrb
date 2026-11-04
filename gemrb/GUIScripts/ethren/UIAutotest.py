@@ -2,13 +2,14 @@
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-# The in-game UI checks: the party column and the slim bar (docs/architecture/ui-design.md, "Proposed: the party
-# column and the slim bar"), the keys, the inventory; all by real mouse clicks, drags, wheel turns and key presses
+# The in-game UI checks: the party column and the slim bar (docs/architecture/ui-design.md, "The party column
+# and the slim bar"), the keys, the inventory; all by real mouse clicks, drags, wheel turns and key presses
 # through the event manager (GemRB.TestClick, TestDrag, TestWheel, TestKey), as a player's would go. Run from the
 # funneltest autotest (FunnelAutotest.py): Funnel16 in its "ui" scenario (the sixteen), Party4 in "ui4" (the four
 # after the funnel's end); the checks go through the caller's _Check and _Log. Screenshots ui_*.bmp in the save path.
 #   Funnel16: the layout (the column on the right edge, the bar along the bottom left of it, neither taking the
-#     keyboard); the column scrolls by the wheel and its tiles answer clicks while scrolled; the keys (I, C, W, R,
+#     keyboard); the sixteen's one-line tiles all fit, and a shorter column scrolls by the wheel, its tiles answering
+#     clicks while scrolled; the keys (I, C, W, R,
 #     space; I and C again from the open inventory and record); the inventory by drags and clicks: an item moved
 #     between pack slots (dragged, then picked up and put down), the weapon unequipped into the pack and equipped
 #     again, an item dropped on the ground and picked up again, one given to another peasant by a click on its tile
@@ -109,14 +110,29 @@ def Funnel16 ():
 	column, bar = _Frames ()
 	Check ("ui: the party column down the right edge, full height", [column['x'] + column['w'], column['w'], column['y'], column['h']], [screen[0], Roster.COLUMN_W, 0, screen[1]])
 	Check ("ui: the bar along the bottom, left of the column, slim", [bar['x'], bar['y'] + bar['h'], bar['w'], bar['h']], [0, screen[1], screen[0] - Roster.COLUMN_W, MessageWindow.BAR_H])
+	labels = MessageWindow.Order
+	Check ("ui: the bar's buttons (no Centre, no Journal yet, Mine only in co-op)", labels, ["Map", "Inv", "Rec", "Spells", "Rest", "Pause", "Set", "All", "Block", "Col", "T", "S", "P"])
+	frames = [MessageWindow.Buttons[label].GetFrame () for label in labels]
+	rows = sorted (set (f['y'] for f in frames))
+	edges = [[(f['x'], f['x'] + f['w']) for f in frames if f['y'] == y] for y in rows]
+	flush = [all (a[1] + MessageWindow.GAP == b[0] for a, b in zip (row, row[1:])) for row in edges]
+	Check ("ui: two rows, no gaps, both from the same left edge to the same right edge", [len (rows), flush, edges[0][0][0] == edges[1][0][0], edges[0][-1][1] == edges[1][-1][1]], [2, [True, True], True, True])
 	Check ("ui: the game view has the keyboard (not the column or the bar)", [_HasKeyboard ("GAMEWIN"), _HasKeyboard ("ROSTWIN"), _HasKeyboard ("MSGWIN")], [True, False, False])
-	Check ("ui: compact tiles for the sixteen, more than fit: the list scrolls", [Roster.Layout["Hero"], Roster.Layout["Scrolls"], Roster.Layout["Rows"] < size, Roster.TileCount ()], [False, True, True, size])
-	Roster.ScrollTo (0)
+	Check ("ui: one-line tiles, all sixteen fit: no scroll bar", [Roster.Layout["Hero"], Roster.Layout["TileH"], Roster.Layout["Scrolls"], Roster.Layout["Rows"], Roster.TileCount ()], [False, Roster.TILE_H, False, size, size])
+	Check ("ui: a tile's one line is the name (and the status); the occupation is in the hover line", [Roster.Shown[1].split ("  ")[0], "\n" in Roster.Shown[1], ": " in Roster.Tiles[1]["Tooltip"]], [GemRB.GetPlayerName (1, 0), False, True])
 	GemRB.GameSelectPC (0, 1)
 	yield
+	Click (Roster.RosterWindow, Roster.RosterWindow.GetControl (size - 1))
+	yield
+	Check ("ui: a click on the last tile selects the last peasant", Roster.Selected (), [size])
 	GemRB.GameSelectPC (0, 1)
 	yield
 	Shot ("funnel16")
+	# a shorter column (a smaller screen): the list scrolls
+	Roster.MaxListHeight = 10 * Roster.Layout["Pitch"]
+	Roster.Rebuild ()
+	yield
+	Check ("ui: a column too short for sixteen scrolls", [Roster.Layout["Scrolls"], Roster.Layout["Rows"], Roster.TileCount ()], [True, 10, size])
 	# the wheel over the column scrolls it (the tiles pass it to the window, the window to its scroll bar)
 	tile = Roster.RosterWindow.GetControl (2)
 	x, y = _Centre (Roster.RosterWindow, tile)
@@ -131,9 +147,14 @@ def Funnel16 ():
 	Check ("ui: a click on the bottom tile, scrolled, selects the last peasant", Roster.Selected (), [size])
 	Check ("ui: its tile shows that one", Roster.Shown[size].split ("\n")[0].split ("  ")[0], GemRB.GetPlayerName (size, 0))
 	Shot ("funnel16_scrolled")
-	GemRB.TestWheel (x, y, size)
+	for i in range (size):
+		GemRB.TestWheel (x, y, 1)
 	yield
 	Check ("ui: and back to the top", Roster.Top, 0)
+	Roster.MaxListHeight = None
+	Roster.Rebuild ()
+	yield
+	Check ("ui: the full column again, no scroll bar", [Roster.Layout["Scrolls"], Roster.Layout["Rows"]], [False, size])
 	# a click between the tiles stays in the column (the backdrop), it doesn't walk the party
 	GemRB.GameSelectPC (1, 1, SELECT_REPLACE)
 	before = GemRB.GetActorPosition (1)

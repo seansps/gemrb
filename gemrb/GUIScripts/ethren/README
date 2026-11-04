@@ -11,10 +11,11 @@ use it to pick the demo's window layouts; use GameCheck.IsEthren () for
 anything that should differ from the demo.
 
 Modules here so far:
-- MessageWindow.py: the slim bottom bar (the proposed layout, docs/architecture/
+- MessageWindow.py: the slim bottom bar (the approved layout, docs/architecture/
   ui-design.md): the demo's message window resized to the log, left of the party
   column, with two rows of buttons (map, inventory, record, spells, rest, pause,
-  the formations, the thief's T S P, the party settings), taller during a
+  the formations, the thief's T S P, the party settings; Mine in co-op only),
+  in two gapless rows, taller during a
   dialog; and the autotest hooks. It ignores events itself, as the stock side
   windows do, so the game view keeps the keyboard for keymap.ini's keys.
 - GUIINV.py: the demo's inventory with its feedback line kept ("MsgSys" 1: the
@@ -36,7 +37,8 @@ Modules here so far:
   the DCC_AUTOTEST global is 1.
 - Roster.py (M2.9, the real one in M3.2, the party column since): the party
   column down the right edge, full height, since the demo GUI has no portrait
-  window; compact tiles that scroll in the funnel, portrait tiles (the figure
+  window; one-line tiles in the funnel (all 16 fit at 720; the list scrolls on
+  shorter screens), portrait tiles (the figure
   as a placeholder portrait) after it; a click on a tile gives it an item picked
   up in the inventory. It started as the funnel's roster panel: the summary ("Alive 12 of 16, 2 dying, 2
   dead"), the prompts waiting, select all and mine, Block and Column on the

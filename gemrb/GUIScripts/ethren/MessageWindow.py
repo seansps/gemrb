@@ -2,12 +2,12 @@
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-# ethren: the bottom bar (docs/architecture/ui-design.md, "Proposed: the party column and the slim bar"): the
+# ethren: the bottom bar (docs/architecture/ui-design.md, "The party column and the slim bar"): the
 # message log and two rows of small buttons, left of the party column (Roster.py) and as slim as the log allows.
 # It is the demo's message window (GUIW window 0: its text area and that one's scroll bar), resized and with its
-# buttons replaced. The buttons: Map (M), Inventory (I), Record (C), Spells (W), Journal (J, not built yet),
-# Rest, Pause (space), Centre; All, Mine (co-op), Block, Column, the thief's T, S and P (DCCThief.py), the party
-# settings. A dialog makes the log taller while it lasts.
+# buttons replaced. The buttons, two rows with no gaps: Map (M), Inventory (I), Record (C), Spells (W), Rest,
+# Pause (space), the party settings; All, Mine (co-op only), Block, Column, the thief's T, S and P (DCCThief.py).
+# No Journal until it exists, no Centre (a double click on a tile centres). A dialog makes the log taller.
 # The window ignores events itself (its buttons still take clicks), as the stock games' side windows do, so it
 # never takes the keyboard from the game view: the keymap's keys (keymap.ini: M, I, C, W, R, space...) only reach
 # the game view while it has the focus.
@@ -38,26 +38,32 @@ BUTTON_H = 30
 GAP = 4
 Window = None
 Buttons = {} # label -> button (for tests)
+Order = [] # the buttons' labels in order (first row, then second)
 
 def _Spec ():
-	"""the bar's buttons, two rows: (label, tooltip, action); None leaves the place empty"""
+	"""the bar's buttons, in order: (label, tooltip, action); the two rows share them out (_Rows). Mine only in
+	co-op; no Journal until the journal exists; no Centre (a double click on a tile centres the view)"""
 	thief = dict ((label, (tip, action)) for label, tip, action in DCCThief.Specs ())
-	return (
-		(("Map", "Map (M)", GUIMA.OpenMapWindow),
+	specs = [("Map", "Map (M)", GUIMA.OpenMapWindow),
 		("Inv", "Inventory (I)", GUIINV.OpenInventoryWindow),
 		("Rec", "Character record (C)", lambda: GUIREC.ToggleRecordsWindow ()),
 		("Spells", "Spells (W)", lambda: _Spells ()),
-		("Jrnl", "Journal (J): not built yet", None),
 		("Rest", "Rest the night; at a camp: the camp, where the reserves wait", lambda: Roster.RestPress ()),
 		("Pause", "Pause (space)", lambda: GemRB.GamePause (2, 0)),
-		("Ctr", "Centre the view on the selected", lambda: GemRB.GameControlSetScreenFlags (SF_CENTERONACTOR, OP_OR))),
-		(("All", "Select everyone", lambda: Roster.SelectAll ()),
-		("Mine", "Select the characters you control", lambda: Roster.SelectMine ()),
-		("Block", "Formation: block (four wide). Lines the selection up where its first one stands", lambda: Roster.Formation (0)),
+		("Set", "Party settings: Luck, spellburn, prompts, the party AI", lambda: Roster.OpenSettings ()),
+		("All", "Select everyone", lambda: Roster.SelectAll ())]
+	if GemRB.NetGetMode ():
+		specs.append (("Mine", "Select the characters you control", lambda: Roster.SelectMine ()))
+	specs += [("Block", "Formation: block (four wide). Lines the selection up where its first one stands", lambda: Roster.Formation (0)),
 		("Col", "Formation: column of twos. Lines the selection up where its first one stands", lambda: Roster.Formation (1)),
-		("T",) + thief["T"], ("S",) + thief["S"], ("P",) + thief["P"],
-		("Set", "Party settings: Luck, spellburn, prompts, the party AI", lambda: Roster.OpenSettings ())),
-	)
+		("T",) + thief["T"], ("S",) + thief["S"], ("P",) + thief["P"]]
+	return specs
+
+def _Rows (count):
+	"""the buttons' two rows: how many on the first, how many on the second (the second as wide as the first, its
+	buttons a little wider when it has one fewer, so neither row leaves a gap)"""
+	first = (count + 1) // 2
+	return first, count - first
 
 def _Spells ():
 	import DCCMagic
@@ -94,19 +100,17 @@ def OnLoad():
 	TMessageTA.SetText ("[color=d8c890]Dungeons of Ethren[/color]\n")
 
 	Buttons.clear ()
-	for row, specs in enumerate (_Spec ()):
-		for col, (label, tip, action) in enumerate (specs):
-			button = MessageWindow.CreateButton (10 + row * 10 + col, 0, 0, BUTTON_W, BUTTON_H)
-			button.SetFlags (IE_GUI_BUTTON_NO_IMAGE, OP_OR)
-			button.SetFont ("NORMAL")
-			button.SetBackground (Roster.ButtonColor)
-			button.SetText (label)
-			button.SetTooltip (tip)
-			if action:
-				_OnPress (button, action)
-			else:
-				button.SetState (IE_GUI_BUTTON_DISABLED)
-			Buttons[label] = button
+	Order[:] = []
+	for i, (label, tip, action) in enumerate (_Spec ()):
+		button = MessageWindow.CreateButton (10 + i, 0, 0, BUTTON_W, BUTTON_H)
+		button.SetFlags (IE_GUI_BUTTON_NO_IMAGE, OP_OR)
+		button.SetFont ("NORMAL")
+		button.SetBackground (Roster.ButtonColor)
+		button.SetText (label)
+		button.SetTooltip (tip)
+		_OnPress (button, action)
+		Buttons[label] = button
+		Order.append (label)
 	Roster.Backdrop (MessageWindow, Width (), BAR_H)
 	# the thief's keys (DCCThief: global hot keys, as before)
 	DCCThief.SetHotKeys (Buttons["T"], Buttons["S"], Buttons["P"])
@@ -142,14 +146,17 @@ def Layout (dialog):
 	screen = GemRB.GetSystemVariable (SV_WIDTH), GemRB.GetSystemVariable (SV_HEIGHT)
 	width = Width ()
 	height = DIALOG_H if dialog else BAR_H
-	cols = max (len (row) for row in _Spec ())
-	block = cols * BUTTON_W + (cols - 1) * GAP
+	first, second = _Rows (len (Order))
+	block = first * BUTTON_W + (first - 1) * GAP
 	bx = width - block - GAP
-	for row in range (2):
-		for col in range (cols):
-			button = win.GetControl (10 + row * 10 + col)
-			if button:
-				button.SetFrame ({'x': bx + col * (BUTTON_W + GAP), 'y': GAP + row * (BUTTON_H + GAP), 'w': BUTTON_W, 'h': BUTTON_H})
+	for i, label in enumerate (Order):
+		row, col = (0, i) if i < first else (1, i - first)
+		count = first if row == 0 else second
+		w = (block - (count - 1) * GAP) // count
+		x = bx + col * (w + GAP)
+		if col == count - 1:
+			w = bx + block - x # the last one ends where the other row does
+		Buttons[label].SetFrame ({'x': x, 'y': GAP + row * (BUTTON_H + GAP), 'w': w, 'h': BUTTON_H})
 	scroll = win.GetControl (1)
 	sw = scroll.GetFrame ()['w'] if scroll else 0
 	log = {'x': GAP, 'y': GAP, 'w': bx - 3 * GAP - sw, 'h': height - 2 * GAP}
@@ -179,7 +186,7 @@ def _WrapDialog ():
 	GUIWORLD.DialogStarted, GUIWORLD.DialogEnded = DialogStarted, DialogEnded
 
 def UpdateBar ():
-	"""what the buttons show now (the roster's timer calls it): pause, the formation, Mine in co-op only"""
+	"""what the buttons show now (the roster's timer calls it): pause, the formation"""
 	if not Window or not Buttons:
 		return
 	try:
@@ -188,7 +195,6 @@ def UpdateBar ():
 		formation = Roster.CurrentFormation ()
 		Buttons["Block"].SetBackground (Roster.SelectedColor if formation == 0 else Roster.ButtonColor)
 		Buttons["Col"].SetBackground (Roster.SelectedColor if formation == 1 else Roster.ButtonColor)
-		Buttons["Mine"].SetState (IE_GUI_BUTTON_ENABLED if GemRB.NetGetMode () else IE_GUI_BUTTON_DISABLED)
 	except RuntimeError:
 		pass # the window went with the game
 

@@ -2,15 +2,15 @@
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-# ethren: the party column (docs/architecture/ui-design.md, "Proposed: the party column and the slim bar"), in
+# ethren: the party column (docs/architecture/ui-design.md, "The party column and the slim bar"), in
 # place of the portrait column the demo GUI doesn't have: one narrow column down the right edge, built from code
 # (no CHU), in the demo's plain colours until Phase 5 skins it; it refreshes itself on a timer.
 #   - the header: the party summary ("Alive 12 of 16", "2 dying, 2 dead" under it; a press opens the graveyard)
 #     and the prompts waiting for this player ("3 waiting");
 #   - saved groups 1-9: Ctrl+1-9 (or a right click) saves the selection, Alt+1-9 (or a click) selects it;
-#   - a tile for each party member, one under the other. In the funnel (more than six) compact ones: the name and
-#     the worst status, the occupation, an HP bar; when they don't all fit the list scrolls (the mouse wheel over
-#     the column, or its scroll bar). After the funnel (six or fewer) portrait tiles, as the IE games': a portrait
+#   - a tile for each party member, one under the other. In the funnel (more than six) one-line ones: the name and
+#     the worst status, an HP bar along the bottom (the occupation is in the hover line); sixteen fit at 720, and
+#     when they don't fit (a smaller screen) the list scrolls (the mouse wheel over the column, or its scroll bar). After the funnel (six or fewer) portrait tiles, as the IE games': a portrait
 #     (until portraits can be picked: the character's own figure, as the game draws it), the name, class and
 #     level, HP, Luck and the status, the HP bar under them. Either kind: the selection highlight, the owner's
 #     colour as a stripe down the left edge in co-op; a click selects one (with the inventory or record open:
@@ -65,7 +65,8 @@ SUMMARY_H = 30
 GROUPS_Y = 38
 GROUPS_H = 16
 LIST_Y = 58
-TILE_H = 38 # a funnel tile: name and status, occupation, the HP bar
+TILE_H = 24 # a funnel tile, one line: name and status, the HP bar under them
+TILE_GAP = 2 # between funnel tiles
 HERO_H = 100 # a portrait tile, after the funnel
 HERO_MAX = 6 # parties this size or smaller get portrait tiles
 PORTRAIT_W = 64
@@ -108,9 +109,12 @@ def PartyKey ():
 	"""who is in the party, slot by slot (global IDs): the tiles are rebuilt when it changes"""
 	return tuple (GemRB.GetDCCFunnel (slot)["GlobalID"] for slot in range (1, min (_Size (), MAX_SLOTS) + 1))
 
+MaxListHeight = None # for tests: a shorter column than the screen gives (to see it scroll)
+
 def _ListHeight ():
 	"""the column's height for tiles: from under the groups to the bottom of the screen"""
-	return GemRB.GetSystemVariable (SV_HEIGHT) - LIST_Y - GAP
+	height = GemRB.GetSystemVariable (SV_HEIGHT) - LIST_Y - GAP
+	return min (height, MaxListHeight) if MaxListHeight else height
 
 def OpenRoster ():
 	global RosterWindow, Built, Top
@@ -119,8 +123,9 @@ def OpenRoster ():
 	Built = PartyKey ()
 	count = len (Built)
 	hero = count <= HERO_MAX
-	pitch = (HERO_H if hero else TILE_H) + GAP
-	rows = min (count, max (1, (_ListHeight () + GAP) // pitch))
+	gap = GAP if hero else TILE_GAP
+	pitch = (HERO_H if hero else TILE_H) + gap
+	rows = min (count, max (1, (_ListHeight () + gap) // pitch))
 	scrolls = rows < count
 	Top = min (Top, count - rows) if scrolls else 0
 	screen = GemRB.GetSystemVariable (SV_WIDTH), GemRB.GetSystemVariable (SV_HEIGHT)
@@ -150,15 +155,15 @@ def OpenRoster ():
 		button.SetHotKey (str (n), GEM_MOD_ALT, True)
 	scrollW = 0
 	if scrolls:
-		scroll = win.CreateScrollBar (SCROLL_ID, {'x': COLUMN_W - GAP - 20, 'y': LIST_Y, 'w': 20, 'h': rows * pitch - GAP})
+		scroll = win.CreateScrollBar (SCROLL_ID, {'x': COLUMN_W - GAP - 20, 'y': LIST_Y, 'w': 20, 'h': rows * pitch - gap})
 		scrollW = scroll.GetFrame ()['w']
-		scroll.SetFrame ({'x': COLUMN_W - GAP - scrollW, 'y': LIST_Y, 'w': scrollW, 'h': rows * pitch - GAP})
+		scroll.SetFrame ({'x': COLUMN_W - GAP - scrollW, 'y': LIST_Y, 'w': scrollW, 'h': rows * pitch - gap})
 		scroll.SetVarAssoc ("RosterTop", Top, 0, count - rows)
 		scroll.OnChange (lambda: ScrollTo (GemRB.GetVar ("RosterTop")))
 		# the wheel over the column (the tiles pass it up to the window): the scroll bar's
 		win.SetEventProxy (scroll)
 	tileW = inner - (scrollW + 2 if scrollW else 0)
-	tileH = pitch - GAP
+	tileH = pitch - gap
 	# (a new view goes behind the ones before it: the backdrop last. Views must not overlap: a tile redrawn on
 	# its timer would paint over a sibling on top of it)
 	textX = GAP + (PORTRAIT_W + 2 if hero else 0) # a portrait tile: the picture on the left, the text tile beside it
@@ -176,7 +181,7 @@ def OpenRoster ():
 		tile.SetFlags (IE_GUI_BUTTON_ALIGN_LEFT | IE_GUI_BUTTON_ALIGN_TOP | IE_GUI_BUTTON_ALIGN_ANCHOR, OP_OR)
 		tile.SetFlags (IE_GUI_BUTTON_NO_IMAGE, OP_NAND) # its borders (the owner, the HP bar) need it off
 		_TileHandlers (tile, i)
-		tile.SetAnchor (OWNER_W + 4, 4 if hero else 3)
+		tile.SetAnchor (OWNER_W + 4, 4 if hero else 2)
 	tileW -= textX - GAP
 	Backdrop (win, COLUMN_W, screen[1])
 	Layout.clear ()
@@ -517,7 +522,7 @@ def TileInfo (slot, owners = None):
 	first = "%s  %s" % (name, DEAD_MARK) if dead else name
 	if status and not dead:
 		first += "  [%s]" % status
-	text = "%s\n%s" % (first, occupation or "-")
+	text = first # the funnel's one line; the occupation is in the hover line
 	if Layout.get ("Hero"):
 		# a portrait tile: class and level, HP and Luck on lines of their own
 		import DCCSheet
@@ -572,7 +577,7 @@ def _ShowTile (button, info):
 		button.SetBorder (0, PLAYER_COLORS[owner % len (PLAYER_COLORS)], 1, 1, {'x': 0, 'y': 0, 'w': OWNER_W, 'h': h})
 	else:
 		button.EnableBorder (0, 0)
-	bar = {'x': OWNER_W + 3, 'y': h - BAR_H - 2, 'w': w - OWNER_W - 6, 'h': BAR_H}
+	bar = {'x': OWNER_W + 3, 'y': h - BAR_H - (2 if Layout["Hero"] else 1), 'w': w - OWNER_W - 6, 'h': BAR_H if Layout["Hero"] else 3}
 	button.SetBorder (1, BarBack, 1, 1, bar)
 	if info["Dead"] or info["MaxHP"] < 1 or info["HP"] < 1:
 		button.EnableBorder (2, 0)
