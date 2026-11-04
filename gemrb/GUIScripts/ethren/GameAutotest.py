@@ -16,10 +16,16 @@
 #   5. the wooded trail's content (DL0300, the first visit; _Trail): the cart's bandits placed and hostile, the archer's cover,
 #      their loot, their hoods (no hair under them, the beards whole), the carter and the cart; every info point's string, by a real click; the snare's data; a bandit's last words,
 #      a broken one's run up the trail and off the map, one taken alive and his dialog; a Detect traps searcher finds the snare
-#      (the notice line, the tip), a walker springs it (held, its weapon dropped, the coppers) and one with a knife cuts it
-#      down; the herb patch's check; the trail's mouth; the party walks up the trail;
+#      (the notice line, the tip) and its handle comes on; the other ways past it, each on the snare set again (GemRB.DCCSetTrap):
+#      a thrown stick and a pole carried near it spring it on nothing (the birch stands up), a hen hangs by one leg until cut
+#      down, round through the thorns leaves it set, Jory's warning and a trapper call it out; a walker springs it (held, hung
+#      head down under the birch in the hanging body, its weapon dropped, the coppers) and one with a knife cuts it down; the
+#      gang's colours; the quiet approach (the hound's ears and nose by gait: a walk, a run, Stealth unheard and heard, and a
+#      blow from hiding by surprise); the archer stepping back from melee; the herb patch's check; the trail's mouth; the
+#      party walks up the trail;
 #   6. screenshots in the save path: game_looks (the paper doll), game_roll (the rolling screen), game_<area> (each area as drawn, the
-#      first visit), game_hall_screen (the hall with the GUI), game_trail_* (the cart, the archer, the hound alive and dead, the hooded captive, an info point, the snare).
+#      first visit), game_hall_screen (the hall with the GUI), game_trail_* (the cart, the archer, the hound alive and dead, the hooded captive, an info point, the snare sprung
+#      empty, the hen in it, a peasant hanging in it).
 # Every check logs "[ETH] ok ..." or "[ETH] FAIL ...", the end "[ETH] autotest done: N checks, F failed";
 # ETH_AT_DONE becomes 1 if all passed, 2 if not (run.sh's AutotestQuit).
 
@@ -179,7 +185,7 @@ TRAIL_BANDITS = ("DlCut1", "DlCut2", "DlCut3", "DlArch")
 TRAIL_INFO = ("DlTollBoard", "DlHeadMan", "DlHeadGranny", "DlHeadYoung", "DlBarricade", "DlCartInfo", "DlBirches", "DlHare", "DlHerbs")
 LAST_WORDS = ("Tell Bess she owes me four silver.", "It's warm. Why is it warm?", "Not the face. I'm getting married.",
 	"Ha! Missed m--", "I can hear it counting.", "Bury me face down. It can't find you face down.")
-MS_NONE, MS_DETECTTRAPS = 0, 2
+MS_NONE, MS_DETECTTRAPS, MS_STEALTH = 0, 2, 3
 Hover = ["", 0] # what _ClickMap's hover found under the cursor
 
 def _Logged (text):
@@ -243,11 +249,240 @@ def _Jump (actor, x, y):
 	GemRB.ClearActions (actor)
 	GemRB.ExecuteString ("JumpToPoint([%d.%d])" % (x, y), actor)
 
+def _Said (pc):
+	"""a party member's overhead text (GetOverheadText takes a global ID)"""
+	said = GemRB.GetOverheadText (GemRB.GetDCCFunnel (pc)["GlobalID"])
+	return said["Text"] if said else ""
+
+def _QuietReset (hound):
+	for name in TRAIL_BANDITS:
+		actor = GemRB.DCCFindActor (name)
+		if actor:
+			GemRB.ClearActions (actor)
+	GemRB.ClearActions (hound)
+	GemRB.ExecuteString ('SetGlobal("DL_CART_ALERT","MYAREA",0)', 1)
+	GemRB.ExecuteString ('SetGlobal("DL_CART_NOSE","MYAREA",0)', 1)
+
+def _Quiet (hound, quiet, pc):
+	"""the quiet approach (docs/world/funnel-adventure.md, "The first bandit encounter"), on the hound led off down the
+	road (screen 1395,1046: the band is 24' and more away, and every spot below is more than 30' from them)"""
+	home = GemRB.GetActorPosition (hound)
+	party = _Party ()
+	modes = dict ((p, GemRB.GetDCCStats (p)["PartyAI"]) for p in party)
+	for p in party:  # the party AI stays out of it (it would go for the hound)
+		GemRB.DCCSetPartyAI (p, 2)
+	# trained in Outdoors (hide and sneak in the wild roll a d20, not the familiar d10 + 2: hidden in daylight needs it)
+	GemRB.ExecuteString ('DCCAddSkill(Myself,"OUTDOORS")', quiet)
+	_Jump (hound, 1395, 1046)
+	yield
+	yield
+	# walking past at 33' (its walk range is 20'): not noticed
+	_Jump (quiet, 1035, 1514)
+	yield
+	GemRB.ExecuteString ("MoveToPoint([1131.1389])", quiet)
+	yield from _Wait (lambda: abs (GemRB.GetActorPosition (quiet)["X"] - 1131) + abs (GemRB.GetActorPosition (quiet)["Y"] - 1389) < 20, 60)
+	for i in range (4):
+		yield
+	_Check ("trail, the quiet approach: walking by at 33', the hound doesn't notice", _AreaVar ("DL_CART_ALERT"), 0)
+	# running the same way: heard at 40'
+	_Jump (quiet, 1035, 1514)
+	yield
+	GemRB.ExecuteString ("RunToPoint([1131.1389])", quiet)
+	yield from _Wait (lambda: _AreaVar ("DL_CART_ALERT") == 1, 60)
+	said = GemRB.GetOverheadText (hound)
+	_Check ("trail, the quiet approach: running, it hears at 40' and bays", [_AreaVar ("DL_CART_ALERT"), _AreaVar ("DL_CART_NOSE"), bool (said and "bays" in said["Text"])], [1, 1, True])
+	_QuietReset (hound)
+	GemRB.ClearActions (quiet)
+	yield
+	# in Stealth, hidden and unheard (every roll a 20), brought to 15': not noticed (a sneak at 10'). Into Stealth
+	# far off first (standing at 15' out of it, it would be heard at once). The hound is led to the wood's shade in the
+	# south-west (screen 440,1422: hiding there is DC 15, the road is broad daylight, DC 20)
+	_Jump (hound, 440, 1422)
+	_Jump (quiet, 1035, 1514)
+	GemRB.DCCForceDice (quiet, [20] * 8)
+	GemRB.SetModalState (quiet, MS_STEALTH)
+	for i in range (4):
+		yield
+	GemRB.ExecuteString ("JumpToPoint([680.1422])", quiet)  # (a ClearActions would end Stealth)
+	for i in range (10):
+		yield
+	GemRB.DCCForceDice (quiet, [])
+	stealth = GemRB.GetDCCStealth (quiet)
+	_Check ("trail, the quiet approach: sneaking unheard at 15', the hound doesn't notice", [stealth["Hidden"], stealth["Silent"], _AreaVar ("DL_CART_ALERT")], [1, 1, 0])
+	# the blow from hiding: caught by surprise (the engine's DCC rule; held to a miss), and the band turns
+	GemRB.DCCForceDice (quiet, [2])
+	GemRB.DCCAttack (quiet, hound)
+	GemRB.DCCForceDice (quiet, [])
+	yield from _Wait (lambda: _AreaVar ("DL_CART_ALERT") == 1, 20)
+	_Check ("trail, the quiet approach: a blow from hiding catches the hound by surprise, and the band turns", [_Logged ("caught by surprise"), _AreaVar ("DL_CART_ALERT")], [True, 1])
+	GemRB.SetModalState (quiet, MS_NONE)
+	GemRB.ClearActions (quiet)
+	_Jump (quiet, 1035, 1514)
+	_Jump (hound, 440, 1422)  # (back where it was: struck, it went for the one who struck it)
+	for i in range (4):
+		yield
+	_QuietReset (hound)
+	# in Stealth but heard (the hide a 20, the sneak a 1), brought to 15': noticed (a walk at 20')
+	GemRB.DCCForceDice (quiet, [20, 1] * 4)
+	GemRB.SetModalState (quiet, MS_STEALTH)
+	for i in range (4):
+		yield
+	_Check ("trail, the quiet approach: (still unnoticed, far off in Stealth)", _AreaVar ("DL_CART_ALERT"), 0)
+	GemRB.ExecuteString ("JumpToPoint([680.1422])", quiet)
+	yield from _Wait (lambda: _AreaVar ("DL_CART_ALERT") == 1, 20)
+	GemRB.DCCForceDice (quiet, [])
+	stealth = GemRB.GetDCCStealth (quiet)
+	_Check ("trail, the quiet approach: in Stealth but heard at 15', the hound notices", [stealth["Silent"], _AreaVar ("DL_CART_ALERT"), _AreaVar ("DL_CART_NOSE")], [0, 1, 1])
+	_QuietReset (hound)
+	GemRB.SetModalState (quiet, MS_NONE)
+	_Jump (quiet, 1785, 1339)
+	_Jump (hound, home["X"], home["Y"])
+	for i in range (4):
+		yield
+	_QuietReset (hound)
+	_Check ("trail, the quiet approach: back as it was, unnoticed", _AreaVar ("DL_CART_ALERT"), 0)
+	for p in party:
+		GemRB.DCCSetPartyAI (p, modes[p])
+
+def _ShotAt (name, x, y, wait = 30):
+	"""a screenshot with the view on an area point, once the floating text has gone"""
+	for i in range (wait):
+		yield
+	GemRB.ExecuteString ("MoveViewPoint([%d.%d],0)" % (x, y), 1)
+	for i in range (3):
+		yield
+	_Shot (name)
+
+def _SnareSet (detected):
+	"""the snare set again for the next way past it (GemRB.DCCSetTrap), its scripts' state back to before"""
+	GemRB.DCCSetTrap ("DlSnare", 1, detected)
+	for p in _Party ():
+		GemRB.ExecuteString ('ApplySpellRES("DLSNCUT",Myself)', p)
+	for var in ("DL_SNARE", "DL_SPRUNG", "DL_SNARE_POLE", "DL_SNARE_STICK", "DL_SNARE_BIRD", "DL_SNARE_WAY", "DL_SNARE_CALLED", "DL_SNARE_CP",
+			"DL_SNARE_BODY"):
+		GemRB.SetGlobal (var, "GLOBAL", 0)
+	GemRB.SetGlobal ("DL_SNARE_FOUND", "GLOBAL", detected)
+	for action in ('SetGlobal("DL_SPRUNG_SHOWN","MYAREA",0)', 'AmbientActivate("DlSprungDay",FALSE)', 'AmbientActivate("DlSprungNight",FALSE)',
+			'Deactivate("DlSnareRope")', 'Activate("DlSnareHandle")' if detected else 'Deactivate("DlSnareHandle")'):
+		GemRB.ExecuteString (action, 1)
+
+def _Handle (who, way):
+	"""a click on the found snare's handle and a reply (the dialog's transitions: 0 pole, 1 stick, 2 hen, 3 duck,
+	4 goose, 5 disarm, 6 round through the thorns, 7 leave it)"""
+	_Jump (who, 1450, 270)
+	for i in range (3):
+		yield
+	yield from _ClickMap (1362, 186, who, "DlSnareHandle")
+	yield from _Wait (_InDialog, 30)
+	opened = _InDialog ()
+	if opened:
+		_Reply (way)
+		yield from _Wait (lambda: not _InDialog (), 20)
+	yield from _Wait (lambda: GemRB.GetGameVar ("DL_SNARE_WAY") == 0, 20)
+	for i in range (3):
+		yield
+	return opened
+
+def _SnareWays (party, cutter):
+	"""the snare's other ways past (docs/world/funnel-adventure.md, "The teaching trap"), each on the snare set again"""
+	thrower, henner, poler, rounder, jory, trapper = party[10], party[11], party[12], party[13], party[14], party[15]
+	# a stick thrown into the leaves: it springs on nothing, the birch stands up empty
+	opened = yield from _Handle (thrower, 1)
+	_Check ("trail, the snare: a click on the handle opens its talk", opened, True)
+	yield from _Wait (lambda: _AreaVar ("DL_SPRUNG_SHOWN") > 0, 20)
+	snare = GemRB.GetDCCTrap ("DlSnare")
+	_Check ("trail, the snare: a thrown stick springs it on nothing; the birch stands up", [GemRB.GetGameVar ("DL_SNARE"), GemRB.GetGameVar ("DL_SNARE_STICK"),
+		snare["Flags"] & 0x100, GemRB.GetPlayerStat (thrower, IE_HELD), _AreaVar ("DL_SPRUNG_SHOWN") in (1, 2), "empty noose" in _Said (thrower)],
+		[5, 1, 0x100, 0, True, True])
+	_Shot ("trail_snare_empty", thrower)
+	_SnareSet (1)
+	yield
+	# a hen sent across: up she goes by one leg, until a blade cuts her down and she goes back on her lead
+	GemRB.CreateItem (henner, "HEN")
+	yield
+	yield from _Handle (henner, 2)
+	_Check ("trail, the snare: the handle saw the hen", GemRB.GetGameVar ("DL_HAND_HEN"), 1)
+	_Check ("trail, the snare: the hen hangs by one leg", [GemRB.GetGameVar ("DL_SNARE"), GemRB.GetGameVar ("DL_SNARE_BIRD"), ("HEN", 1) in _Items (henner),
+		GemRB.GetDCCTrap ("DlSnareRope")["Flags"] & 0x100], [8, 1, False, 0])
+	for i in range (3):
+		yield
+	_Shot ("trail_snare_hen", henner)
+	yield from _ShotAt ("trail_snare_hen_quiet", 1362, 186)
+	GemRB.CreateItem (cutter, "KNIFE")
+	_Jump (cutter, 1450, 270)
+	for i in range (3):
+		yield
+	yield from _ClickMap (1420, 195, cutter, "DlSnareRope")
+	yield from _Wait (lambda: GemRB.GetGameVar ("DL_SNARE") == 9, 30)
+	_Check ("trail, the snare: cut down, the hen goes back to the one who cut her", [GemRB.GetGameVar ("DL_SNARE"), ("HEN", 1) in _Items (cutter)], [9, True])
+	_SnareSet (0)
+	yield
+	# the 10' pole, before the snare is found: carried near it, it prods the leaves and springs it on nothing
+	GemRB.CreateItem (poler, "POLE")
+	_Jump (poler, 1035, 470)
+	for i in range (3):
+		yield
+	GemRB.ExecuteString ("MoveToPoint([1330.300])", poler)
+	yield from _Wait (lambda: GemRB.GetGameVar ("DL_SNARE") == 5, 60)
+	_Check ("trail, the snare: a pole carried near it springs it on nothing, and it is found", [GemRB.GetGameVar ("DL_SNARE"), GemRB.GetGameVar ("DL_SNARE_POLE"),
+		GemRB.GetDCCTrap ("DlSnare")["Detected"], GemRB.GetPlayerStat (poler, IE_HELD)], [5, 1, 1, 0])
+	GemRB.ClearActions (poler)
+	for i in range (3):
+		GemRB.ExecuteString ('DestroyItem("POLE")', poler)
+	_Jump (poler, 1785, 1339)
+	_SnareSet (1)
+	yield
+	# round through the thorns: a minute, and the snare left set behind the party (off for it)
+	hour = GemRB.GetGameTime ()
+	yield from _Handle (rounder, 6)
+	_Check ("trail, the snare: round through the thorns, a minute; it stays set, the party past it", [GemRB.GetGameVar ("DL_SNARE"),
+		GemRB.GetDCCTrap ("DlSnare")["Trapped"], GemRB.GetDCCTrap ("DlSnare")["Flags"] & 0x100, GemRB.GetGameTime () - hour >= 60], [6, 1, 0x100, True])
+	_Jump (rounder, 1362, 186)
+	for i in range (6):
+		yield
+	_Check ("trail, the snare: walked over after going round, it doesn't catch", [GemRB.GetGameVar ("DL_SNARE"), GemRB.GetPlayerStat (rounder, IE_HELD)], [6, 0])
+	_Jump (rounder, 1785, 1339)
+	_SnareSet (0)
+	yield
+	# Jory's warning (DL_JORY_WARNED: his talk in Delmord, when he lived): the first near the snare remembers, and it is found
+	for p in (party[1], thrower, henner, cutter):  # nobody else near it
+		_Jump (p, 1785, 1339)
+	yield
+	GemRB.SetGlobal ("DL_JORY_WARNED", "GLOBAL", 1)
+	_Jump (jory, 1250, 330)
+	yield from _Wait (lambda: GemRB.GetGameVar ("DL_JORY_SAID") == 1 and GemRB.GetDCCTrap ("DlSnare")["Detected"], 20)
+	_Check ("trail, the snare: Jory's warning calls it out", [GemRB.GetGameVar ("DL_JORY_SAID"), GemRB.GetDCCTrap ("DlSnare")["Detected"],
+		"Jory said" in _Said (jory)], [1, 1, True])
+	_Jump (jory, 1785, 1339)
+	_SnareSet (0)
+	yield
+	# a trapper or hunter (trained in Outdoors and Butchery) knows it on sight
+	for tag in ("OUTDOORS", "BUTCHERY"):
+		GemRB.ExecuteString ('DCCAddSkill(Myself,"%s")' % tag, trapper)
+	GemRB.SetGlobal ("DL_TRAPPER_SAID", "GLOBAL", 0)
+	yield
+	_Jump (trapper, 1250, 330)
+	yield from _Wait (lambda: GemRB.GetGameVar ("DL_TRAPPER_SAID") == 1 and GemRB.GetDCCTrap ("DlSnare")["Detected"], 20)
+	_Check ("trail, the snare: a trapper calls it out on sight", [GemRB.GetGameVar ("DL_TRAPPER_SAID"), GemRB.GetDCCTrap ("DlSnare")["Detected"],
+		"Spring snare" in _Said (trapper)], [1, 1, True])
+	_Jump (trapper, 1785, 1339)
+	# set and found again, for the walker
+	_SnareSet (1)
+	for i in range (3):
+		yield
+
 def _Trail ():
 	"""the wooded trail's content, on the party's first visit"""
 	party = _Party ()
 	# the test looks everywhere at once: the whole map explored (the clicks need it, the screenshots too)
 	GemRB.ExploreArea (True)
+	# no pole or staff in the party for now (the snare's pole probe springs it on anyone carrying one near it), and
+	# no trapper's call-out yet (the party's occupations are the roll's): both are tried on their own below
+	for p in party:
+		for ref in ("POLE", "STAFF", "POLEW"):
+			for i in range (3):
+				GemRB.ExecuteString ('DestroyItem("%s")' % ref, p)
+	GemRB.SetGlobal ("DL_TRAPPER_SAID", "GLOBAL", 1)
 	yield
 	ids = dict ((name, GemRB.DCCFindActor (name)) for name in TRAIL_BANDITS)
 	_Check ("trail: the cart's four bandits are placed", all (ids.values ()), True)
@@ -270,6 +505,14 @@ def _Trail ():
 	_Check ("trail: no hair under the hood, the beard whole", [(d["HairOverlay"], d["BeardOverlay"]) for d in looks],
 		[("", "BC"), ("", "BM"), ("", "BD"), ("", "BM")])
 	_Check ("trail: the hood's overlay file is there (WQLRHG1)", GemRB.HasResource ("WQLRHG1", RES_BAM), True)
+	# the gang's colours (CRE pal16 rows): the forest green tunic under the hood (major 17; the hood itself is the HOOD
+	# item's forest green, the helmet's major range, colour byte 3), faded black breeches (minor 27), oxblood leather (49);
+	# each one's own skin and hair
+	gang = [(GemRB.GetPlayerStat (i, IE_MAJOR_COLOR) & 0xff, GemRB.GetPlayerStat (i, IE_MINOR_COLOR) & 0xff, GemRB.GetPlayerStat (i, IE_LEATHER_COLOR) & 0xff,
+		GemRB.GetPlayerStat (i, IE_MAJOR_COLOR) >> 24) for i in ids.values ()]
+	_Check ("trail: one gang: green tunic, black breeches, oxblood leather, the green hood", gang, [(17, 27, 49, 17)] * 4)
+	looks = [(GemRB.GetPlayerStat (i, IE_SKIN_COLOR) & 0xff, GemRB.GetPlayerStat (i, IE_HAIR_COLOR) & 0xff) for i in ids.values ()]
+	_Check ("trail: each with his own skin and hair", [len (set (k for k, h in looks)), len (set (h for k, h in looks))], [4, 4])
 	silver = [dict (_Items (i)).get ("SILVER", 0) for i in ids.values ()]
 	_Check ("trail: 2d6 sp each", all (2 <= n <= 12 for n in silver), True)
 	_Check ("trail: the archer's arrows (1d10)", 1 <= dict (_Items (arch)).get ("ARROW", 0) <= 10, True)
@@ -292,6 +535,11 @@ def _Trail ():
 		_Shot ("trail_hound", hound)
 	GemRB.GameControlDebugFlags (fog)
 	_Check ("trail: still unnoticed", _AreaVar ("DL_CART_ALERT"), 0)
+
+	# the quiet approach: the hound's nose and ears by how one comes (DCCNoticesParty: a run at 40', a walk at 20', a sneak
+	# unheard at 10'), tried with the hound led off down the road, out of the band's sight, and one party member
+	if hound:
+		yield from _Quiet (hound, party[8], party[0])
 
 	# the info points: each one's description, shown by a real click (the examine cursor's click)
 	pc = party[0]
@@ -354,6 +602,23 @@ def _Trail ():
 	_Check ("trail: a subdual blow with fists knocks cutthroat 3 out", [rolls[0]["Hit"], rolls[0]["Subdual"], GemRB.GetDCCStats (cut3)["Subdued"]], [1, 1, 1])
 	yield from _Wait (lambda: GemRB.GetGameVar ("DL_CART_TAKEN") == 1, 20)
 	_Check ("trail: knocked out, cutthroat 3 is taken alive (neutral)", [GemRB.GetGameVar ("DL_CART_TAKEN"), GemRB.GetPlayerStat (cut3, IE_EA)], [1, 128])
+	# the archer steps back from melee (the band is fighting): a peasant at his elbow, its free swing held to a miss
+	GemRB.ExecuteString ('SetGlobal("DL_CART_ALERT","MYAREA",1)', pc)
+	near = party[9]
+	where = GemRB.GetActorPosition (arch)
+	_Jump (near, where["X"] + 48, where["Y"])
+	GemRB.DCCForceDice (near, [2] * 6)
+	yield from _Wait (lambda: _AreaVar ("DL_ARCH_BACKOFF") >= 1, 30)
+	for i in range (12):
+		yield
+	moved = GemRB.GetActorPosition (arch)
+	said = GemRB.GetOverheadText (arch)
+	went = ((moved["X"] - where["X"]) / 16.0) ** 2 + ((moved["Y"] - where["Y"]) / 12.0) ** 2
+	_Log ("the archer from %d,%d to %d,%d, the peasant at %s" % (where["X"], where["Y"], moved["X"], moved["Y"], GemRB.GetActorPosition (near)))
+	_Check ("trail: the archer steps back from the peasant at his elbow (3' and more), and says so",
+		[_AreaVar ("DL_ARCH_BACKOFF") >= 1, bool (said and "give me room" in said["Text"]), went >= 9], [True, True, True])
+	GemRB.DCCForceDice (near, [])
+	GemRB.ClearActions (near)
 	# the archer dies: a second, different line
 	GemRB.ClearActions (pc)
 	GemRB.ExecuteString ('Kill("DlArch")', pc)
@@ -452,10 +717,15 @@ def _Trail ():
 	yield
 	_Check ("trail: the snare's script got Detected; the tip was given", [GemRB.GetGameVar ("DL_SNARE_FOUND"), GemRB.GetGameVar ("DCC_TRAP_TIP")], [1, 1])
 	GemRB.SetModalState (searcher, MS_NONE)
+	_Check ("trail: found, the snare's handle is on", GemRB.GetDCCTrap ("DlSnareHandle")["Flags"] & 0x100, 0)
+
+	# the ways past it (the handle's dialog DLSNHAND, the pole probe, the call-outs), each tried on the snare set again
+	yield from _SnareWays (party, cutter)
 
 	# sprung on a walker: held by one ankle, what it holds falls, 1d10 cp out of the purse onto the ground
 	gold = GemRB.GameGetPartyGold ()
 	held = _Items (walker)
+	anim = GemRB.GetPlayerStat (walker, IE_ANIMATION_ID)
 	_Jump (walker, 1362, 186)
 	yield from _Wait (lambda: GemRB.GetGameVar ("DL_SNARE") == 1 and GemRB.GetGameVar ("DL_SNARE_CP") > 0, 20)
 	cp = GemRB.GetGameVar ("DL_SNARE_CP")
@@ -465,7 +735,17 @@ def _Trail ():
 	dropped = [item for item in held if item not in _Items (walker)]
 	_Check ("trail: it drops what it held, there too", bool (dropped) and all (item in ground for item in dropped) or not held, True)
 	_Check ("trail: the rope can be clicked now", GemRB.GetDCCTrap ("DlSnareRope")["Flags"] & 0x100, 0)
+	# hung under the birch's tip: the hanging body by sex (avatars.2da 0x6502, 0x6512), the birch stood up (the patch)
+	yield from _Wait (lambda: GemRB.GetGameVar ("DL_SNARE_BODY") > 0 and _AreaVar ("DL_SPRUNG_SHOWN") > 0, 20)
+	for i in range (3):
+		yield
+	female = GemRB.GetPlayerStat (walker, IE_SEX) == 2
+	at = GemRB.GetActorPosition (walker)
+	_Check ("trail: it hangs head down, at the noose under the birch's tip, the birch stood up",
+		[GemRB.GetPlayerStat (walker, IE_ANIMATION_ID), abs (at["X"] - 1362) + abs (at["Y"] - 186) < 24, _AreaVar ("DL_SPRUNG_SHOWN") in (1, 2)],
+		[0x6512 if female else 0x6502, True, True])
 	_Shot ("trail_snare", walker)
+	yield from _ShotAt ("trail_snare_quiet", 1362, 186)
 	# cut down by one with a knife: a click on the rope, a round's sawing
 	GemRB.CreateItem (cutter, "KNIFE")
 	_Jump (cutter, 1450, 270)
@@ -475,6 +755,7 @@ def _Trail ():
 	yield from _Wait (lambda: GemRB.GetGameVar ("DL_SNARE") == 4, 60)
 	yield
 	_Check ("trail: cut down with a knife", [GemRB.GetGameVar ("DL_SNARE"), GemRB.GetPlayerStat (walker, IE_HELD)], [4, 0])
+	_Check ("trail: cut down, its own body again", GemRB.GetPlayerStat (walker, IE_ANIMATION_ID) not in (0x6502, 0x6512), True)
 
 	# the herb patch: a click is the party's Herbalism check (Int DC 10); a pass leaves two poultices
 	_Jump (pc, 910, 1450)

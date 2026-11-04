@@ -3,8 +3,10 @@
            AT_1       AT_2       AT_3       AT_4       TYPE       SPACE      PALETTE    SIZE
 0x6500     CPM1       CPM1       CPM1       CPM1       0          2          0          L
 0x6501     CPM2       CPML       CPMC       CPMP       0          2          0          L
+0x6502     CPMH       CPMH       CPMH       CPMH       0          2          0          *
 0x6510     CPF1       CPF1       CPF1       CPF1       0          2          0          F
 0x6511     CPF2       CPFL       CPFC       CPFP       0          2          0          F
+0x6512     CPFH       CPFH       CPFH       CPFH       0          2          0          *
 0x6520     CDM2       CDML       CDMC       CDMP       0          2          0          D
 0x6530     CDF2       CDFL       CDFC       CDFP       0          2          0          W
 0x6540     CEM2       CEML       CEMC       CEMP       0          2          0          E
@@ -33,3 +35,6 @@
 # The baked-hair bodies (CPM1, CPF1) have no armour sets.
 # 0x6600 MHND: the bandits' hound (art/creatures/mastiff), the IWD monster layout (TYPE 16, IE_ANI_TWO_FILES_3B) with
 # its own palette (PALETTE 1); MHND<stance>.BAM and MHND<stance>E.BAM, plus MHNDRN (the run) for DCC.
+# 0x6502 CPMH and 0x6512 CPFH: a peasant hung head down by one ankle in the trail's snare (art/sprites/hang.json,
+# tools/sprite_render/hang.py), one frame in every stance; SIZE * draws no overlays on it. A spell's animation change
+# (effect 53: DLHANGM, DLHANGF) puts the catch into it until it is cut down.

@@ -124,6 +124,7 @@ static const TriggerLink triggernames[] = {
 	{ "damagetakengt", GameScript::DamageTakenGT, 0 },
 	{ "damagetakenlt", GameScript::DamageTakenLT, 0 },
 	{ "dcchasskill", GameScript::DCCHasSkill, 0 }, // DCC games (M3.4)
+	{ "dccnoticesparty", GameScript::DCCNoticesParty, 0 }, // DCC games (the funnel's quiet approach)
 	{ "dccpartyhasskill", GameScript::DCCPartyHasSkill, 0 },
 	{ "dccpartyskillcheck", GameScript::DCCPartySkillCheck, 0 },
 	{ "dccskillcheck", GameScript::DCCSkillCheck, 0 },

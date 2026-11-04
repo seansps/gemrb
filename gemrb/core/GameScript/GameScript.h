@@ -781,6 +781,7 @@ public: //Script Functions
 	static int DCCPartySkillCheck(Scriptable* Sender, const Trigger* parameters);
 	static int DCCHasSkill(Scriptable* Sender, const Trigger* parameters);
 	static int DCCPartyHasSkill(Scriptable* Sender, const Trigger* parameters);
+	static int DCCNoticesParty(Scriptable* Sender, const Trigger* parameters);
 
 	//Actions
 	static void Activate(Scriptable* Sender, Holder<Action> parameters);
