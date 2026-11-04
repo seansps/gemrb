@@ -1295,8 +1295,8 @@ def _Roster ():
 	placeName = {"fnt01": "the glade", "fnt02": "the cave"}.get (area, area)
 	Roster.UpdateRoster ()
 	_Check ("roster: 16 tiles", len (Roster.Tiles), 16)
-	_Check ("roster: name and occupation", Roster.Shown.get (jora, "").split ("\n"), [GemRB.GetPlayerName (jora, 0), "farmer"])
 	tip = Roster.Tiles[jora]["Tooltip"]
+	_Check ("roster: the name on its one line, the occupation in the hover line", [Roster.Shown.get (jora, ""), ": farmer" in tip], [GemRB.GetPlayerName (jora, 0), True])
 	_Log ("roster: Jora's hover line: " + tip)
 	held = GemRB.GetSlotItem (jora, GemRB.GetEquippedQuickSlot (jora))
 	weapon = "pitchfork" if held and held["ItemResRef"].lower () == "fntpfork" else "bare hands"
