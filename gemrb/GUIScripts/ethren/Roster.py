@@ -4,7 +4,8 @@
 
 # ethren: the party column (docs/architecture/ui-design.md, "The party column and the slim bar"), in
 # place of the portrait column the demo GUI doesn't have: one narrow column down the right edge, built from code
-# (no CHU), in the demo's plain colours until Phase 5 skins it; it refreshes itself on a timer.
+# (no CHU), in the skin (Skin.py: the column's background, the buttons', tiles' and portrait frames' BAMs; the plain
+# colours in a game without it); it refreshes itself on a timer.
 #   - the header: the party summary ("Alive 12 of 16", "2 dying, 2 dead" under it; a press opens the graveyard)
 #     and the prompts waiting for this player ("3 waiting");
 #   - saved groups 1-9: Ctrl+1-9 (or a right click) saves the selection, Alt+1-9 (or a click) selects it;
@@ -16,7 +17,7 @@
 #     colour as a stripe down the left edge in co-op; a click selects one (with the inventory or record open:
 #     shows that one), a shift click (or a right click) adds or takes one away, a double click centres on it;
 #     an item picked up in the inventory and clicked on a tile goes to that one; hovering shows occupation, HP,
-#     Luck and weapon. The dying flash, the dead stay in the list, greyed and marked (dead).
+#     Luck and weapon. The dying flash, the dead stay in the list, greyed and marked (the skin's skull, or "(dead)").
 # The bar's buttons (MessageWindow.py) hold the rest: select all and mine, the formations, the party settings, Rest.
 # The window ignores events itself, as the stock side windows do (its controls still take clicks), so the game
 # view keeps the keyboard and the keymap's keys work; a backdrop button eats the clicks between the tiles, and
@@ -29,6 +30,7 @@
 
 import GemRB
 import FunnelRoll
+import Skin
 from GUIDefines import *
 from ie_stats import *
 
@@ -53,7 +55,7 @@ PLAYER_COLORS = [
 	{'r': 85, 'g': 195, 'b': 95, 'a': 255},
 	{'r': 215, 'g': 85, 'b': 75, 'a': 255},
 ]
-DEAD_MARK = "(dead)" # in place of the skull until Phase 5 draws one (the demo's font has no cross or skull)
+DEAD_MARK = "(dead)" # without the skin (dcctest); the skin's dead tile has a skull on it instead
 
 MAX_SLOTS = 16
 COLUMN_W = 176 # the column's width, at any screen size
@@ -133,6 +135,7 @@ def OpenRoster ():
 	win = GemRB.CreateView (95, 255, frame)
 	win.AddAlias ("ROSTWIN")
 	win.SetBackground (WindowColor)
+	Skin.Background (win, Skin.ColumnBackground (screen[1]))
 	# like the stock side windows: the controls take clicks, the window never the keyboard (the game view keeps
 	# it, for the keymap's keys); the backdrop eats the clicks between the controls (they would fall through to
 	# the game view and walk the party)
@@ -142,12 +145,16 @@ def OpenRoster ():
 	summary.SetFlags (IE_GUI_BUTTON_ALIGN_LEFT, OP_OR)
 	waiting = _Button (win, 101, COLUMN_W - GAP - 56, SUMMARY_Y, 56, SUMMARY_H, "", None, "Prompts waiting for you")
 	waiting.SetState (IE_GUI_BUTTON_LOCKED)
+	if Skin.Button (summary, "summary"):
+		summary.SetFont (Skin.SMALL_FONT)
+	Skin.Button (waiting, "waiting")
 	# the saved groups: Ctrl+N saves the selection, Alt+N selects it (a click selects, a right click saves)
 	w = (inner - (GROUPS - 1) * 2) // GROUPS
 	for n in range (1, GROUPS + 1):
 		button = _Button (win, 110 + n, GAP + (n - 1) * (w + 2), GROUPS_Y, w, GROUPS_H, str (n), lambda n = n: SelectGroup (n), "Group %d: a click (Alt+%d) selects it, a right click (Ctrl+%d) saves the selection" % (n, n, n))
 		button.OnRightPress (lambda control, n = n: SaveGroup (n))
 		button.SetBackground (GroupEmpty)
+		Skin.Button (button, "group%d" % n, bool (Groups.get (n)))
 		# hot keys are the button's own (one key each), so the saving keys get buttons of their own, hidden
 		saver = win.CreateButton (130 + n, 0, 0, 0, 0)
 		saver.OnPress (lambda control, n = n: SaveGroup (n))
@@ -155,7 +162,7 @@ def OpenRoster ():
 		button.SetHotKey (str (n), GEM_MOD_ALT, True)
 	scrollW = 0
 	if scrolls:
-		scroll = win.CreateScrollBar (SCROLL_ID, {'x': COLUMN_W - GAP - 20, 'y': LIST_Y, 'w': 20, 'h': rows * pitch - gap})
+		scroll = win.CreateScrollBar (SCROLL_ID, {'x': COLUMN_W - GAP - 20, 'y': LIST_Y, 'w': 20, 'h': rows * pitch - gap}, Skin.ScrollBam ())
 		scrollW = scroll.GetFrame ()['w']
 		scroll.SetFrame ({'x': COLUMN_W - GAP - scrollW, 'y': LIST_Y, 'w': scrollW, 'h': rows * pitch - gap})
 		scroll.SetVarAssoc ("RosterTop", Top, 0, count - rows)
@@ -185,7 +192,9 @@ def OpenRoster ():
 	tileW -= textX - GAP
 	Backdrop (win, COLUMN_W, screen[1])
 	Layout.clear ()
-	Layout.update ({"Hero": hero, "Rows": rows, "Pitch": pitch, "TileW": tileW, "TileH": tileH, "Count": count, "Scrolls": scrolls})
+	Layout.update ({"Hero": hero, "Rows": rows, "Pitch": pitch, "TileW": tileW, "TileH": tileH, "Count": count, "Scrolls": scrolls,
+		"TileBam": Skin.TileBam (hero, tileW), "PortraitBam": Skin.PortraitBam () if hero else None})
+	Looks.clear () # new tiles: the skin's frames are set again
 	Portraits.clear ()
 	RosterWindow = win
 	_StartTimer ()
@@ -519,7 +528,8 @@ def TileInfo (slot, owners = None):
 	occupation = OccupationName (record["Occupation"], True)
 	luck = GemRB.GetPlayerStat (slot, IE_DCC_LUCK)
 	dead = status == "dead"
-	first = "%s  %s" % (name, DEAD_MARK) if dead else name
+	# the skin's dead tile has the skull on it; without the skin, the words
+	first = "%s  %s" % (name, DEAD_MARK) if dead and not Layout.get ("TileBam") else name
 	if status and not dead:
 		first += "  [%s]" % status
 	text = first # the funnel's one line; the occupation is in the hover line
@@ -557,28 +567,51 @@ def WaitingText ():
 		return ""
 	return "%d waiting" % (1 + prompt.get ("Queued", 0))
 
-def _ShowTile (button, info):
+Looks = {} # tile row -> the frame its skinned image shows (set only when it changes)
+
+def _TileFrame (info):
 	if info["Dead"]:
-		background = DeadColor
-	elif info["Dying"]:
-		background = DyingColor if Ticks % 2 == 0 else TileColor # it flashes
-	elif info["Selected"]:
-		background = SelectedColor
+		return Skin.TILE_DEAD
+	if info["Dying"] and Ticks % 2 == 0: # it flashes
+		return Skin.TILE_DYING
+	return Skin.TILE_SELECTED if info["Selected"] else Skin.TILE_NORMAL
+
+def _ShowTile (button, info, row = None):
+	bam = Layout.get ("TileBam")
+	if bam:
+		frame = _TileFrame (info)
+		if Looks.get (row) != frame:
+			Looks[row] = frame
+			button.SetBackground (Skin.CLEAR)
+			Skin.ShowFrame (button, bam, frame)
+		info["Frame"] = frame
+		button.SetColor (Skin.INK_DEAD if info["Dead"] else (Skin.INK_LIT if info["Selected"] else Skin.INK))
 	else:
-		background = TileColor
-	button.SetBackground (background)
-	button.SetColor (DeadText if info["Dead"] else LiveText)
+		if info["Dead"]:
+			background = DeadColor
+		elif info["Dying"]:
+			background = DyingColor if Ticks % 2 == 0 else TileColor # it flashes
+		elif info["Selected"]:
+			background = SelectedColor
+		else:
+			background = TileColor
+		button.SetBackground (background)
+		button.SetColor (DeadText if info["Dead"] else LiveText)
 	button.SetText (info["Text"])
 	button.SetTooltip (info["Tooltip"])
 	w, h = Layout["TileW"], Layout["TileH"]
-	# the owner's colour on the edge (co-op), the HP bar along the bottom
+	# the owner's colour on the edge (co-op), the HP bar along the bottom (in the skin's groove)
 	owner = info["Owner"]
 	if owner is not None:
-		button.SetBorder (0, PLAYER_COLORS[owner % len (PLAYER_COLORS)], 1, 1, {'x': 0, 'y': 0, 'w': OWNER_W, 'h': h})
+		stripe = {'x': 1, 'y': 2, 'w': 3, 'h': h - 4} if bam else {'x': 0, 'y': 0, 'w': OWNER_W, 'h': h}
+		button.SetBorder (0, PLAYER_COLORS[owner % len (PLAYER_COLORS)], 1, 1, stripe)
 	else:
 		button.EnableBorder (0, 0)
 	bar = {'x': OWNER_W + 3, 'y': h - BAR_H - (2 if Layout["Hero"] else 1), 'w': w - OWNER_W - 6, 'h': BAR_H if Layout["Hero"] else 3}
-	button.SetBorder (1, BarBack, 1, 1, bar)
+	if bam:
+		button.EnableBorder (1, 0) # the groove is in the image
+	else:
+		button.SetBorder (1, BarBack, 1, 1, bar)
 	if info["Dead"] or info["MaxHP"] < 1 or info["HP"] < 1:
 		button.EnableBorder (2, 0)
 		return
@@ -633,18 +666,27 @@ def UpdateRoster ():
 		Tiles[slot] = info
 	for row, slot in enumerate (OnShow ()):
 		info = Tiles[slot]
-		_ShowTile (win.GetControl (row), info)
+		_ShowTile (win.GetControl (row), info, row)
 		if Layout["Hero"]:
 			portrait = win.GetControl (PORTRAIT_ID + row)
 			_ShowPortrait (portrait, slot, info)
 			portrait.SetTooltip (info["Tooltip"])
+			bam = Layout.get ("PortraitBam")
+			if bam:
+				frame = Skin.PORTRAIT_DEAD if info["Dead"] else (Skin.PORTRAIT_SELECTED if info["Selected"] else Skin.PORTRAIT_NORMAL)
+				if Looks.get ("P%d" % row) != frame:
+					Looks["P%d" % row] = frame
+					portrait.SetBackground (Skin.CLEAR)
+					portrait.SetFlags (IE_GUI_BUTTON_NO_IMAGE, OP_NAND)
+					Skin.ShowFrame (portrait, bam, frame)
 	Header["Summary"] = Summary (infos)
 	Header["Waiting"] = WaitingText ()
 	# the summary on two lines: who is alive, then the dying and the dead
 	win.GetControl (100).SetText (Header["Summary"].replace (", ", "\n", 1))
 	win.GetControl (101).SetText (Header["Waiting"].replace (" ", "\n"))
 	for n in range (1, GROUPS + 1):
-		win.GetControl (110 + n).SetBackground (GroupSet if Groups.get (n) else GroupEmpty)
+		if not Skin.SetLit ("group%d" % n, bool (Groups.get (n))):
+			win.GetControl (110 + n).SetBackground (GroupSet if Groups.get (n) else GroupEmpty)
 	if GraveyardWindow:
 		UpdateGraveyard ()
 

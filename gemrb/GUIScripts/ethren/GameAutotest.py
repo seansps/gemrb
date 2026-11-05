@@ -1135,6 +1135,7 @@ def _Reply (transition):
 	GemRB.SetVar ("DialogChoose", transition)
 
 EndShot = False
+ContinueShot = False
 
 def _ClickContinue (what, snippet):
 	"""a real click on the dialog's Continue or End dialog button (GUIWORLD.ContinueWindow), as a player's would go: it must
@@ -1151,6 +1152,10 @@ def _ClickContinue (what, snippet):
 		# the first End dialog button: a full-window shot, so it can be seen in front of the bar
 		globals ()["EndShot"] = True
 		_Shot ("dialog_end_button", 0, 1)
+	elif not ContinueShot and "continue" in button.QueryText ().lower ():
+		# and the first Continue button (the skin puts both in the bar's button block)
+		globals ()["ContinueShot"] = True
+		_Shot ("dialog_continue_button", 0, 1)
 	_Click (win, button)
 
 def _Click (win, control, button = 1, mod = 0):

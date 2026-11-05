@@ -1365,7 +1365,13 @@ def _Roster ():
 	Roster.UpdateRoster ()
 	_Check ("fight: Essa and Mags dead", [_Dead (essa), _Dead (mags)], [True, True])
 	_Check ("fight: Mira dying (bleeding out)", [_Dead (mira), Roster.Tiles[mira]["Status"], Roster.Tiles[mira]["Dying"]], [False, "dying", True])
-	_Check ("roster: the dead greyed and marked, kept in the list", [Roster.Tiles[essa]["Dead"], Roster.Shown[essa].startswith ("Essa  " + Roster.DEAD_MARK)], [True, True])
+	# marked: the skin's dead tile (its skull) and the name alone, or without the skin the words after the name
+	if Roster.Layout.get ("TileBam"):
+		import Skin
+		marked = [Roster.Tiles[essa].get ("Frame"), Roster.Shown[essa]] == [Skin.TILE_DEAD, "Essa"]
+	else:
+		marked = Roster.Shown[essa].startswith ("Essa  " + Roster.DEAD_MARK)
+	_Check ("roster: the dead greyed and marked, kept in the list", [Roster.Tiles[essa]["Dead"], marked], [True, True])
 	_Check ("roster: the summary mid-fight", Roster.Header["Summary"], _ExpectedSummary ())
 	_Log ("roster mid-fight: " + Roster.Header["Summary"])
 	_ShotScreen ("roster_fight", essa)
@@ -2287,6 +2293,15 @@ def _Reserves ():
 	for i in range (6):
 		yield
 	_Check ("short-handed: nothing opens, nobody joins, the dead stays in its place", [Reserves.Window, ClassPick.Window, Camp.Window, GemRB.GetPartySize (), GemRB.GetDCCFreePlaces ()], [None, None, None, 4, []])
+	# the four's column with the dead one: its tile and portrait frame the skin's dead ones (the skull), or the words
+	import Roster
+	Roster.UpdateRoster ()
+	if Roster.Layout.get ("TileBam"):
+		import Skin
+		_Check ("short-handed: the dead one's tile is the skin's dead one", [Roster.Layout["Hero"], Roster.Tiles[victim].get ("Frame"), Roster.Shown[victim].split ("\n")[0]], [True, Skin.TILE_DEAD, Saved["victim"]])
+	else:
+		_Check ("short-handed: the dead one's tile is marked", Roster.Shown[victim].split ("\n")[0], Saved["victim"] + "  " + Roster.DEAD_MARK)
+	_ShotScreen ("party4_dead", victim)
 	# the rest button away from a camp: a rest, not the camp
 	Camp.Shown.pop ("Rested", None)
 	Roster.RestPress ()

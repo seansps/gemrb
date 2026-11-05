@@ -18,6 +18,11 @@ Modules here so far:
   in two gapless rows, taller during a
   dialog; and the autotest hooks. It ignores events itself, as the stock side
   windows do, so the game view keeps the keyboard for keymap.ini's keys.
+- Skin.py: the UI skin (style A, iron-bound oak; docs/architecture/ui-design.md, "Built: the skin's
+  first step"): the column's and the bar's PNG backgrounds by screen size, the buttons' BAMs by size (hover a
+  frame swapped on mouse enter and leave, lit a frame of its own), the tiles' and portrait's BAMs, the scroll bar
+  for scroll bars made from code, the skin's inks and fonts. The art is the game's (art/ui/kit.py,
+  tools/ui_render, game/src/ui/skin.json); a game without it (dcctest) keeps the plain colours.
 - GUIINV.py: the demo's inventory with its feedback line kept ("MsgSys" 1: the
   shared item code clears it on every pick-up, and without it nothing could be
   moved), centred in the play area, the ground slots draggable both ways, I and
