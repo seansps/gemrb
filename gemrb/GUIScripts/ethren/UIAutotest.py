@@ -128,6 +128,7 @@ def Funnel16 ():
 	GemRB.GameSelectPC (0, 1)
 	yield
 	Shot ("funnel16")
+	yield from _Skin ()
 	# a shorter column (a smaller screen): the list scrolls
 	Roster.MaxListHeight = 10 * Roster.Layout["Pitch"]
 	Roster.Rebuild ()
@@ -166,6 +167,26 @@ def Funnel16 ():
 
 	yield from _Keys ()
 	yield from _Inventory ()
+
+def _Skin ():
+	"""the skin (Skin.py), when the game has it: a bar button under the mouse shows its hover frame and leaves it again,
+	the formation in use is lit"""
+	import Skin
+	import MessageWindow
+	import Roster
+	if not Skin.On ():
+		Log ("ui: no skin in this game, its checks skipped")
+		return
+	bar = MessageWindow.Window
+	x, y = _Centre (bar, MessageWindow.Buttons["Inv"])
+	GemRB.TestClick (x, y, 0) # only moves the mouse
+	yield from _Ticks (2)
+	lit = Skin.LIT if Roster.CurrentFormation () == 0 else Skin.NORMAL
+	Check ("ui: the skin: the button under the mouse hovers, the others don't, the formation in use is lit", [Skin.Frame ("Inv"), Skin.Frame ("Map"), Skin.Frame ("Block")], [Skin.HOVER, Skin.NORMAL, lit])
+	Shot ("bar_hover")
+	GemRB.TestClick (300, 300, 0) # over the game view
+	yield from _Ticks (2)
+	Check ("ui: the skin: and the hover goes when the mouse leaves", Skin.Frame ("Inv"), Skin.NORMAL)
 
 def _Keys ():
 	"""the keymap's keys reach the game view: I, C, W, R, space; and the open windows' own I and C"""
